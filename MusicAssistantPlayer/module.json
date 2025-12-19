@@ -1,0 +1,10 @@
+{
+  "id": "{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}",
+  "name": "Music Assistant (Player)",
+  "type": 3,
+  "vendor": "Music Assistant",
+  "aliases": [
+    "Music Assistant Player"
+  ],
+  "prefix": "MA"
+}

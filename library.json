@@ -1,12 +1,12 @@
 {
-    "id": "{7F10CABF-4C5E-D431-8B4E-2528CEF4AE89}",
-    "name": "MusicAssistant",
-    "type": 0,
-    "vendor": "Loerdy",
-    "aliases": [],
-    "parentRequirements": [],
-    "childRequirements": ["{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}"],
-    "implemented": [],
-    "prefix": "MUSIC",
-    "useDefault": false
+  "id": "{0F7D8E2A-29D0-4BA6-8F4B-2F2B9F33D4A1}",
+  "author": "Loerdy",
+  "name": "Music Assistant",
+  "url": "https://www.music-assistant.io/api/",
+  "compatibility": {
+    "version": "7.0"
+  },
+  "version": "1.0",
+  "build": 1,
+  "date": 20251219
 }

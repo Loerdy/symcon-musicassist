@@ -1,0 +1,10 @@
+{
+  "id": "{7F10CABF-4C5E-D431-8B4E-2528CEF4AE89}",
+  "name": "Music Assistant (Configurator)",
+  "type": 4,
+  "vendor": "Music Assistant",
+  "aliases": [
+    "Music Assistant (Server)"
+  ],
+  "prefix": "MA"
+}
