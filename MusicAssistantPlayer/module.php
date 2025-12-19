@@ -15,12 +15,15 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyInteger('Port', 8095);
         $this->RegisterPropertyString('Token', '');
         $this->RegisterPropertyString('PlayerID', '');
-        $this->RegisterPropertyString('PlaylistProfile', 'MA.Playlists.default');
+
+        // WICHTIG: Kein Default-Profil erzwingen, das evtl. nicht existiert
+        $this->RegisterPropertyString('PlaylistProfile', '');
 
         $this->SetBuffer('MsgId', '0');
 
         // Variablen
-        $this->RegisterVariableString('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
+        // WICHTIG: Playlist-Variable ohne Profil anlegen (Profil kommt erst in ApplyChanges)
+        $this->RegisterVariableString('Playlist', 'Playlist', '', 10);
         $this->EnableAction('Playlist');
 
         $this->RegisterVariableInteger('Volume', 'Volume', '~Intensity.100', 20);
@@ -31,10 +34,21 @@ class MusicAssistantPlayer extends IPSModule
     {
         parent::ApplyChanges();
 
-        // Profil (falls geändert) an Variable binden
         $vid = @$this->GetIDForIdent('Playlist');
-        if ($vid > 0) {
-            IPS_SetVariableCustomProfile($vid, $this->ReadPropertyString('PlaylistProfile'));
+        if ($vid <= 0) {
+            return;
+        }
+
+        $profile = trim($this->ReadPropertyString('PlaylistProfile'));
+
+        if ($profile !== '' && IPS_VariableProfileExists($profile)) {
+            IPS_SetVariableCustomProfile($vid, $profile);
+        } else {
+            // Profil (noch) nicht vorhanden -> ohne Profil arbeiten
+            IPS_SetVariableCustomProfile($vid, '');
+            if ($profile !== '') {
+                $this->SendDebug('PlaylistProfile', 'Profile not found: ' . $profile, 0);
+            }
         }
     }
 
@@ -43,7 +57,6 @@ class MusicAssistantPlayer extends IPSModule
         switch ($Ident) {
             case 'Playlist':
                 $this->PlayPlaylist((string)$Value);
-                // Variable auf Auswahl setzen
                 $this->SetValue('Playlist', (string)$Value);
                 break;
 
@@ -89,7 +102,6 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Playlist URI is empty');
         }
 
-        // Queue-ID ist i. d. R. gleich Player-ID (außer Gruppen), in Logs oft so beschrieben. :contentReference[oaicite:9]{index=9}
         $queueId = $this->playerId();
 
         $this->maCall('player_queues/play_media', [
