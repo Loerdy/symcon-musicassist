@@ -16,8 +16,13 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('Token', '');
         $this->RegisterPropertyString('PlayerID', '');
 
+        // Playlists
         $this->RegisterPropertyString('PlaylistProfile', '');
         $this->RegisterPropertyString('PlaylistMap', '{}');
+
+        // Radios
+        $this->RegisterPropertyString('RadioProfile', '');
+        $this->RegisterPropertyString('RadioMap', '{}');
 
         $this->SetBuffer('MsgId', '0');
     }
@@ -26,38 +31,8 @@ class MusicAssistantPlayer extends IPSModule
     {
         parent::ApplyChanges();
 
-        // Playlist Variable als INTEGER (item_id)
-        $profile = trim($this->ReadPropertyString('PlaylistProfile'));
-
-        // Falls Variable schon existiert aber falscher Typ, löschen
-        $existingId = @$this->GetIDForIdent('Playlist');
-        if ($existingId > 0) {
-            $v = IPS_GetVariable($existingId);
-            if (($v['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-                IPS_DeleteVariable($existingId);
-            }
-        }
-
-        $this->MaintainVariable('Playlist', 'Playlist', VARIABLETYPE_INTEGER, '', 10, true);
-        $this->EnableAction('Playlist');
-
-        $this->MaintainVariable('Volume', 'Volume', VARIABLETYPE_INTEGER, '~Intensity.100', 20, true);
-        $this->EnableAction('Volume');
-
-        $vid = @$this->GetIDForIdent('Playlist');
-        if ($vid > 0) {
-            if ($profile !== '' && IPS_VariableProfileExists($profile)) {
-                $pp = IPS_GetVariableProfile($profile);
-                if (($pp['ProfileType'] ?? -1) === VARIABLETYPE_INTEGER) {
-                    IPS_SetVariableCustomProfile($vid, $profile);
-                } else {
-                    IPS_SetVariableCustomProfile($vid, '');
-                    $this->SendDebug('PlaylistProfile', 'Wrong profile type: ' . $profile, 0);
-                }
-            } else {
-                IPS_SetVariableCustomProfile($vid, '');
-            }
-        }
+        $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
+        $this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20);
     }
 
     public function RequestAction($Ident, $Value): void
@@ -65,15 +40,16 @@ class MusicAssistantPlayer extends IPSModule
         switch ($Ident) {
             case 'Playlist':
                 $itemId = (int)$Value;
-                $uri = $this->resolvePlaylistUri($itemId);
-                $this->PlayPlaylistUri($uri);
+                $uri = $this->resolveUriFromMap($itemId, 'PlaylistMap', 'music/playlists/library_items');
+                $this->PlayMediaUri($uri);
                 $this->SetValue('Playlist', $itemId);
                 break;
 
-            case 'Volume':
-                $vol = max(0, min(100, (int)$Value));
-                $this->SetVolume($vol);
-                $this->SetValue('Volume', $vol);
+            case 'Radio':
+                $itemId = (int)$Value;
+                $uri = $this->resolveUriFromMap($itemId, 'RadioMap', 'music/radios/library_items');
+                $this->PlayMediaUri($uri);
+                $this->SetValue('Radio', $itemId);
                 break;
 
             default:
@@ -98,23 +74,43 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/previous', ['player_id' => $this->playerId()]);
     }
 
-    public function SetVolume(int $volume): void
-    {
-        $this->maCall('players/cmd/volume_set', [
-            'player_id' => $this->playerId(),
-            'volume'    => $volume
-        ]);
-    }
-
     // --------- intern ---------
 
-    private function resolvePlaylistUri(int $itemId): string
+    private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): void
     {
-        if ($itemId <= 0) {
-            throw new Exception('Invalid playlist item_id');
+        // Wenn Variable existiert aber falscher Typ: löschen
+        $existingId = @$this->GetIDForIdent($ident);
+        if ($existingId > 0) {
+            $v = IPS_GetVariable($existingId);
+            if (($v['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                IPS_DeleteVariable($existingId);
+            }
         }
 
-        $mapRaw = trim($this->ReadPropertyString('PlaylistMap'));
+        $this->MaintainVariable($ident, $name, VARIABLETYPE_INTEGER, '', $pos, true);
+        $this->EnableAction($ident);
+
+        $vid = @$this->GetIDForIdent($ident);
+        if ($vid <= 0) return;
+
+        $profile = trim($profile);
+        if ($profile !== '' && IPS_VariableProfileExists($profile)) {
+            $pp = IPS_GetVariableProfile($profile);
+            if (($pp['ProfileType'] ?? -1) === VARIABLETYPE_INTEGER) {
+                IPS_SetVariableCustomProfile($vid, $profile);
+                return;
+            }
+        }
+        IPS_SetVariableCustomProfile($vid, '');
+    }
+
+    private function resolveUriFromMap(int $itemId, string $mapProperty, string $refreshCommand): string
+    {
+        if ($itemId <= 0) {
+            throw new Exception('Invalid item_id');
+        }
+
+        $mapRaw = trim($this->ReadPropertyString($mapProperty));
         $map = json_decode($mapRaw, true);
         if (!is_array($map)) {
             $map = [];
@@ -125,15 +121,15 @@ class MusicAssistantPlayer extends IPSModule
             return $map[$key];
         }
 
-        // Fallback: Map aus MA ziehen
-        $resp = $this->maCall('music/playlists/library_items');
+        // Fallback: erneut aus MA ziehen
+        $resp = $this->maCall($refreshCommand);
         $result = $resp['result'];
 
         if (is_array($result) && array_keys($result) === range(0, count($result) - 1)) {
-            foreach ($result as $pl) {
-                $idStr = (string)($pl['item_id'] ?? '');
+            foreach ($result as $it) {
+                $idStr = (string)($it['item_id'] ?? '');
                 $id    = (int)$idStr;
-                $uri   = (string)($pl['uri'] ?? '');
+                $uri   = (string)($it['uri'] ?? '');
                 if ($id > 0 && $uri !== '') {
                     $map[(string)$id] = $uri;
                 }
@@ -143,20 +139,19 @@ class MusicAssistantPlayer extends IPSModule
             }
         }
 
-        throw new Exception('Playlist URI not found for item_id=' . $itemId);
+        throw new Exception('URI not found for item_id=' . $itemId);
     }
 
-    private function PlayPlaylistUri(string $playlistUri): void
+    private function PlayMediaUri(string $uri): void
     {
-        if ($playlistUri === '') {
-            throw new Exception('Playlist URI is empty');
+        if ($uri === '') {
+            throw new Exception('Media URI is empty');
         }
 
         $queueId = $this->playerId();
-
         $this->maCall('player_queues/play_media', [
             'queue_id' => $queueId,
-            'media'    => $playlistUri,
+            'media'    => $uri,
             'enqueue'  => 'replace'
         ]);
     }

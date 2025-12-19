@@ -18,7 +18,10 @@ class MusicAssistantConfigurator extends IPSModule
         $this->RegisterPropertyString('Token', '');
 
         $this->SetBuffer('MsgId', '0');
-        $this->SetBuffer('PlaylistMap', '{}'); // item_id => uri
+
+        // Maps: item_id => uri
+        $this->SetBuffer('PlaylistMap', '{}');
+        $this->SetBuffer('RadioMap', '{}');
     }
 
     public function ApplyChanges(): void
@@ -46,11 +49,18 @@ class MusicAssistantConfigurator extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
                 ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
                 ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
+
                 [
                     'type'    => 'Button',
                     'caption' => 'Playlists laden (Profil erstellen/aktualisieren)',
                     'onClick' => 'MA_SyncPlaylistsProfile($id);'
                 ],
+                [
+                    'type'    => 'Button',
+                    'caption' => 'Radios laden (Profil erstellen/aktualisieren)',
+                    'onClick' => 'MA_SyncRadiosProfile($id);'
+                ],
+
                 [
                     'type'    => 'Configurator',
                     'name'    => 'Players',
@@ -76,6 +86,8 @@ class MusicAssistantConfigurator extends IPSModule
         return json_encode($form);
     }
 
+    // -------- Playlists --------
+
     public function SyncPlaylistsProfile(): void
     {
         $profile = $this->playlistProfileName();
@@ -92,16 +104,7 @@ class MusicAssistantConfigurator extends IPSModule
 
         $this->SendDebug('Playlists result', json_encode($result, JSON_UNESCAPED_SLASHES), 0);
 
-        // Profil-Typ prüfen/migrieren
-        if (IPS_VariableProfileExists($profile)) {
-            $p = IPS_GetVariableProfile($profile);
-            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-                IPS_DeleteVariableProfile($profile);
-            }
-        }
-        if (!IPS_VariableProfileExists($profile)) {
-            IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
-        }
+        $this->ensureIntegerProfile($profile);
 
         // Alte Associations löschen
         $p = IPS_GetVariableProfile($profile);
@@ -127,9 +130,71 @@ class MusicAssistantConfigurator extends IPSModule
         }
 
         $this->SetBuffer('PlaylistMap', json_encode($map, JSON_UNESCAPED_SLASHES));
-
         $this->SendDebug('Playlists', 'Profile=' . $profile . ' entries=' . $count, 0);
         $this->ReloadForm();
+    }
+
+    // -------- Radios --------
+
+    public function SyncRadiosProfile(): void
+    {
+        $profile = $this->radioProfileName();
+
+        $resp = $this->maCall('music/radios/library_items');
+        $result = $resp['result'];
+
+        $items = [];
+        if (is_array($result) && $this->isList($result)) {
+            $items = $result;
+        } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
+            $items = $result['items'];
+        }
+
+        $this->SendDebug('Radios result', json_encode($result, JSON_UNESCAPED_SLASHES), 0);
+
+        $this->ensureIntegerProfile($profile);
+
+        // Alte Associations löschen
+        $p = IPS_GetVariableProfile($profile);
+        foreach (($p['Associations'] ?? []) as $assoc) {
+            IPS_SetVariableProfileAssociation($profile, (float)$assoc['Value'], '', '', -1);
+        }
+
+        $map = [];
+        $count = 0;
+        foreach ($items as $r) {
+            if ($count >= 128) break;
+
+            $idStr = (string)($r['item_id'] ?? '');
+            $id    = (int)$idStr;
+            $name  = (string)($r['name'] ?? ('Radio ' . $idStr));
+            $uri   = (string)($r['uri'] ?? '');
+
+            if ($id <= 0 || $uri === '') continue;
+
+            IPS_SetVariableProfileAssociation($profile, (float)$id, $name, '', -1);
+            $map[(string)$id] = $uri;
+            $count++;
+        }
+
+        $this->SetBuffer('RadioMap', json_encode($map, JSON_UNESCAPED_SLASHES));
+        $this->SendDebug('Radios', 'Profile=' . $profile . ' entries=' . $count, 0);
+        $this->ReloadForm();
+    }
+
+    // -------- intern --------
+
+    private function ensureIntegerProfile(string $profile): void
+    {
+        if (IPS_VariableProfileExists($profile)) {
+            $p = IPS_GetVariableProfile($profile);
+            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                IPS_DeleteVariableProfile($profile);
+            }
+        }
+        if (!IPS_VariableProfileExists($profile)) {
+            IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
+        }
     }
 
     private function playlistProfileName(): string
@@ -138,10 +203,21 @@ class MusicAssistantConfigurator extends IPSModule
         return 'MA.Playlists.' . substr(md5($key), 0, 8);
     }
 
+    private function radioProfileName(): string
+    {
+        $key = strtolower(trim($this->ReadPropertyString('Host'))) . ':' . (string)$this->ReadPropertyInteger('Port');
+        return 'MA.Radios.' . substr(md5($key), 0, 8);
+    }
+
     private function getPlaylistMap(): array
     {
-        $raw = (string)$this->GetBuffer('PlaylistMap');
-        $arr = json_decode($raw, true);
+        $arr = json_decode((string)$this->GetBuffer('PlaylistMap'), true);
+        return is_array($arr) ? $arr : [];
+    }
+
+    private function getRadioMap(): array
+    {
+        $arr = json_decode((string)$this->GetBuffer('RadioMap'), true);
         return is_array($arr) ? $arr : [];
     }
 
@@ -161,8 +237,10 @@ class MusicAssistantConfigurator extends IPSModule
             $this->SendDebug('Players', 'players/all failed: ' . $e->getMessage(), 0);
         }
 
-        $profileName = $this->playlistProfileName();
-        $playlistMap = $this->getPlaylistMap();
+        $playlistProfile = $this->playlistProfileName();
+        $radioProfile    = $this->radioProfileName();
+        $playlistMap     = $this->getPlaylistMap();
+        $radioMap        = $this->getRadioMap();
 
         $rows = [];
         foreach ($players as $p) {
@@ -189,8 +267,12 @@ class MusicAssistantConfigurator extends IPSModule
                         'Port'            => $this->ReadPropertyInteger('Port'),
                         'Token'           => $this->ReadPropertyString('Token'),
                         'PlayerID'        => $playerId,
-                        'PlaylistProfile' => $profileName,
-                        'PlaylistMap'     => json_encode($playlistMap, JSON_UNESCAPED_SLASHES)
+
+                        'PlaylistProfile' => $playlistProfile,
+                        'PlaylistMap'     => json_encode($playlistMap, JSON_UNESCAPED_SLASHES),
+
+                        'RadioProfile'    => $radioProfile,
+                        'RadioMap'        => json_encode($radioMap, JSON_UNESCAPED_SLASHES)
                     ]
                 ]
             ];
