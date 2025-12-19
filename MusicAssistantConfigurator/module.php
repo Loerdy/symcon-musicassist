@@ -17,13 +17,24 @@ class MusicAssistantConfigurator extends IPSModule
         $this->RegisterPropertyInteger('Port', 8095);
         $this->RegisterPropertyString('Token', '');
 
-        // Name des Playlist-Profils wird automatisch aus Host:Port abgeleitet
         $this->SetBuffer('MsgId', '0');
+        $this->SetBuffer('PlaylistMap', '{}'); // item_id => uri
     }
 
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+    }
+
+    public function RequestAction($Ident, $Value): void
+    {
+        switch ($Ident) {
+            case 'ReloadPlayers':
+                $this->ReloadForm();
+                break;
+            default:
+                throw new Exception('Unknown action: ' . $Ident);
+        }
     }
 
     public function GetConfigurationForm(): string
@@ -36,100 +47,82 @@ class MusicAssistantConfigurator extends IPSModule
                 ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
                 ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
                 [
-                    'type' => 'Button',
-                    'caption' => 'Playlists laden (Variablenprofil erstellen/aktualisieren)',
+                    'type'    => 'Button',
+                    'caption' => 'Playlists laden (Profil erstellen/aktualisieren)',
                     'onClick' => 'MA_SyncPlaylistsProfile($id);'
                 ],
                 [
-                    'type' => 'Configurator',
-                    'name' => 'Players',
+                    'type'    => 'Configurator',
+                    'name'    => 'Players',
                     'caption' => 'Player',
                     'columns' => [
                         ['caption' => 'Name',      'name' => 'name',      'width' => '250px'],
-                        ['caption' => 'Player ID',  'name' => 'player_id', 'width' => '260px'],
-                        ['caption' => 'Provider',   'name' => 'provider',  'width' => '160px'],
-                        ['caption' => 'Available',  'name' => 'available', 'width' => '90px']
+                        ['caption' => 'Player ID', 'name' => 'player_id', 'width' => '260px'],
+                        ['caption' => 'Provider',  'name' => 'provider',  'width' => '160px'],
+                        ['caption' => 'Available', 'name' => 'available', 'width' => '90px']
                     ],
-                    'values' => $values
+                    'values'  => $values
                 ]
             ],
             'actions' => [
-                ['type' => 'Button', 'caption' => 'Player neu laden', 'onClick' => 'IPS_RequestAction($id, "ReloadPlayers", true);']
+                [
+                    'type'    => 'Button',
+                    'caption' => 'Player neu laden',
+                    'onClick' => 'IPS_RequestAction($id, "ReloadPlayers", true);'
+                ]
             ]
         ];
 
         return json_encode($form);
     }
 
-    public function RequestAction($Ident, $Value): void
-    {
-        switch ($Ident) {
-            case 'ReloadPlayers':
-                // Form wird neu gerendert – GetConfigurationForm zieht neue Daten
-                $this->ReloadForm();
-                break;
-            default:
-                throw new Exception('Unknown action: ' . $Ident);
-        }
-    }
-
     public function SyncPlaylistsProfile(): void
     {
         $profile = $this->playlistProfileName();
 
-        // Versuche: music/playlists/library_items (aus Logs bekannt)
+        $resp = $this->maCall('music/playlists/library_items');
+        $result = $resp['result'];
+
+        // Doku: Returns Array of Playlist => result ist eine Liste
         $items = [];
-        try {
-            $resp = $this->maCall('music/playlists/library_items', [
-                'limit' => 500,
-                'offset' => 0,
-                'order_by' => 'name'
-            ]);
-            $result = $resp['result'];
-            $items = is_array($result['items'] ?? null) ? $result['items'] : (is_array($result) ? ($result['items'] ?? []) : []);
-        } catch (Throwable $e) {
-            $this->SendDebug('Playlists', 'library_items failed: ' . $e->getMessage(), 0);
+        if (is_array($result) && $this->isList($result)) {
+            $items = $result;
+        } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
+            // Fallback, falls MA-Variante result.items liefert
+            $items = $result['items'];
         }
 
-        // Fallback: get_library_items (in der Praxis als “get library items call” bekannt)
-        if (!is_array($items) || count($items) === 0) {
-            try {
-                $resp = $this->maCall('music/get_library_items', [
-                    'media_type' => 'playlist',
-                    'limit' => 500,
-                    'offset' => 0,
-                    'order_by' => 'name'
-                ]);
-                $result = $resp['result'];
-                $items = is_array($result['items'] ?? null) ? $result['items'] : [];
-            } catch (Throwable $e) {
-                $this->SendDebug('Playlists', 'get_library_items failed: ' . $e->getMessage(), 0);
-            }
-        }
+        $this->SendDebug('Playlists result', json_encode($result, JSON_UNESCAPED_SLASHES), 0);
 
+        // Profil als INTEGER, Associations: item_id -> name
         if (!IPS_VariableProfileExists($profile)) {
-            IPS_CreateVariableProfile($profile, VARIABLETYPE_STRING);
+            IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
         }
 
-        // Existing Associations löschen
+        // Alte Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
-            IPS_SetVariableProfileAssociation($profile, (string)$assoc['Value'], '', '', -1);
+            IPS_SetVariableProfileAssociation($profile, (float)$assoc['Value'], '', '', -1);
         }
 
+        $map = [];
         $count = 0;
         foreach ($items as $pl) {
-            if ($count >= 128) {
-                break;
-            }
-            $uri = (string)($pl['uri'] ?? '');
-            $name = (string)($pl['name'] ?? $uri);
-            if ($uri === '') {
-                continue;
-            }
-            IPS_SetVariableProfileAssociation($profile, $uri, $name, '', -1);
+            if ($count >= 128) break; // Symcon Limit Associations :contentReference[oaicite:1]{index=1}
+
+            $idStr = (string)($pl['item_id'] ?? '');
+            $id    = (int)$idStr;
+            $name  = (string)($pl['name'] ?? ('Playlist ' . $idStr));
+            $uri   = (string)($pl['uri'] ?? '');
+
+            if ($id <= 0 || $uri === '') continue;
+
+            IPS_SetVariableProfileAssociation($profile, (float)$id, $name, '', -1);
+            $map[(string)$id] = $uri;
             $count++;
         }
+
+        $this->SetBuffer('PlaylistMap', json_encode($map, JSON_UNESCAPED_SLASHES));
 
         $this->SendDebug('Playlists', 'Profile=' . $profile . ' entries=' . $count, 0);
         $this->ReloadForm();
@@ -141,48 +134,59 @@ class MusicAssistantConfigurator extends IPSModule
         return 'MA.Playlists.' . substr(md5($key), 0, 8);
     }
 
-    /**
-     * @return array<int, array<string, mixed>>
-     */
+    private function getPlaylistMap(): array
+    {
+        $raw = (string)$this->GetBuffer('PlaylistMap');
+        $arr = json_decode($raw, true);
+        return is_array($arr) ? $arr : [];
+    }
+
     private function buildPlayersConfiguratorValues(): array
     {
         $players = [];
         try {
             $resp = $this->maCall('players/all');
-            $list = $this->maAsList($resp['result']);
-            $players = $list;
+            $result = $resp['result'];
+
+            if (is_array($result) && $this->isList($result)) {
+                $players = $result;
+            } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
+                $players = $result['items'];
+            }
         } catch (Throwable $e) {
             $this->SendDebug('Players', 'players/all failed: ' . $e->getMessage(), 0);
         }
 
+        $profileName = $this->playlistProfileName();
+        $playlistMap = $this->getPlaylistMap();
+
         $rows = [];
         foreach ($players as $p) {
             $playerId = (string)($p['player_id'] ?? $p['id'] ?? '');
+            if ($playerId === '') continue;
+
             $name     = (string)($p['name'] ?? $playerId);
             $provider = (string)($p['provider'] ?? '');
             $avail    = (bool)($p['available'] ?? false);
 
-            if ($playerId === '') {
-                continue;
-            }
-
             $instanceId = $this->findExistingPlayerInstance($playerId);
 
             $rows[] = [
-                'name'      => $name,
-                'player_id' => $playerId,
-                'provider'  => $provider,
-                'available' => $avail ? 'Yes' : 'No',
+                'name'       => $name,
+                'player_id'  => $playerId,
+                'provider'   => $provider,
+                'available'  => $avail ? 'Yes' : 'No',
                 'instanceID' => $instanceId,
-                'create' => [
+                'create'     => [
                     'moduleID' => self::PLAYER_MODULE_ID,
                     'name'     => 'MA Player - ' . $name,
                     'configuration' => [
-                        'Host' => $this->ReadPropertyString('Host'),
-                        'Port' => $this->ReadPropertyInteger('Port'),
-                        'Token' => $this->ReadPropertyString('Token'),
-                        'PlayerID' => $playerId,
-                        'PlaylistProfile' => $this->playlistProfileName()
+                        'Host'            => $this->ReadPropertyString('Host'),
+                        'Port'            => $this->ReadPropertyInteger('Port'),
+                        'Token'           => $this->ReadPropertyString('Token'),
+                        'PlayerID'        => $playerId,
+                        'PlaylistProfile' => $profileName,
+                        'PlaylistMap'     => json_encode($playlistMap, JSON_UNESCAPED_SLASHES)
                     ]
                 ]
             ];
@@ -202,5 +206,10 @@ class MusicAssistantConfigurator extends IPSModule
             }
         }
         return 0;
+    }
+
+    private function isList(array $arr): bool
+    {
+        return array_keys($arr) === range(0, count($arr) - 1);
     }
 }
