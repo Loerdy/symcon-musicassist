@@ -16,15 +16,10 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('Token', '');
         $this->RegisterPropertyString('PlayerID', '');
 
-        // Profilname kommt vom Configurator (MA.Playlists.<hash>)
         $this->RegisterPropertyString('PlaylistProfile', '');
-
-        // JSON: {"4":"library://playlist/4", ...}
         $this->RegisterPropertyString('PlaylistMap', '{}');
 
         $this->SetBuffer('MsgId', '0');
-
-        // Variablen (werden in ApplyChanges via MaintainVariable sauber angelegt)
     }
 
     public function ApplyChanges(): void
@@ -34,7 +29,7 @@ class MusicAssistantPlayer extends IPSModule
         // Playlist Variable als INTEGER (item_id)
         $profile = trim($this->ReadPropertyString('PlaylistProfile'));
 
-        // Wenn es die Variable schon als falschen Typ gab (String), löschen und neu anlegen
+        // Falls Variable schon existiert aber falscher Typ, löschen
         $existingId = @$this->GetIDForIdent('Playlist');
         if ($existingId > 0) {
             $v = IPS_GetVariable($existingId);
@@ -52,12 +47,15 @@ class MusicAssistantPlayer extends IPSModule
         $vid = @$this->GetIDForIdent('Playlist');
         if ($vid > 0) {
             if ($profile !== '' && IPS_VariableProfileExists($profile)) {
-                IPS_SetVariableCustomProfile($vid, $profile);
+                $pp = IPS_GetVariableProfile($profile);
+                if (($pp['ProfileType'] ?? -1) === VARIABLETYPE_INTEGER) {
+                    IPS_SetVariableCustomProfile($vid, $profile);
+                } else {
+                    IPS_SetVariableCustomProfile($vid, '');
+                    $this->SendDebug('PlaylistProfile', 'Wrong profile type: ' . $profile, 0);
+                }
             } else {
                 IPS_SetVariableCustomProfile($vid, '');
-                if ($profile !== '') {
-                    $this->SendDebug('PlaylistProfile', 'Profile not found: ' . $profile, 0);
-                }
             }
         }
     }
@@ -127,7 +125,7 @@ class MusicAssistantPlayer extends IPSModule
             return $map[$key];
         }
 
-        // Fallback: Map neu ziehen
+        // Fallback: Map aus MA ziehen
         $resp = $this->maCall('music/playlists/library_items');
         $result = $resp['result'];
 
@@ -140,8 +138,6 @@ class MusicAssistantPlayer extends IPSModule
                     $map[(string)$id] = $uri;
                 }
             }
-            // Map in Property zurückschreiben geht nicht direkt (keine SetProperty im Modul),
-            // daher nur Debug und Runtime-Nutzung:
             if (isset($map[$key])) {
                 return $map[$key];
             }

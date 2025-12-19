@@ -83,18 +83,22 @@ class MusicAssistantConfigurator extends IPSModule
         $resp = $this->maCall('music/playlists/library_items');
         $result = $resp['result'];
 
-        // Doku: Returns Array of Playlist => result ist eine Liste
         $items = [];
         if (is_array($result) && $this->isList($result)) {
             $items = $result;
         } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
-            // Fallback, falls MA-Variante result.items liefert
             $items = $result['items'];
         }
 
         $this->SendDebug('Playlists result', json_encode($result, JSON_UNESCAPED_SLASHES), 0);
 
-        // Profil als INTEGER, Associations: item_id -> name
+        // Profil-Typ prüfen/migrieren
+        if (IPS_VariableProfileExists($profile)) {
+            $p = IPS_GetVariableProfile($profile);
+            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                IPS_DeleteVariableProfile($profile);
+            }
+        }
         if (!IPS_VariableProfileExists($profile)) {
             IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
         }
@@ -108,7 +112,7 @@ class MusicAssistantConfigurator extends IPSModule
         $map = [];
         $count = 0;
         foreach ($items as $pl) {
-            if ($count >= 128) break; // Symcon Limit Associations :contentReference[oaicite:1]{index=1}
+            if ($count >= 128) break;
 
             $idStr = (string)($pl['item_id'] ?? '');
             $id    = (int)$idStr;
