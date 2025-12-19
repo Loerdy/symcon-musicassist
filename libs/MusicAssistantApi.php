@@ -7,12 +7,12 @@ trait MusicAssistantApi
     {
         $host = trim($this->ReadPropertyString('Host'));
         $port = (int)$this->ReadPropertyInteger('Port');
-
         return sprintf('http://%s:%d', $host, $port);
     }
 
     private function maApiUrl(): string
     {
+        // Music Assistant JSON-RPC Endpoint
         return $this->maBaseUrl() . '/api';
     }
 
@@ -25,9 +25,9 @@ trait MusicAssistantApi
     }
 
     /**
-     * @return array{raw: mixed, result: mixed, success: bool}
+     * @return array{raw:mixed, result:mixed, success:bool, http_code:int, body:string}
      */
-    protected function maCall(string $command, array $args = [], int $timeoutMs = 6000): array
+    protected function maCall(string $command, array $args = [], int $timeoutMs = 8000): array
     {
         $payload = [
             'message_id' => $this->maNextMessageId(),
@@ -44,15 +44,18 @@ trait MusicAssistantApi
             $headers[] = 'Authorization: Bearer ' . $token;
         }
 
-        $this->SendDebug('MA Request', json_encode($payload, JSON_UNESCAPED_SLASHES), 0);
+        $reqJson = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        $this->SendDebug('MA Request', $reqJson, 0);
 
         $ch = curl_init($this->maApiUrl());
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
             CURLOPT_HTTPHEADER     => $headers,
-            CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_SLASHES),
-            CURLOPT_TIMEOUT_MS     => $timeoutMs
+            CURLOPT_POSTFIELDS     => $reqJson,
+            CURLOPT_TIMEOUT_MS     => $timeoutMs,
+            CURLOPT_CONNECTTIMEOUT_MS => 3000,
+            CURLOPT_FOLLOWLOCATION => true // falls Proxy/Redirect im Spiel ist
         ]);
 
         $respBody = curl_exec($ch);
@@ -64,17 +67,51 @@ trait MusicAssistantApi
             throw new Exception('HTTP request failed: ' . $err);
         }
 
-        $this->SendDebug('MA HTTP', 'Code=' . $httpCode . ' Body=' . (string)$respBody, 0);
+        $body = (string)$respBody;
+        $this->SendDebug('MA HTTP', 'Code=' . $httpCode . ' Body=' . $body, 0);
 
-        $data = json_decode((string)$respBody, true);
-        if (!is_array($data)) {
-            throw new Exception('Invalid JSON response from Music Assistant');
+        $trim = trim($body);
+
+        // 1) Leere Antwort (z.B. 204 No Content) als Erfolg akzeptieren
+        if ($trim === '' && ($httpCode === 200 || $httpCode === 204)) {
+            return [
+                'raw' => ['result' => null],
+                'result' => null,
+                'success' => true,
+                'http_code' => $httpCode,
+                'body' => $body
+            ];
         }
 
-        $result = $data['result'] ?? $data;
-        $success = !isset($data['error']);
+        // 2) JSON "null" akzeptieren
+        if ($trim === 'null') {
+            return [
+                'raw' => ['result' => null],
+                'result' => null,
+                'success' => true,
+                'http_code' => $httpCode,
+                'body' => $body
+            ];
+        }
 
-        return ['raw' => $data, 'result' => $result, 'success' => $success];
+        $data = json_decode($body, true);
+
+        // 3) Wenn kein JSON: Exception mit Details (HTTP-Code + Body-Auszug)
+        if (!is_array($data)) {
+            $snippet = substr($trim, 0, 300);
+            throw new Exception('Invalid JSON response from Music Assistant. HTTP ' . $httpCode . ' Body: ' . $snippet);
+        }
+
+        $success = !isset($data['error']);
+        $result  = $data['result'] ?? $data;
+
+        return [
+            'raw' => $data,
+            'result' => $result,
+            'success' => $success,
+            'http_code' => $httpCode,
+            'body' => $body
+        ];
     }
 
     /**
@@ -82,13 +119,10 @@ trait MusicAssistantApi
      */
     protected function maAsList($value): array
     {
-        if (is_array($value)) {
-            // entweder schon Liste oder assoziativ
-            $isList = array_keys($value) === range(0, count($value) - 1);
-            if ($isList) {
-                return $value;
-            }
+        if (!is_array($value)) {
+            return [];
         }
-        return [];
+        $isList = array_keys($value) === range(0, count($value) - 1);
+        return $isList ? $value : [];
     }
 }
