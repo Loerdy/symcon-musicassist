@@ -31,8 +31,14 @@ class MusicAssistantPlayer extends IPSModule
     {
         parent::ApplyChanges();
 
+        // Auswahl-Variablen
         $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
         $this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20);
+
+        // Transport-Variable mit Legacy Profil ~PlaybackPreviousNext
+        // Werte-Mapping: 0=Previous, 1=Stop, 2=Play, 3=Pause, 4=Next
+        $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
+        $this->EnableAction('Transport');
     }
 
     public function RequestAction($Ident, $Value): void
@@ -52,17 +58,17 @@ class MusicAssistantPlayer extends IPSModule
                 $this->SetValue('Radio', $itemId);
                 break;
 
+            case 'Transport':
+                $this->ExecuteTransport((int)$Value);
+                $this->SetValue('Transport', (int)$Value);
+                break;
+
             default:
                 throw new Exception('Unknown action: ' . $Ident);
         }
     }
 
-    // --------- öffentliche Funktionen ---------
-
-    public function PlayPause(): void
-    {
-        $this->maCall('players/cmd/play_pause', ['player_id' => $this->playerId()]);
-    }
+    // --------- MA Commands (laut deiner API-Doku) ---------
 
     public function Next(): void
     {
@@ -74,7 +80,39 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/previous', ['player_id' => $this->playerId()]);
     }
 
+    public function Pause(): void
+    {
+        $this->maCall('players/cmd/pause', ['player_id' => $this->playerId()]);
+    }
+
+    public function Play(): void
+    {
+        $this->maCall('players/cmd/play', ['player_id' => $this->playerId()]);
+    }
+
+    public function PlayPause(): void
+    {
+        $this->maCall('players/cmd/play_pause', ['player_id' => $this->playerId()]);
+    }
+
+    public function Stop(): void
+    {
+        $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
+    }
+
     // --------- intern ---------
+
+    private function ExecuteTransport(int $value): void
+    {
+        switch ($value) {
+            case 0: $this->Previous(); break;
+            case 1: $this->Stop();     break;
+            case 2: $this->Play();     break;
+            case 3: $this->Pause();    break;
+            case 4: $this->Next();     break;
+            default: break;
+        }
+    }
 
     private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): void
     {

@@ -12,7 +12,6 @@ trait MusicAssistantApi
 
     private function maApiUrl(): string
     {
-        // Music Assistant JSON-RPC Endpoint
         return $this->maBaseUrl() . '/api';
     }
 
@@ -49,13 +48,13 @@ trait MusicAssistantApi
 
         $ch = curl_init($this->maApiUrl());
         curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST           => true,
-            CURLOPT_HTTPHEADER     => $headers,
-            CURLOPT_POSTFIELDS     => $reqJson,
-            CURLOPT_TIMEOUT_MS     => $timeoutMs,
-            CURLOPT_CONNECTTIMEOUT_MS => 3000,
-            CURLOPT_FOLLOWLOCATION => true // falls Proxy/Redirect im Spiel ist
+            CURLOPT_RETURNTRANSFER     => true,
+            CURLOPT_POST               => true,
+            CURLOPT_HTTPHEADER         => $headers,
+            CURLOPT_POSTFIELDS         => $reqJson,
+            CURLOPT_TIMEOUT_MS         => $timeoutMs,
+            CURLOPT_CONNECTTIMEOUT_MS  => 3000,
+            CURLOPT_FOLLOWLOCATION     => true
         ]);
 
         $respBody = curl_exec($ch);
@@ -72,19 +71,8 @@ trait MusicAssistantApi
 
         $trim = trim($body);
 
-        // 1) Leere Antwort (z.B. 204 No Content) als Erfolg akzeptieren
-        if ($trim === '' && ($httpCode === 200 || $httpCode === 204)) {
-            return [
-                'raw' => ['result' => null],
-                'result' => null,
-                'success' => true,
-                'http_code' => $httpCode,
-                'body' => $body
-            ];
-        }
-
-        // 2) JSON "null" akzeptieren
-        if ($trim === 'null') {
+        // Leere Antwort (z.B. 204 No Content) oder JSON null akzeptieren
+        if (($trim === '' && ($httpCode === 200 || $httpCode === 204)) || $trim === 'null') {
             return [
                 'raw' => ['result' => null],
                 'result' => null,
@@ -95,8 +83,6 @@ trait MusicAssistantApi
         }
 
         $data = json_decode($body, true);
-
-        // 3) Wenn kein JSON: Exception mit Details (HTTP-Code + Body-Auszug)
         if (!is_array($data)) {
             $snippet = substr($trim, 0, 300);
             throw new Exception('Invalid JSON response from Music Assistant. HTTP ' . $httpCode . ' Body: ' . $snippet);
@@ -112,17 +98,5 @@ trait MusicAssistantApi
             'http_code' => $httpCode,
             'body' => $body
         ];
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    protected function maAsList($value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-        $isList = array_keys($value) === range(0, count($value) - 1);
-        return $isList ? $value : [];
     }
 }

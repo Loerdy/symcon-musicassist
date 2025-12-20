@@ -19,7 +19,7 @@ class MusicAssistantConfigurator extends IPSModule
 
         $this->SetBuffer('MsgId', '0');
 
-        // Maps: item_id => uri
+        // item_id => uri
         $this->SetBuffer('PlaylistMap', '{}');
         $this->SetBuffer('RadioMap', '{}');
     }
@@ -97,16 +97,14 @@ class MusicAssistantConfigurator extends IPSModule
 
         $items = [];
         if (is_array($result) && $this->isList($result)) {
-            $items = $result;
+            $items = $result; // Array of Playlist
         } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
             $items = $result['items'];
         }
 
-        $this->SendDebug('Playlists result', json_encode($result, JSON_UNESCAPED_SLASHES), 0);
-
         $this->ensureIntegerProfile($profile);
 
-        // Alte Associations löschen
+        // Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation($profile, (float)$assoc['Value'], '', '', -1);
@@ -145,16 +143,14 @@ class MusicAssistantConfigurator extends IPSModule
 
         $items = [];
         if (is_array($result) && $this->isList($result)) {
-            $items = $result;
+            $items = $result; // Array of Radio
         } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
             $items = $result['items'];
         }
 
-        $this->SendDebug('Radios result', json_encode($result, JSON_UNESCAPED_SLASHES), 0);
-
         $this->ensureIntegerProfile($profile);
 
-        // Alte Associations löschen
+        // Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation($profile, (float)$assoc['Value'], '', '', -1);
