@@ -25,6 +25,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('RadioMap', '{}');
 
         $this->SetBuffer('MsgId', '0');
+        $this->SetBuffer('QueueId', ''); // gecached
     }
 
     public function ApplyChanges(): void
@@ -39,6 +40,10 @@ class MusicAssistantPlayer extends IPSModule
         // Werte-Mapping: 0=Previous, 1=Stop, 2=Play, 3=Pause, 4=Next
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
+
+        // Shuffle (an/aus)
+        $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Switch', 40, true);
+        $this->EnableAction('Shuffle');
     }
 
     public function RequestAction($Ident, $Value): void
@@ -61,6 +66,12 @@ class MusicAssistantPlayer extends IPSModule
             case 'Transport':
                 $this->ExecuteTransport((int)$Value);
                 $this->SetValue('Transport', (int)$Value);
+                break;
+
+            case 'Shuffle':
+                $enabled = (bool)$Value;
+                $this->SetShuffle($enabled);
+                $this->SetValue('Shuffle', $enabled);
                 break;
 
             default:
@@ -100,6 +111,17 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
     }
 
+    // Shuffle an/aus
+    public function SetShuffle(bool $enabled): void
+    {
+        $queueId = $this->getQueueIdForPlayer();
+
+        $this->maCall('player_queues/shuffle', [
+            'queue_id'         => $queueId,
+            'shuffle_enabled'  => $enabled
+        ]);
+    }
+
     // --------- intern ---------
 
     private function ExecuteTransport(int $value): void
@@ -112,6 +134,39 @@ class MusicAssistantPlayer extends IPSModule
             case 4: $this->Next();     break;
             default: break;
         }
+    }
+
+    /**
+     * Ermittelt die passende Queue-ID für den Player:
+     * - versucht zuerst Cache (Buffer)
+     * - sonst player_queues/all und matching über player_id
+     */
+    private function getQueueIdForPlayer(): string
+    {
+        $cached = trim((string)$this->GetBuffer('QueueId'));
+        if ($cached !== '') {
+            return $cached;
+        }
+
+        $playerId = $this->playerId();
+
+        $resp = $this->maCall('player_queues/all');
+        $result = $resp['result'];
+
+        if (is_array($result) && $this->isList($result)) {
+            foreach ($result as $q) {
+                // je nach MA-Version kann das Feld anders heißen, wir probieren mehrere
+                $qid = (string)($q['queue_id'] ?? $q['id'] ?? '');
+                $pid = (string)($q['player_id'] ?? $q['player'] ?? $q['playerId'] ?? '');
+
+                if ($qid !== '' && $pid === $playerId) {
+                    $this->SetBuffer('QueueId', $qid);
+                    return $qid;
+                }
+            }
+        }
+
+        throw new Exception('Queue for player not found (player_id=' . $playerId . ')');
     }
 
     private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): void
@@ -163,7 +218,7 @@ class MusicAssistantPlayer extends IPSModule
         $resp = $this->maCall($refreshCommand);
         $result = $resp['result'];
 
-        if (is_array($result) && array_keys($result) === range(0, count($result) - 1)) {
+        if (is_array($result) && $this->isList($result)) {
             foreach ($result as $it) {
                 $idStr = (string)($it['item_id'] ?? '');
                 $id    = (int)$idStr;
@@ -186,6 +241,7 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Media URI is empty');
         }
 
+        // PlayMedia nutzt queue_id (hier funktioniert auch player_id oft, aber wir lassen es wie bisher)
         $queueId = $this->playerId();
         $this->maCall('player_queues/play_media', [
             'queue_id' => $queueId,
@@ -201,5 +257,10 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('PlayerID not configured');
         }
         return $id;
+    }
+
+    private function isList(array $arr): bool
+    {
+        return array_keys($arr) === range(0, count($arr) - 1);
     }
 }
