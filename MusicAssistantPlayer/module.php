@@ -46,7 +46,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
 
-        // Shuffle an/aus
+        // Shuffle an/aus (Profil ~Shuffle)
         $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Shuffle', 40, true);
         $this->EnableAction('Shuffle');
 
@@ -55,7 +55,11 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Repeat', 'Repeat', VARIABLETYPE_STRING, self::REPEAT_PROFILE, 50, true);
         $this->EnableAction('Repeat');
 
-        // Initialwert (falls leer) auf off
+        // Mute (Profil ~Mute)
+        $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
+        $this->EnableAction('Mute');
+
+        // Initialwerte (falls leer) setzen
         if (@$this->GetIDForIdent('Repeat') > 0) {
             $cur = (string)@$this->GetValue('Repeat');
             if ($cur === '') {
@@ -101,12 +105,18 @@ class MusicAssistantPlayer extends IPSModule
                 $this->SetValue('Repeat', $mode);
                 break;
 
+            case 'Mute':
+                $muted = (bool)$Value;
+                $this->SetMute($muted);
+                $this->SetValue('Mute', $muted);
+                break;
+
             default:
                 throw new Exception('Unknown action: ' . $Ident);
         }
     }
 
-    // --------- MA Commands (laut deiner API-Doku) ---------
+    // --------- MA Commands ---------
 
     public function Next(): void
     {
@@ -138,7 +148,6 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
     }
 
-    // Shuffle an/aus (laut deiner API-Doku)
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -149,14 +158,21 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
-    // Repeat off/one/all (laut deiner API-Doku)
     public function SetRepeat(string $mode): void
     {
         $queueId = $this->getQueueIdForPlayer();
 
         $this->maCall('player_queues/repeat', [
-            'queue_id'     => $queueId,
-            'repeat_mode'  => $mode
+            'queue_id'    => $queueId,
+            'repeat_mode' => $mode
+        ]);
+    }
+
+    public function SetMute(bool $muted): void
+    {
+        $this->maCall('players/cmd/volume_mute', [
+            'player_id' => $this->playerId(),
+            'muted'     => $muted
         ]);
     }
 
@@ -174,7 +190,6 @@ class MusicAssistantPlayer extends IPSModule
             IPS_CreateVariableProfile(self::REPEAT_PROFILE, VARIABLETYPE_STRING);
         }
 
-        // Associations zurücksetzen
         $p = IPS_GetVariableProfile(self::REPEAT_PROFILE);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, (string)$assoc['Value'], '', '', -1);
@@ -197,12 +212,6 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    /**
-     * Queue-ID ermitteln (inkl. SyncGroups):
-     * - Cache
-     * - player_queues/all: match über player_id / queue_id / players[]
-     * - Fallback: player_id
-     */
     private function getQueueIdForPlayer(): string
     {
         $playerId = $this->playerId();
