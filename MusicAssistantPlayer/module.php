@@ -45,6 +45,17 @@ class MusicAssistantPlayer extends IPSModule
         $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
         $this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20);
 
+        // Icons direkt an den Variablen setzen (UI-Kosmetik)
+        $vidPlaylist = @$this->GetIDForIdent('Playlist');
+        if ($vidPlaylist > 0) {
+            IPS_SetIcon($vidPlaylist, 'list-music');
+        }
+
+        $vidRadio = @$this->GetIDForIdent('Radio');
+        if ($vidRadio > 0) {
+            IPS_SetIcon($vidRadio, 'radio');
+        }
+
         // Transport-Variable mit Legacy Profil ~PlaybackPreviousNext
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
