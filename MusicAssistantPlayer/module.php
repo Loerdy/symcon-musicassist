@@ -36,7 +36,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
 
-        // Timer für State Polling (Shuffle/Repeat aus MA zurückholen)
+        // Timer für State Polling
         $this->RegisterTimer('PollState', 0, 'MA_PollState($_IPS["TARGET"]);');
     }
 
@@ -79,6 +79,11 @@ class MusicAssistantPlayer extends IPSModule
         // Mute (Profil ~Mute)
         $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
         $this->EnableAction('Mute');
+
+        // Now Playing (aus player_queues/all -> current_item.media_item)
+        $this->MaintainVariable('NowTitle',  'Titel',     VARIABLETYPE_STRING, '', 110, true);
+        $this->MaintainVariable('NowArtist', 'Interpret', VARIABLETYPE_STRING, '', 120, true);
+        $this->MaintainVariable('NowAlbum',  'Album',     VARIABLETYPE_STRING, '', 130, true);
 
         // Initialwert Repeat (falls leer) auf off
         if (@$this->GetIDForIdent('Repeat') > 0) {
@@ -170,8 +175,7 @@ class MusicAssistantPlayer extends IPSModule
     }
 
     /**
-     * Polling: Shuffle/Repeat aus MA übernehmen, wenn MA-UI etwas ändert.
-     * Nutzt player_queues/all und matcht queue_id auf die Queue des Players.
+     * Polling: Shuffle/Repeat + NowPlaying aus MA übernehmen (MA-UI Änderungen -> Symcon konsistent).
      */
     public function PollState(): void
     {
@@ -209,10 +213,53 @@ class MusicAssistantPlayer extends IPSModule
                     }
                 }
 
+                // Now Playing (Titel/Interpret/Album) - leeren wenn nichts spielt
+                $state = strtolower(trim((string)($q['state'] ?? '')));
+                $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
+
+                $title  = '';
+                $artist = '';
+                $album  = '';
+
+                if ($state !== 'idle' && $hasCurrent) {
+                    $mi = $q['current_item']['media_item'] ?? null;
+                    if (is_array($mi)) {
+                        $title = (string)($mi['name'] ?? '');
+
+                        if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
+                            $a0 = $mi['artists'][0];
+                            if (is_array($a0)) {
+                                $artist = (string)($a0['name'] ?? '');
+                            } elseif (is_string($a0)) {
+                                $artist = $a0;
+                            }
+                        }
+
+                        if (isset($mi['album']) && is_array($mi['album'])) {
+                            $album = (string)($mi['album']['name'] ?? '');
+                        }
+                    }
+                }
+
+                $this->setIfChangedString('NowTitle',  $title);
+                $this->setIfChangedString('NowArtist', $artist);
+                $this->setIfChangedString('NowAlbum',  $album);
+
                 break;
             }
         } catch (Throwable $e) {
             $this->SendDebug('PollState failed', $e->getMessage(), 0);
+        }
+    }
+
+    private function setIfChangedString(string $ident, string $value): void
+    {
+        $vid = @$this->GetIDForIdent($ident);
+        if ($vid <= 0) {
+            return;
+        }
+        if ((string)$this->GetValue($ident) !== $value) {
+            $this->SetValue($ident, $value);
         }
     }
 
@@ -248,7 +295,6 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
     }
 
-    // Shuffle an/aus
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -259,7 +305,6 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
-    // Repeat off/one/all
     public function SetRepeat(string $mode): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -342,12 +387,6 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    /**
-     * Queue-ID ermitteln (inkl. SyncGroups):
-     * - Cache
-     * - player_queues/all: match über player_id / queue_id / players[]
-     * - Fallback: player_id
-     */
     private function getQueueIdForPlayer(): string
     {
         $playerId = $this->playerId();
