@@ -7,6 +7,8 @@ class MusicAssistantPlayer extends IPSModule
 {
     use MusicAssistantApi;
 
+    private const REPEAT_PROFILE = 'MA.RepeatMode';
+
     public function Create(): void
     {
         parent::Create();
@@ -47,6 +49,19 @@ class MusicAssistantPlayer extends IPSModule
         // Shuffle an/aus
         $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Switch', 40, true);
         $this->EnableAction('Shuffle');
+
+        // Repeat (off/one/all/unknown)
+        $this->ensureRepeatProfile();
+        $this->MaintainVariable('Repeat', 'Repeat', VARIABLETYPE_STRING, self::REPEAT_PROFILE, 50, true);
+        $this->EnableAction('Repeat');
+
+        // Initialwert (falls leer) auf off
+        if (@$this->GetIDForIdent('Repeat') > 0) {
+            $cur = (string)@$this->GetValue('Repeat');
+            if ($cur === '') {
+                $this->SetValue('Repeat', 'off');
+            }
+        }
     }
 
     public function RequestAction($Ident, $Value): void
@@ -75,6 +90,15 @@ class MusicAssistantPlayer extends IPSModule
                 $enabled = (bool)$Value;
                 $this->SetShuffle($enabled);
                 $this->SetValue('Shuffle', $enabled);
+                break;
+
+            case 'Repeat':
+                $mode = strtolower(trim((string)$Value));
+                if (!in_array($mode, ['off', 'one', 'all', 'unknown'], true)) {
+                    $mode = 'off';
+                }
+                $this->SetRepeat($mode);
+                $this->SetValue('Repeat', $mode);
                 break;
 
             default:
@@ -114,7 +138,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
     }
 
-    // Shuffle an/aus (laut deiner API-Doku)
+    // Shuffle an/aus
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -125,7 +149,42 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
+    // Repeat off/one/all/unknown
+    public function SetRepeat(string $mode): void
+    {
+        $queueId = $this->getQueueIdForPlayer();
+
+        $this->maCall('player_queues/repeat', [
+            'queue_id'     => $queueId,
+            'repeat_mode'  => $mode
+        ]);
+    }
+
     // --------- intern ---------
+
+    private function ensureRepeatProfile(): void
+    {
+        if (IPS_VariableProfileExists(self::REPEAT_PROFILE)) {
+            $p = IPS_GetVariableProfile(self::REPEAT_PROFILE);
+            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_STRING) {
+                IPS_DeleteVariableProfile(self::REPEAT_PROFILE);
+            }
+        }
+        if (!IPS_VariableProfileExists(self::REPEAT_PROFILE)) {
+            IPS_CreateVariableProfile(self::REPEAT_PROFILE, VARIABLETYPE_STRING);
+        }
+
+        // Associations zurücksetzen
+        $p = IPS_GetVariableProfile(self::REPEAT_PROFILE);
+        foreach (($p['Associations'] ?? []) as $assoc) {
+            IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, (string)$assoc['Value'], '', '', -1);
+        }
+
+        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'off', 'Off', '', -1);
+        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'one', 'One', '', -1);
+        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', '', -1);
+        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'unknown', 'Unknown', '', -1);
+    }
 
     private function ExecuteTransport(int $value): void
     {
@@ -140,10 +199,10 @@ class MusicAssistantPlayer extends IPSModule
     }
 
     /**
-     * Ermittelt die passende Queue-ID für den Player:
-     * - versucht Cache (Buffer)
-     * - sonst player_queues/all und matching über player_id / queue_id / players[]
-     * - fallback: player_id (bei SyncGroups sehr häufig identisch)
+     * Queue-ID ermitteln (inkl. SyncGroups):
+     * - Cache
+     * - player_queues/all: match über player_id / queue_id / players[]
+     * - Fallback: player_id
      */
     private function getQueueIdForPlayer(): string
     {
@@ -164,19 +223,16 @@ class MusicAssistantPlayer extends IPSModule
                 $qid = (string)($q['queue_id'] ?? $q['id'] ?? '');
                 $pid = (string)($q['player_id'] ?? $q['player'] ?? $q['playerId'] ?? '');
 
-                // 1) Standard
                 if ($qid !== '' && $pid === $playerId) {
                     $this->SetBuffer('QueueId', $qid);
                     return $qid;
                 }
 
-                // 2) Gruppen/Sonderfälle: queue_id == player_id
                 if ($qid !== '' && $qid === $playerId) {
                     $this->SetBuffer('QueueId', $qid);
                     return $qid;
                 }
 
-                // 3) players: [...]
                 if ($qid !== '' && isset($q['players']) && is_array($q['players'])) {
                     foreach ($q['players'] as $p) {
                         if ((string)$p === $playerId) {
@@ -188,7 +244,6 @@ class MusicAssistantPlayer extends IPSModule
             }
         }
 
-        // 4) Fallback
         $this->SendDebug('Queue fallback', 'Using player_id as queue_id: ' . $playerId, 0);
         $this->SetBuffer('QueueId', $playerId);
         return $playerId;
