@@ -81,9 +81,15 @@ class MusicAssistantPlayer extends IPSModule
         $this->EnableAction('Mute');
 
         // Now Playing (aus player_queues/all -> current_item.media_item)
-        $this->MaintainVariable('NowTitle',  'Titel',     VARIABLETYPE_STRING, '', 110, true);
-        $this->MaintainVariable('NowArtist', 'Interpret', VARIABLETYPE_STRING, '', 120, true);
+        $this->MaintainVariable('NowTitle',  'Titel',     VARIABLETYPE_STRING, '~Song', 110, true);
+        $this->MaintainVariable('NowArtist', 'Interpret', VARIABLETYPE_STRING, '~Artist', 120, true);
         $this->MaintainVariable('NowAlbum',  'Album',     VARIABLETYPE_STRING, '', 130, true);
+
+        $vidAlbum = @$this->GetIDForIdent('NowAlbum');
+        if ($vidAlbum > 0) {
+            IPS_SetIcon($vidAlbum, 'album');
+        }
+
 
         // Initialwert Repeat (falls leer) auf off
         if (@$this->GetIDForIdent('Repeat') > 0) {
