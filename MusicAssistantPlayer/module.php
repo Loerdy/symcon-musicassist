@@ -25,12 +25,15 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('RadioMap', '{}');
 
         $this->SetBuffer('MsgId', '0');
-        $this->SetBuffer('QueueId', ''); // gecached
+        $this->SetBuffer('QueueId', '');
     }
 
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+
+        // Queue-Cache leeren, damit SyncGroup/Player-Wechsel sauber ist
+        $this->SetBuffer('QueueId', '');
 
         // Auswahl-Variablen
         $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
@@ -41,7 +44,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
 
-        // Shuffle (an/aus)
+        // Shuffle an/aus
         $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Switch', 40, true);
         $this->EnableAction('Shuffle');
     }
@@ -111,14 +114,14 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
     }
 
-    // Shuffle an/aus
+    // Shuffle an/aus (laut deiner API-Doku)
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
 
         $this->maCall('player_queues/shuffle', [
-            'queue_id'         => $queueId,
-            'shuffle_enabled'  => $enabled
+            'queue_id'        => $queueId,
+            'shuffle_enabled' => $enabled
         ]);
     }
 
@@ -138,40 +141,61 @@ class MusicAssistantPlayer extends IPSModule
 
     /**
      * Ermittelt die passende Queue-ID für den Player:
-     * - versucht zuerst Cache (Buffer)
-     * - sonst player_queues/all und matching über player_id
+     * - versucht Cache (Buffer)
+     * - sonst player_queues/all und matching über player_id / queue_id / players[]
+     * - fallback: player_id (bei SyncGroups sehr häufig identisch)
      */
     private function getQueueIdForPlayer(): string
     {
+        $playerId = $this->playerId();
+
         $cached = trim((string)$this->GetBuffer('QueueId'));
         if ($cached !== '') {
             return $cached;
         }
 
-        $playerId = $this->playerId();
-
-        $resp = $this->maCall('player_queues/all');
+        $resp   = $this->maCall('player_queues/all');
         $result = $resp['result'];
+
+        $this->SendDebug('Queues RAW', json_encode($result, JSON_UNESCAPED_SLASHES), 0);
 
         if (is_array($result) && $this->isList($result)) {
             foreach ($result as $q) {
-                // je nach MA-Version kann das Feld anders heißen, wir probieren mehrere
                 $qid = (string)($q['queue_id'] ?? $q['id'] ?? '');
                 $pid = (string)($q['player_id'] ?? $q['player'] ?? $q['playerId'] ?? '');
 
+                // 1) Standard
                 if ($qid !== '' && $pid === $playerId) {
                     $this->SetBuffer('QueueId', $qid);
                     return $qid;
                 }
+
+                // 2) Gruppen/Sonderfälle: queue_id == player_id
+                if ($qid !== '' && $qid === $playerId) {
+                    $this->SetBuffer('QueueId', $qid);
+                    return $qid;
+                }
+
+                // 3) players: [...]
+                if ($qid !== '' && isset($q['players']) && is_array($q['players'])) {
+                    foreach ($q['players'] as $p) {
+                        if ((string)$p === $playerId) {
+                            $this->SetBuffer('QueueId', $qid);
+                            return $qid;
+                        }
+                    }
+                }
             }
         }
 
-        throw new Exception('Queue for player not found (player_id=' . $playerId . ')');
+        // 4) Fallback
+        $this->SendDebug('Queue fallback', 'Using player_id as queue_id: ' . $playerId, 0);
+        $this->SetBuffer('QueueId', $playerId);
+        return $playerId;
     }
 
     private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): void
     {
-        // Wenn Variable existiert aber falscher Typ: löschen
         $existingId = @$this->GetIDForIdent($ident);
         if ($existingId > 0) {
             $v = IPS_GetVariable($existingId);
@@ -214,7 +238,6 @@ class MusicAssistantPlayer extends IPSModule
             return $map[$key];
         }
 
-        // Fallback: erneut aus MA ziehen
         $resp = $this->maCall($refreshCommand);
         $result = $resp['result'];
 
@@ -241,7 +264,6 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Media URI is empty');
         }
 
-        // PlayMedia nutzt queue_id (hier funktioniert auch player_id oft, aber wir lassen es wie bisher)
         $queueId = $this->playerId();
         $this->maCall('player_queues/play_media', [
             'queue_id' => $queueId,

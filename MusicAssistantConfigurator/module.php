@@ -86,8 +86,6 @@ class MusicAssistantConfigurator extends IPSModule
         return json_encode($form);
     }
 
-    // -------- Playlists --------
-
     public function SyncPlaylistsProfile(): void
     {
         $profile = $this->playlistProfileName();
@@ -97,14 +95,13 @@ class MusicAssistantConfigurator extends IPSModule
 
         $items = [];
         if (is_array($result) && $this->isList($result)) {
-            $items = $result; // Array of Playlist
+            $items = $result;
         } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
             $items = $result['items'];
         }
 
         $this->ensureIntegerProfile($profile);
 
-        // Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation($profile, (float)$assoc['Value'], '', '', -1);
@@ -132,8 +129,6 @@ class MusicAssistantConfigurator extends IPSModule
         $this->ReloadForm();
     }
 
-    // -------- Radios --------
-
     public function SyncRadiosProfile(): void
     {
         $profile = $this->radioProfileName();
@@ -143,14 +138,13 @@ class MusicAssistantConfigurator extends IPSModule
 
         $items = [];
         if (is_array($result) && $this->isList($result)) {
-            $items = $result; // Array of Radio
+            $items = $result;
         } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
             $items = $result['items'];
         }
 
         $this->ensureIntegerProfile($profile);
 
-        // Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation($profile, (float)$assoc['Value'], '', '', -1);
@@ -177,8 +171,6 @@ class MusicAssistantConfigurator extends IPSModule
         $this->SendDebug('Radios', 'Profile=' . $profile . ' entries=' . $count, 0);
         $this->ReloadForm();
     }
-
-    // -------- intern --------
 
     private function ensureIntegerProfile(string $profile): void
     {

@@ -71,7 +71,6 @@ trait MusicAssistantApi
 
         $trim = trim($body);
 
-        // Leere Antwort (z.B. 204 No Content) oder JSON null akzeptieren
         if (($trim === '' && ($httpCode === 200 || $httpCode === 204)) || $trim === 'null') {
             return [
                 'raw' => ['result' => null],
