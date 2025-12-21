@@ -59,7 +59,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
         $this->EnableAction('Mute');
 
-        // Initialwerte (falls leer) setzen
+        // Initialwert (falls leer) auf off
         if (@$this->GetIDForIdent('Repeat') > 0) {
             $cur = (string)@$this->GetValue('Repeat');
             if ($cur === '') {
@@ -107,8 +107,14 @@ class MusicAssistantPlayer extends IPSModule
 
             case 'Mute':
                 $muted = (bool)$Value;
-                $this->SetMute($muted);
-                $this->SetValue('Mute', $muted);
+                try {
+                    $this->SetMute($muted);
+                    $this->SetValue('Mute', $muted);
+                } catch (Throwable $e) {
+                    $this->SendDebug('Mute failed', $e->getMessage(), 0);
+                    IPS_LogMessage('MusicAssistantPlayer', 'Mute failed: ' . $e->getMessage());
+                    // Variable bewusst NICHT setzen, damit UI-Status nicht falsch wird
+                }
                 break;
 
             default:
@@ -116,7 +122,7 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    // --------- MA Commands ---------
+    // --------- MA Commands (laut deiner API-Doku) ---------
 
     public function Next(): void
     {
@@ -148,6 +154,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
     }
 
+    // Shuffle an/aus (laut deiner API-Doku)
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -158,6 +165,7 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
+    // Repeat off/one/all (laut deiner API-Doku)
     public function SetRepeat(string $mode): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -168,12 +176,45 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
+    /**
+     * Mute:
+     * - zuerst direkt auf player_id probieren
+     * - wenn das (bei SyncGroups oft) mit 500 scheitert: Mitglieder ermitteln und einzeln muten
+     */
     public function SetMute(bool $muted): void
     {
-        $this->maCall('players/cmd/volume_mute', [
-            'player_id' => $this->playerId(),
-            'muted'     => $muted
-        ]);
+        $playerId = $this->playerId();
+
+        // 1) Direkt versuchen
+        try {
+            $this->maCall('players/cmd/volume_mute', [
+                'player_id' => $playerId,
+                'muted'     => $muted
+            ]);
+            return;
+        } catch (Throwable $e) {
+            // 2) SyncGroup: auf Mitglieder ausweichen
+            if (str_starts_with($playerId, 'syncgroup_')) {
+                $members = $this->getSyncGroupMembers($playerId);
+                if (count($members) === 0) {
+                    throw $e;
+                }
+
+                foreach ($members as $mid) {
+                    try {
+                        $this->maCall('players/cmd/volume_mute', [
+                            'player_id' => $mid,
+                            'muted'     => $muted
+                        ]);
+                    } catch (Throwable $inner) {
+                        $this->SendDebug('Mute member failed', $mid . ': ' . $inner->getMessage(), 0);
+                    }
+                }
+                return;
+            }
+
+            throw $e;
+        }
     }
 
     // --------- intern ---------
@@ -190,6 +231,7 @@ class MusicAssistantPlayer extends IPSModule
             IPS_CreateVariableProfile(self::REPEAT_PROFILE, VARIABLETYPE_STRING);
         }
 
+        // Associations zurücksetzen
         $p = IPS_GetVariableProfile(self::REPEAT_PROFILE);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, (string)$assoc['Value'], '', '', -1);
@@ -212,6 +254,12 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
+    /**
+     * Queue-ID ermitteln (inkl. SyncGroups):
+     * - Cache
+     * - player_queues/all: match über player_id / queue_id / players[]
+     * - Fallback: player_id
+     */
     private function getQueueIdForPlayer(): string
     {
         $playerId = $this->playerId();
@@ -255,6 +303,60 @@ class MusicAssistantPlayer extends IPSModule
         $this->SendDebug('Queue fallback', 'Using player_id as queue_id: ' . $playerId, 0);
         $this->SetBuffer('QueueId', $playerId);
         return $playerId;
+    }
+
+    /**
+     * SyncGroup-Member ermitteln (Key-Namen können je nach Version variieren).
+     */
+    private function getSyncGroupMembers(string $syncGroupId): array
+    {
+        $resp   = $this->maCall('players/all');
+        $result = $resp['result'];
+
+        if (!is_array($result) || !$this->isList($result)) {
+            return [];
+        }
+
+        foreach ($result as $p) {
+            $pid = (string)($p['player_id'] ?? $p['id'] ?? '');
+            if ($pid !== $syncGroupId) {
+                continue;
+            }
+
+            $candidates = [
+                $p['group_members'] ?? null,
+                $p['members'] ?? null,
+                $p['players'] ?? null,
+                $p['child_player_ids'] ?? null,
+                $p['group_childs'] ?? null
+            ];
+
+            foreach ($candidates as $cand) {
+                if (!is_array($cand)) {
+                    continue;
+                }
+
+                $out = [];
+                foreach ($cand as $x) {
+                    if (is_string($x) && $x !== '') {
+                        $out[] = $x;
+                    } elseif (is_array($x)) {
+                        $id = (string)($x['player_id'] ?? $x['id'] ?? '');
+                        if ($id !== '') {
+                            $out[] = $id;
+                        }
+                    }
+                }
+
+                $out = array_values(array_unique($out));
+                $this->SendDebug('SyncGroup members', json_encode($out, JSON_UNESCAPED_SLASHES), 0);
+                return $out;
+            }
+
+            return [];
+        }
+
+        return [];
     }
 
     private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): void
@@ -327,6 +429,7 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Media URI is empty');
         }
 
+        // PlayMedia nutzt queue_id – hier hat bisher player_id funktioniert, daher lassen wir es so.
         $queueId = $this->playerId();
         $this->maCall('player_queues/play_media', [
             'queue_id' => $queueId,
