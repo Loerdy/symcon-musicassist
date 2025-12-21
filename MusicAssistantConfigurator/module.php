@@ -102,10 +102,14 @@ class MusicAssistantConfigurator extends IPSModule
 
         $this->ensureIntegerProfile($profile);
 
+        // Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation($profile, (float)$assoc['Value'], '', '', -1);
         }
+
+        // 0 = "-" (Neutralwert)
+        IPS_SetVariableProfileAssociation($profile, 0, '-', '', -1);
 
         $map = [];
         $count = 0;
@@ -145,10 +149,14 @@ class MusicAssistantConfigurator extends IPSModule
 
         $this->ensureIntegerProfile($profile);
 
+        // Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation($profile, (float)$assoc['Value'], '', '', -1);
         }
+
+        // 0 = "-" (Neutralwert)
+        IPS_SetVariableProfileAssociation($profile, 0, '-', '', -1);
 
         $map = [];
         $count = 0;

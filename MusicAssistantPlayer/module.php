@@ -28,6 +28,10 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('QueueId', '');
+
+        // Timer zum Zurücksetzen der Auswahl auf 0 ("-")
+        $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
+        $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges(): void
@@ -42,24 +46,23 @@ class MusicAssistantPlayer extends IPSModule
         $this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20);
 
         // Transport-Variable mit Legacy Profil ~PlaybackPreviousNext
-        // Werte-Mapping: 0=Previous, 1=Stop, 2=Play, 3=Pause, 4=Next
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
 
-        // Shuffle an/aus (Profil ~Shuffle)
+        // Shuffle
         $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Shuffle', 40, true);
         $this->EnableAction('Shuffle');
 
-        // Repeat (off/one/all)
+        // Repeat
         $this->ensureRepeatProfile();
         $this->MaintainVariable('Repeat', 'Repeat', VARIABLETYPE_STRING, self::REPEAT_PROFILE, 50, true);
         $this->EnableAction('Repeat');
 
-        // Mute (Profil ~Mute)
+        // Mute
         $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
         $this->EnableAction('Mute');
 
-        // Initialwert (falls leer) auf off
+        // Initialwert Repeat
         if (@$this->GetIDForIdent('Repeat') > 0) {
             $cur = (string)@$this->GetValue('Repeat');
             if ($cur === '') {
@@ -76,6 +79,9 @@ class MusicAssistantPlayer extends IPSModule
                 $uri = $this->resolveUriFromMap($itemId, 'PlaylistMap', 'music/playlists/library_items');
                 $this->PlayMediaUri($uri);
                 $this->SetValue('Playlist', $itemId);
+
+                // nach 5s zurück auf "-"
+                $this->SetTimerInterval('ResetPlaylist', 5000);
                 break;
 
             case 'Radio':
@@ -83,6 +89,9 @@ class MusicAssistantPlayer extends IPSModule
                 $uri = $this->resolveUriFromMap($itemId, 'RadioMap', 'music/radios/library_items');
                 $this->PlayMediaUri($uri);
                 $this->SetValue('Radio', $itemId);
+
+                // nach 5s zurück auf "-"
+                $this->SetTimerInterval('ResetRadio', 5000);
                 break;
 
             case 'Transport':
@@ -113,7 +122,6 @@ class MusicAssistantPlayer extends IPSModule
                 } catch (Throwable $e) {
                     $this->SendDebug('Mute failed', $e->getMessage(), 0);
                     IPS_LogMessage('MusicAssistantPlayer', 'Mute failed: ' . $e->getMessage());
-                    // Variable bewusst NICHT setzen, damit UI-Status nicht falsch wird
                 }
                 break;
 
@@ -122,7 +130,24 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    // --------- MA Commands (laut deiner API-Doku) ---------
+    // Timer-Callbacks: Auswahl zurück auf 0 ("-")
+    public function ResetPlaylistSelection(): void
+    {
+        $this->SetTimerInterval('ResetPlaylist', 0);
+        if (@$this->GetIDForIdent('Playlist') > 0) {
+            $this->SetValue('Playlist', 0);
+        }
+    }
+
+    public function ResetRadioSelection(): void
+    {
+        $this->SetTimerInterval('ResetRadio', 0);
+        if (@$this->GetIDForIdent('Radio') > 0) {
+            $this->SetValue('Radio', 0);
+        }
+    }
+
+    // --------- MA Commands ---------
 
     public function Next(): void
     {
@@ -154,7 +179,6 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
     }
 
-    // Shuffle an/aus (laut deiner API-Doku)
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -165,7 +189,6 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
-    // Repeat off/one/all (laut deiner API-Doku)
     public function SetRepeat(string $mode): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -176,16 +199,10 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
-    /**
-     * Mute:
-     * - zuerst direkt auf player_id probieren
-     * - wenn das (bei SyncGroups oft) mit 500 scheitert: Mitglieder ermitteln und einzeln muten
-     */
     public function SetMute(bool $muted): void
     {
         $playerId = $this->playerId();
 
-        // 1) Direkt versuchen
         try {
             $this->maCall('players/cmd/volume_mute', [
                 'player_id' => $playerId,
@@ -193,7 +210,6 @@ class MusicAssistantPlayer extends IPSModule
             ]);
             return;
         } catch (Throwable $e) {
-            // 2) SyncGroup: auf Mitglieder ausweichen
             if (str_starts_with($playerId, 'syncgroup_')) {
                 $members = $this->getSyncGroupMembers($playerId);
                 if (count($members) === 0) {
@@ -231,7 +247,6 @@ class MusicAssistantPlayer extends IPSModule
             IPS_CreateVariableProfile(self::REPEAT_PROFILE, VARIABLETYPE_STRING);
         }
 
-        // Associations zurücksetzen
         $p = IPS_GetVariableProfile(self::REPEAT_PROFILE);
         foreach (($p['Associations'] ?? []) as $assoc) {
             IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, (string)$assoc['Value'], '', '', -1);
@@ -254,12 +269,6 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    /**
-     * Queue-ID ermitteln (inkl. SyncGroups):
-     * - Cache
-     * - player_queues/all: match über player_id / queue_id / players[]
-     * - Fallback: player_id
-     */
     private function getQueueIdForPlayer(): string
     {
         $playerId = $this->playerId();
@@ -305,9 +314,6 @@ class MusicAssistantPlayer extends IPSModule
         return $playerId;
     }
 
-    /**
-     * SyncGroup-Member ermitteln (Key-Namen können je nach Version variieren).
-     */
     private function getSyncGroupMembers(string $syncGroupId): array
     {
         $resp   = $this->maCall('players/all');
@@ -332,9 +338,7 @@ class MusicAssistantPlayer extends IPSModule
             ];
 
             foreach ($candidates as $cand) {
-                if (!is_array($cand)) {
-                    continue;
-                }
+                if (!is_array($cand)) continue;
 
                 $out = [];
                 foreach ($cand as $x) {
@@ -429,7 +433,6 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Media URI is empty');
         }
 
-        // PlayMedia nutzt queue_id – hier hat bisher player_id funktioniert, daher lassen wir es so.
         $queueId = $this->playerId();
         $this->maCall('player_queues/play_media', [
             'queue_id' => $queueId,
