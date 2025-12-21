@@ -102,6 +102,9 @@ class MusicAssistantConfigurator extends IPSModule
 
         $this->ensureIntegerProfile($profile);
 
+        // Standard-Icon für das Profil
+        IPS_SetVariableProfileIcon($profile, 'list-music');
+
         // Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
@@ -123,6 +126,7 @@ class MusicAssistantConfigurator extends IPSModule
 
             if ($id <= 0 || $uri === '') continue;
 
+            // einzelne Playlist-Einträge ohne eigenes Icon -> Profil-Icon gilt als Default
             IPS_SetVariableProfileAssociation($profile, (float)$id, $name, '', -1);
             $map[(string)$id] = $uri;
             $count++;
@@ -149,6 +153,9 @@ class MusicAssistantConfigurator extends IPSModule
 
         $this->ensureIntegerProfile($profile);
 
+        // Standard-Icon für das Profil
+        IPS_SetVariableProfileIcon($profile, 'radio');
+
         // Associations löschen
         $p = IPS_GetVariableProfile($profile);
         foreach (($p['Associations'] ?? []) as $assoc) {
@@ -170,6 +177,7 @@ class MusicAssistantConfigurator extends IPSModule
 
             if ($id <= 0 || $uri === '') continue;
 
+            // einzelne Radios ohne eigenes Icon -> Profil-Icon gilt als Default
             IPS_SetVariableProfileAssociation($profile, (float)$id, $name, '', -1);
             $map[(string)$id] = $uri;
             $count++;

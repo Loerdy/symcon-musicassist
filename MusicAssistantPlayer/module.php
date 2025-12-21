@@ -252,9 +252,10 @@ class MusicAssistantPlayer extends IPSModule
             IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, (string)$assoc['Value'], '', '', -1);
         }
 
-        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'off', 'Off', '', -1);
-        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'one', 'One', '', -1);
-        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', '', -1);
+            IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'off', 'Off', 'ban', -1);
+            IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'one', 'One', 'arrows-repeat-1', -1);
+            IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', 'arrows-repeat', -1);
+
     }
 
     private function ExecuteTransport(int $value): void
