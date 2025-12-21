@@ -50,7 +50,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Switch', 40, true);
         $this->EnableAction('Shuffle');
 
-        // Repeat (off/one/all/unknown)
+        // Repeat (off/one/all)
         $this->ensureRepeatProfile();
         $this->MaintainVariable('Repeat', 'Repeat', VARIABLETYPE_STRING, self::REPEAT_PROFILE, 50, true);
         $this->EnableAction('Repeat');
@@ -94,7 +94,7 @@ class MusicAssistantPlayer extends IPSModule
 
             case 'Repeat':
                 $mode = strtolower(trim((string)$Value));
-                if (!in_array($mode, ['off', 'one', 'all', 'unknown'], true)) {
+                if (!in_array($mode, ['off', 'one', 'all'], true)) {
                     $mode = 'off';
                 }
                 $this->SetRepeat($mode);
@@ -138,7 +138,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
     }
 
-    // Shuffle an/aus
+    // Shuffle an/aus (laut deiner API-Doku)
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -149,7 +149,7 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
-    // Repeat off/one/all/unknown
+    // Repeat off/one/all (laut deiner API-Doku)
     public function SetRepeat(string $mode): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -183,7 +183,6 @@ class MusicAssistantPlayer extends IPSModule
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'off', 'Off', '', -1);
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'one', 'One', '', -1);
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', '', -1);
-        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'unknown', 'Unknown', '', -1);
     }
 
     private function ExecuteTransport(int $value): void
