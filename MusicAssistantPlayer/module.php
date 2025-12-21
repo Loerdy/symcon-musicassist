@@ -47,7 +47,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->EnableAction('Transport');
 
         // Shuffle an/aus
-        $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Switch', 40, true);
+        $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Shuffle', 40, true);
         $this->EnableAction('Shuffle');
 
         // Repeat (off/one/all)
