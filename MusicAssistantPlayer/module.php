@@ -82,12 +82,11 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
         $this->EnableAction('Mute');
 
-        // Volume (einfach wie vorher: Slider + 2 Buttons)
-        // Slider: volume_set
+        // Volume (Rollback-Variante wie vorher: Slider + 2 Buttons)
         $this->MaintainVariable('VolumeLevel', 'Volume', VARIABLETYPE_INTEGER, '~Volume', 70, true);
         $this->EnableAction('VolumeLevel');
 
-        // Buttons: group_volume_up / group_volume_down (wie in deiner früheren Doku/Beispielen)
+        // Buttons: group_volume_up / group_volume_down
         $this->ensureVolumeButtonProfiles();
         $this->MaintainVariable('VolumeUp', 'Volume +', VARIABLETYPE_INTEGER, self::VOLUP_PROFILE, 80, true);
         $this->EnableAction('VolumeUp');
@@ -159,8 +158,14 @@ class MusicAssistantPlayer extends IPSModule
 
             case 'Mute':
                 $muted = (bool)$Value;
-                $this->SetMute($muted);
-                $this->SetValue('Mute', $muted);
+                try {
+                    $this->SetMute($muted);
+                    $this->SetValue('Mute', $muted);
+                } catch (Throwable $e) {
+                    $this->SendDebug('Mute failed', $e->getMessage(), 0);
+                    IPS_LogMessage('MusicAssistantPlayer', 'Mute failed: ' . $e->getMessage());
+                    // Wert nicht setzen -> UI bleibt konsistent
+                }
                 break;
 
             case 'VolumeLevel':
@@ -307,27 +312,52 @@ class MusicAssistantPlayer extends IPSModule
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
-        $this->maCall('player_queues/shuffle', [
-            'queue_id'        => $queueId,
-            'shuffle_enabled' => $enabled
-        ]);
+        $this->maCall('player_queues/shuffle', ['queue_id' => $queueId, 'shuffle_enabled' => $enabled]);
     }
 
     public function SetRepeat(string $mode): void
     {
         $queueId = $this->getQueueIdForPlayer();
-        $this->maCall('player_queues/repeat', [
-            'queue_id'    => $queueId,
-            'repeat_mode' => $mode
-        ]);
+        $this->maCall('player_queues/repeat', ['queue_id' => $queueId, 'repeat_mode' => $mode]);
     }
 
+    /**
+     * Mute mit SyncGroup-Fallback:
+     * - direkt probieren
+     * - bei 500 (SyncGroup) -> Mitglieder muten
+     */
     public function SetMute(bool $muted): void
     {
-        $this->maCall('players/cmd/volume_mute', [
-            'player_id' => $this->playerId(),
-            'muted'     => $muted
-        ]);
+        $playerId = $this->playerId();
+
+        try {
+            $this->maCall('players/cmd/volume_mute', [
+                'player_id' => $playerId,
+                'muted'     => $muted
+            ]);
+            return;
+        } catch (Throwable $e) {
+            if (str_starts_with($playerId, 'syncgroup_')) {
+                $members = $this->getSyncGroupMembers($playerId);
+                if (count($members) === 0) {
+                    throw $e;
+                }
+
+                foreach ($members as $mid) {
+                    try {
+                        $this->maCall('players/cmd/volume_mute', [
+                            'player_id' => $mid,
+                            'muted'     => $muted
+                        ]);
+                    } catch (Throwable $inner) {
+                        $this->SendDebug('Mute member failed', $mid . ': ' . $inner->getMessage(), 0);
+                    }
+                }
+                return;
+            }
+
+            throw $e;
+        }
     }
 
     public function SetVolumeLevel(int $level): void
@@ -338,22 +368,67 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
-    // Buttons (wie vorher): Group Volume Up/Down
+    // Buttons (Rollback-Variante): Group Volume Up/Down
     public function GroupVolumeUp(): void
     {
-        $this->maCall('players/cmd/group_volume_up', [
-            'player_id' => $this->playerId()
-        ]);
+        $this->maCall('players/cmd/group_volume_up', ['player_id' => $this->playerId()]);
     }
 
     public function GroupVolumeDown(): void
     {
-        $this->maCall('players/cmd/group_volume_down', [
-            'player_id' => $this->playerId()
-        ]);
+        $this->maCall('players/cmd/group_volume_down', ['player_id' => $this->playerId()]);
     }
 
     // --------- intern ---------
+
+    private function getSyncGroupMembers(string $syncGroupId): array
+    {
+        $resp   = $this->maCall('players/all');
+        $result = $resp['result'];
+
+        if (!is_array($result) || !$this->isList($result)) {
+            return [];
+        }
+
+        foreach ($result as $p) {
+            $pid = (string)($p['player_id'] ?? $p['id'] ?? '');
+            if ($pid !== $syncGroupId) {
+                continue;
+            }
+
+            $candidates = [
+                $p['group_members'] ?? null,
+                $p['members'] ?? null,
+                $p['players'] ?? null,
+                $p['child_player_ids'] ?? null,
+                $p['group_childs'] ?? null
+            ];
+
+            foreach ($candidates as $cand) {
+                if (!is_array($cand)) {
+                    continue;
+                }
+
+                $out = [];
+                foreach ($cand as $x) {
+                    if (is_string($x) && $x !== '') {
+                        $out[] = $x;
+                    } elseif (is_array($x)) {
+                        $id = (string)($x['player_id'] ?? $x['id'] ?? '');
+                        if ($id !== '') {
+                            $out[] = $id;
+                        }
+                    }
+                }
+
+                return array_values(array_unique($out));
+            }
+
+            return [];
+        }
+
+        return [];
+    }
 
     private function ensureRepeatProfile(): void
     {
