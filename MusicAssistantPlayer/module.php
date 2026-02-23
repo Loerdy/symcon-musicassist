@@ -449,15 +449,12 @@ class MusicAssistantPlayer extends IPSModule
             $p = IPS_GetVariableProfile(self::VOLUP_PROFILE);
             if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
                 IPS_DeleteVariableProfile(self::VOLUP_PROFILE);
+            } else {
+                // Profil existiert bereits korrekt -> wir bauen es sauber neu auf:
+                IPS_DeleteVariableProfile(self::VOLUP_PROFILE);
             }
         }
-        if (!IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
-            IPS_CreateVariableProfile(self::VOLUP_PROFILE, VARIABLETYPE_INTEGER);
-        }
-        $p = IPS_GetVariableProfile(self::VOLUP_PROFILE);
-        foreach (($p['Associations'] ?? []) as $assoc) {
-            IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, (float)$assoc['Value'], '', '', -1);
-        }
+        IPS_CreateVariableProfile(self::VOLUP_PROFILE, VARIABLETYPE_INTEGER);
         IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 0, '', '', -1);
         IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 1, 'Up', 'volume-up', -1);
 
@@ -466,15 +463,11 @@ class MusicAssistantPlayer extends IPSModule
             $p = IPS_GetVariableProfile(self::VOLDOWN_PROFILE);
             if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
                 IPS_DeleteVariableProfile(self::VOLDOWN_PROFILE);
+            } else {
+                IPS_DeleteVariableProfile(self::VOLDOWN_PROFILE);
             }
         }
-        if (!IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
-            IPS_CreateVariableProfile(self::VOLDOWN_PROFILE, VARIABLETYPE_INTEGER);
-        }
-        $p = IPS_GetVariableProfile(self::VOLDOWN_PROFILE);
-        foreach (($p['Associations'] ?? []) as $assoc) {
-            IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, (float)$assoc['Value'], '', '', -1);
-        }
+        IPS_CreateVariableProfile(self::VOLDOWN_PROFILE, VARIABLETYPE_INTEGER);
         IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 0, '', '', -1);
         IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 1, 'Down', 'volume-down', -1);
     }
