@@ -404,7 +404,7 @@ class MusicAssistantPlayer extends IPSModule
         if (!IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
             IPS_CreateVariableProfile(self::VOLDOWN_PROFILE, VARIABLETYPE_INTEGER);
         }
-        IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 0, '', '', -1);
+        IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 0, '-', '', -1);
         IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 1, 'Down', 'volume-down', -1);
     }
 
