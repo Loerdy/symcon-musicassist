@@ -7,7 +7,9 @@ class MusicAssistantPlayer extends IPSModule
 {
     use MusicAssistantApi;
 
-    private const REPEAT_PROFILE = 'MA.RepeatMode';
+    private const REPEAT_PROFILE  = 'MA.RepeatMode';
+    private const VOLUP_PROFILE   = 'MA.VolumeUp';
+    private const VOLDOWN_PROFILE = 'MA.VolumeDown';
 
     public function Create(): void
     {
@@ -67,31 +69,43 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
 
-        // Shuffle an/aus (Profil ~Shuffle)
+        // Shuffle
         $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Shuffle', 40, true);
         $this->EnableAction('Shuffle');
 
-        // Repeat (off/one/all) mit Icons
+        // Repeat
         $this->ensureRepeatProfile();
         $this->MaintainVariable('Repeat', 'Repeat', VARIABLETYPE_STRING, self::REPEAT_PROFILE, 50, true);
         $this->EnableAction('Repeat');
 
-        // Mute (Profil ~Mute)
+        // Mute
         $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
         $this->EnableAction('Mute');
 
-        // Now Playing (aus player_queues/all -> current_item.media_item)
-        $this->MaintainVariable('NowTitle',  'Titel',     VARIABLETYPE_STRING, '~Song', 110, true);
+        // Volume (Systemprofil ~Volume)
+        $this->MaintainVariable('VolumeLevel', 'Volume', VARIABLETYPE_INTEGER, '~Volume', 70, true);
+        $this->EnableAction('VolumeLevel');
+
+        // Volume Up/Down Buttons (eigene INTEGER-Profile)
+        $this->ensureVolumeButtonProfiles();
+
+        $this->MaintainVariable('VolumeUp', 'Volume +', VARIABLETYPE_INTEGER, self::VOLUP_PROFILE, 80, true);
+        $this->EnableAction('VolumeUp');
+
+        $this->MaintainVariable('VolumeDown', 'Volume -', VARIABLETYPE_INTEGER, self::VOLDOWN_PROFILE, 90, true);
+        $this->EnableAction('VolumeDown');
+
+        // Now Playing
+        $this->MaintainVariable('NowTitle',  'Titel',     VARIABLETYPE_STRING, '~Song',   110, true);
         $this->MaintainVariable('NowArtist', 'Interpret', VARIABLETYPE_STRING, '~Artist', 120, true);
-        $this->MaintainVariable('NowAlbum',  'Album',     VARIABLETYPE_STRING, '', 130, true);
+        $this->MaintainVariable('NowAlbum',  'Album',     VARIABLETYPE_STRING, '',        130, true);
 
         $vidAlbum = @$this->GetIDForIdent('NowAlbum');
         if ($vidAlbum > 0) {
             IPS_SetIcon($vidAlbum, 'album');
         }
 
-
-        // Initialwert Repeat (falls leer) auf off
+        // Initialwert Repeat
         if (@$this->GetIDForIdent('Repeat') > 0) {
             $cur = (string)@$this->GetValue('Repeat');
             if ($cur === '') {
@@ -112,8 +126,6 @@ class MusicAssistantPlayer extends IPSModule
                 $uri = $this->resolveUriFromMap($itemId, 'PlaylistMap', 'music/playlists/library_items');
                 $this->PlayMediaUri($uri);
                 $this->SetValue('Playlist', $itemId);
-
-                // nach 5s zurück auf "-"
                 $this->SetTimerInterval('ResetPlaylist', 5000);
                 break;
 
@@ -122,8 +134,6 @@ class MusicAssistantPlayer extends IPSModule
                 $uri = $this->resolveUriFromMap($itemId, 'RadioMap', 'music/radios/library_items');
                 $this->PlayMediaUri($uri);
                 $this->SetValue('Radio', $itemId);
-
-                // nach 5s zurück auf "-"
                 $this->SetTimerInterval('ResetRadio', 5000);
                 break;
 
@@ -158,6 +168,27 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 break;
 
+            case 'VolumeLevel':
+                $level = max(0, min(100, (int)$Value));
+                $this->SetVolumeLevel($level);
+                $this->SetValue('VolumeLevel', $level);
+                break;
+
+            case 'VolumeUp':
+                if ((int)$Value === 1) {
+                    $this->GroupVolumeUp();
+                }
+                // Button zurücksetzen
+                $this->SetValue('VolumeUp', 0);
+                break;
+
+            case 'VolumeDown':
+                if ((int)$Value === 1) {
+                    $this->GroupVolumeDown();
+                }
+                $this->SetValue('VolumeDown', 0);
+                break;
+
             default:
                 throw new Exception('Unknown action: ' . $Ident);
         }
@@ -181,7 +212,7 @@ class MusicAssistantPlayer extends IPSModule
     }
 
     /**
-     * Polling: Shuffle/Repeat + NowPlaying aus MA übernehmen (MA-UI Änderungen -> Symcon konsistent).
+     * Polling: Shuffle/Repeat + NowPlaying + Volume aus MA übernehmen.
      */
     public function PollState(): void
     {
@@ -219,7 +250,15 @@ class MusicAssistantPlayer extends IPSModule
                     }
                 }
 
-                // Now Playing (Titel/Interpret/Album) - leeren wenn nichts spielt
+                // Volume (falls vorhanden)
+                if (isset($q['volume_level']) && @$this->GetIDForIdent('VolumeLevel') > 0) {
+                    $vol = max(0, min(100, (int)$q['volume_level']));
+                    if ((int)$this->GetValue('VolumeLevel') !== $vol) {
+                        $this->SetValue('VolumeLevel', $vol);
+                    }
+                }
+
+                // Now Playing - leeren wenn nichts spielt
                 $state = strtolower(trim((string)($q['state'] ?? '')));
                 $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
 
@@ -321,6 +360,28 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
+    public function SetVolumeLevel(int $level): void
+    {
+        $this->maCall('players/cmd/volume_set', [
+            'player_id'     => $this->playerId(),
+            'volume_level'  => $level
+        ]);
+    }
+
+    public function GroupVolumeUp(): void
+    {
+        $this->maCall('players/cmd/group_volume_up', [
+            'player_id' => $this->playerId()
+        ]);
+    }
+
+    public function GroupVolumeDown(): void
+    {
+        $this->maCall('players/cmd/group_volume_down', [
+            'player_id' => $this->playerId()
+        ]);
+    }
+
     // Mute (bei SyncGroup ggf. auf Member ausweichen)
     public function SetMute(bool $muted): void
     {
@@ -381,6 +442,43 @@ class MusicAssistantPlayer extends IPSModule
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', 'arrows-repeat', -1);
     }
 
+    private function ensureVolumeButtonProfiles(): void
+    {
+        // VolumeUp (Integer)
+        if (IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
+            $p = IPS_GetVariableProfile(self::VOLUP_PROFILE);
+            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                IPS_DeleteVariableProfile(self::VOLUP_PROFILE);
+            }
+        }
+        if (!IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
+            IPS_CreateVariableProfile(self::VOLUP_PROFILE, VARIABLETYPE_INTEGER);
+        }
+        $p = IPS_GetVariableProfile(self::VOLUP_PROFILE);
+        foreach (($p['Associations'] ?? []) as $assoc) {
+            IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, (float)$assoc['Value'], '', '', -1);
+        }
+        IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 0, '', '', -1);
+        IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 1, 'Up', 'volume-up', -1);
+
+        // VolumeDown (Integer)
+        if (IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
+            $p = IPS_GetVariableProfile(self::VOLDOWN_PROFILE);
+            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                IPS_DeleteVariableProfile(self::VOLDOWN_PROFILE);
+            }
+        }
+        if (!IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
+            IPS_CreateVariableProfile(self::VOLDOWN_PROFILE, VARIABLETYPE_INTEGER);
+        }
+        $p = IPS_GetVariableProfile(self::VOLDOWN_PROFILE);
+        foreach (($p['Associations'] ?? []) as $assoc) {
+            IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, (float)$assoc['Value'], '', '', -1);
+        }
+        IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 0, '', '', -1);
+        IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 1, 'Down', 'volume-down', -1);
+    }
+
     private function ExecuteTransport(int $value): void
     {
         switch ($value) {
@@ -404,8 +502,6 @@ class MusicAssistantPlayer extends IPSModule
 
         $resp   = $this->maCall('player_queues/all');
         $result = $resp['result'];
-
-        $this->SendDebug('Queues RAW', json_encode($result, JSON_UNESCAPED_SLASHES), 0);
 
         if (is_array($result) && $this->isList($result)) {
             foreach ($result as $q) {
@@ -433,7 +529,6 @@ class MusicAssistantPlayer extends IPSModule
             }
         }
 
-        $this->SendDebug('Queue fallback', 'Using player_id as queue_id: ' . $playerId, 0);
         $this->SetBuffer('QueueId', $playerId);
         return $playerId;
     }
@@ -476,9 +571,7 @@ class MusicAssistantPlayer extends IPSModule
                     }
                 }
 
-                $out = array_values(array_unique($out));
-                $this->SendDebug('SyncGroup members', json_encode($out, JSON_UNESCAPED_SLASHES), 0);
-                return $out;
+                return array_values(array_unique($out));
             }
 
             return [];
