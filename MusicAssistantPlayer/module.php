@@ -82,7 +82,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
         $this->EnableAction('Mute');
 
-        // Volume (Rollback-Variante wie vorher: Slider + 2 Buttons)
+        // Volume (Rollback-Variante: Slider + 2 Buttons)
         $this->MaintainVariable('VolumeLevel', 'Volume', VARIABLETYPE_INTEGER, '~Volume', 70, true);
         $this->EnableAction('VolumeLevel');
 
@@ -164,19 +164,20 @@ class MusicAssistantPlayer extends IPSModule
                 } catch (Throwable $e) {
                     $this->SendDebug('Mute failed', $e->getMessage(), 0);
                     IPS_LogMessage('MusicAssistantPlayer', 'Mute failed: ' . $e->getMessage());
-                    // Wert nicht setzen -> UI bleibt konsistent
                 }
                 break;
 
             case 'VolumeLevel':
                 $level = max(0, min(100, (int)$Value));
                 $this->SetVolumeLevel($level);
-                $this->SetValue('VolumeLevel', $level);
+                // anschließend echten Wert spiegeln (falls MA intern anders setzt)
+                $this->PollState();
                 break;
 
             case 'VolumeUp':
                 if ((int)$Value === 1) {
                     $this->GroupVolumeUp();
+                    $this->PollState();
                 }
                 $this->SetValue('VolumeUp', 0);
                 break;
@@ -184,6 +185,7 @@ class MusicAssistantPlayer extends IPSModule
             case 'VolumeDown':
                 if ((int)$Value === 1) {
                     $this->GroupVolumeDown();
+                    $this->PollState();
                 }
                 $this->SetValue('VolumeDown', 0);
                 break;
@@ -211,7 +213,7 @@ class MusicAssistantPlayer extends IPSModule
     }
 
     /**
-     * Polling: Shuffle/Repeat + NowPlaying + (optional) Volume aus MA übernehmen.
+     * Polling: Shuffle/Repeat + NowPlaying + Volume (aus players/all) übernehmen.
      */
     public function PollState(): void
     {
@@ -221,78 +223,111 @@ class MusicAssistantPlayer extends IPSModule
             $resp   = $this->maCall('player_queues/all');
             $queues = $resp['result'] ?? null;
 
-            if (!is_array($queues) || !$this->isList($queues)) {
+            if (is_array($queues) && $this->isList($queues)) {
+                foreach ($queues as $q) {
+                    $qid = (string)($q['queue_id'] ?? '');
+                    if ($qid !== $queueId) {
+                        continue;
+                    }
+
+                    // Shuffle
+                    if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
+                        $shuffle = (bool)$q['shuffle_enabled'];
+                        if ((bool)$this->GetValue('Shuffle') !== $shuffle) {
+                            $this->SetValue('Shuffle', $shuffle);
+                        }
+                    }
+
+                    // Repeat
+                    if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
+                        $repeat = strtolower(trim((string)$q['repeat_mode']));
+                        if (in_array($repeat, ['off', 'one', 'all'], true)) {
+                            if ((string)$this->GetValue('Repeat') !== $repeat) {
+                                $this->SetValue('Repeat', $repeat);
+                            }
+                        }
+                    }
+
+                    // Now Playing - leeren wenn nichts spielt
+                    $state = strtolower(trim((string)($q['state'] ?? '')));
+                    $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
+
+                    $title  = '';
+                    $artist = '';
+                    $album  = '';
+
+                    if ($state !== 'idle' && $hasCurrent) {
+                        $mi = $q['current_item']['media_item'] ?? null;
+                        if (is_array($mi)) {
+                            $title = (string)($mi['name'] ?? '');
+
+                            if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
+                                $a0 = $mi['artists'][0];
+                                if (is_array($a0)) {
+                                    $artist = (string)($a0['name'] ?? '');
+                                } elseif (is_string($a0)) {
+                                    $artist = $a0;
+                                }
+                            }
+
+                            if (isset($mi['album']) && is_array($mi['album'])) {
+                                $album = (string)($mi['album']['name'] ?? '');
+                            }
+                        }
+                    }
+
+                    $this->setIfChangedString('NowTitle',  $title);
+                    $this->setIfChangedString('NowArtist', $artist);
+                    $this->setIfChangedString('NowAlbum',  $album);
+
+                    break;
+                }
+            }
+
+            // Volume zuverlässig aus players/all holen
+            $this->updateVolumeFromPlayersAll();
+        } catch (Throwable $e) {
+            $this->SendDebug('PollState failed', $e->getMessage(), 0);
+        }
+    }
+
+    private function updateVolumeFromPlayersAll(): void
+    {
+        try {
+            $pid = $this->playerId();
+
+            $resp = $this->maCall('players/all');
+            $players = $resp['result'] ?? null;
+
+            if (!is_array($players) || !$this->isList($players)) {
                 return;
             }
 
-            foreach ($queues as $q) {
-                $qid = (string)($q['queue_id'] ?? '');
-                if ($qid !== $queueId) {
+            foreach ($players as $p) {
+                $id = (string)($p['player_id'] ?? $p['id'] ?? '');
+                if ($id !== $pid) {
                     continue;
                 }
 
-                // Shuffle
-                if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
-                    $shuffle = (bool)$q['shuffle_enabled'];
-                    if ((bool)$this->GetValue('Shuffle') !== $shuffle) {
-                        $this->SetValue('Shuffle', $shuffle);
+                // mögliche Feldnamen abdecken
+                $vol = null;
+                foreach (['volume_level', 'volume', 'volumeLevel', 'group_volume_level', 'group_volume', 'groupVolumeLevel'] as $k) {
+                    if (isset($p[$k])) {
+                        $vol = (int)$p[$k];
+                        break;
                     }
                 }
 
-                // Repeat
-                if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
-                    $repeat = strtolower(trim((string)$q['repeat_mode']));
-                    if (in_array($repeat, ['off', 'one', 'all'], true)) {
-                        if ((string)$this->GetValue('Repeat') !== $repeat) {
-                            $this->SetValue('Repeat', $repeat);
-                        }
-                    }
-                }
-
-                // Volume (falls MA das Feld liefert)
-                if (isset($q['volume_level']) && @$this->GetIDForIdent('VolumeLevel') > 0) {
-                    $vol = max(0, min(100, (int)$q['volume_level']));
+                if ($vol !== null && @$this->GetIDForIdent('VolumeLevel') > 0) {
+                    $vol = max(0, min(100, $vol));
                     if ((int)$this->GetValue('VolumeLevel') !== $vol) {
                         $this->SetValue('VolumeLevel', $vol);
                     }
                 }
-
-                // Now Playing - leeren wenn nichts spielt
-                $state = strtolower(trim((string)($q['state'] ?? '')));
-                $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
-
-                $title  = '';
-                $artist = '';
-                $album  = '';
-
-                if ($state !== 'idle' && $hasCurrent) {
-                    $mi = $q['current_item']['media_item'] ?? null;
-                    if (is_array($mi)) {
-                        $title = (string)($mi['name'] ?? '');
-
-                        if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
-                            $a0 = $mi['artists'][0];
-                            if (is_array($a0)) {
-                                $artist = (string)($a0['name'] ?? '');
-                            } elseif (is_string($a0)) {
-                                $artist = $a0;
-                            }
-                        }
-
-                        if (isset($mi['album']) && is_array($mi['album'])) {
-                            $album = (string)($mi['album']['name'] ?? '');
-                        }
-                    }
-                }
-
-                $this->setIfChangedString('NowTitle',  $title);
-                $this->setIfChangedString('NowArtist', $artist);
-                $this->setIfChangedString('NowAlbum',  $album);
-
                 break;
             }
         } catch (Throwable $e) {
-            $this->SendDebug('PollState failed', $e->getMessage(), 0);
+            $this->SendDebug('updateVolumeFromPlayersAll failed', $e->getMessage(), 0);
         }
     }
 
