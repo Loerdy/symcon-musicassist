@@ -378,35 +378,33 @@ class MusicAssistantPlayer extends IPSModule
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', 'arrows-repeat', -1);
     }
 
-    private function ensureVolumeButtonProfiles(): void
-    {
-        // VolumeUp
-        if (IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
-            $p = IPS_GetVariableProfile(self::VOLUP_PROFILE);
-            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-                IPS_DeleteVariableProfile(self::VOLUP_PROFILE);
-            }
-        }
-        if (!IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
-            IPS_CreateVariableProfile(self::VOLUP_PROFILE, VARIABLETYPE_INTEGER);
-        }
-        // Associations nur setzen (keine Löschversuche)
-        IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 0, '', '', -1);
-        IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 1, 'Up', 'volume-up', -1);
 
-        // VolumeDown
-        if (IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
-            $p = IPS_GetVariableProfile(self::VOLDOWN_PROFILE);
-            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-                IPS_DeleteVariableProfile(self::VOLDOWN_PROFILE);
-            }
+    private function ensureVolumeButtonProfiles(): void
+{
+    // VolumeUp (Integer)
+    if (IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
+        $p = IPS_GetVariableProfile(self::VOLUP_PROFILE);
+        if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            IPS_DeleteVariableProfile(self::VOLUP_PROFILE);
         }
-        if (!IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
-            IPS_CreateVariableProfile(self::VOLDOWN_PROFILE, VARIABLETYPE_INTEGER);
-        }
-        IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 0, '-', '', -1);
-        IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 1, 'Down', 'volume-down', -1);
     }
+    if (!IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
+        IPS_CreateVariableProfile(self::VOLUP_PROFILE, VARIABLETYPE_INTEGER);
+    }
+    IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 1, 'Up', 'volume-up', -1);
+
+    // VolumeDown (Integer)
+    if (IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
+        $p = IPS_GetVariableProfile(self::VOLDOWN_PROFILE);
+        if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            IPS_DeleteVariableProfile(self::VOLDOWN_PROFILE);
+        }
+    }
+    if (!IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
+        IPS_CreateVariableProfile(self::VOLDOWN_PROFILE, VARIABLETYPE_INTEGER);
+    }
+    IPS_SetVariableProfileAssociation(self::VOLDOWN_PROFILE, 1, 'Down', 'volume-down', -1);
+}
 
     private function ExecuteTransport(int $value): void
     {
