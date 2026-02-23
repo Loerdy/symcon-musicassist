@@ -88,7 +88,6 @@ class MusicAssistantPlayer extends IPSModule
 
         // Volume Up/Down Buttons (eigene INTEGER-Profile)
         $this->ensureVolumeButtonProfiles();
-
         $this->MaintainVariable('VolumeUp', 'Volume +', VARIABLETYPE_INTEGER, self::VOLUP_PROFILE, 80, true);
         $this->EnableAction('VolumeUp');
 
@@ -178,7 +177,6 @@ class MusicAssistantPlayer extends IPSModule
                 if ((int)$Value === 1) {
                     $this->GroupVolumeUp();
                 }
-                // Button zurücksetzen
                 $this->SetValue('VolumeUp', 0);
                 break;
 
@@ -310,36 +308,6 @@ class MusicAssistantPlayer extends IPSModule
 
     // --------- MA Commands ---------
 
-    public function Next(): void
-    {
-        $this->maCall('players/cmd/next', ['player_id' => $this->playerId()]);
-    }
-
-    public function Previous(): void
-    {
-        $this->maCall('players/cmd/previous', ['player_id' => $this->playerId()]);
-    }
-
-    public function Pause(): void
-    {
-        $this->maCall('players/cmd/pause', ['player_id' => $this->playerId()]);
-    }
-
-    public function Play(): void
-    {
-        $this->maCall('players/cmd/play', ['player_id' => $this->playerId()]);
-    }
-
-    public function PlayPause(): void
-    {
-        $this->maCall('players/cmd/play_pause', ['player_id' => $this->playerId()]);
-    }
-
-    public function Stop(): void
-    {
-        $this->maCall('players/cmd/stop', ['player_id' => $this->playerId()]);
-    }
-
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -363,8 +331,8 @@ class MusicAssistantPlayer extends IPSModule
     public function SetVolumeLevel(int $level): void
     {
         $this->maCall('players/cmd/volume_set', [
-            'player_id'     => $this->playerId(),
-            'volume_level'  => $level
+            'player_id'    => $this->playerId(),
+            'volume_level' => $level
         ]);
     }
 
@@ -382,39 +350,12 @@ class MusicAssistantPlayer extends IPSModule
         ]);
     }
 
-    // Mute (bei SyncGroup ggf. auf Member ausweichen)
     public function SetMute(bool $muted): void
     {
-        $playerId = $this->playerId();
-
-        try {
-            $this->maCall('players/cmd/volume_mute', [
-                'player_id' => $playerId,
-                'muted'     => $muted
-            ]);
-            return;
-        } catch (Throwable $e) {
-            if (str_starts_with($playerId, 'syncgroup_')) {
-                $members = $this->getSyncGroupMembers($playerId);
-                if (count($members) === 0) {
-                    throw $e;
-                }
-
-                foreach ($members as $mid) {
-                    try {
-                        $this->maCall('players/cmd/volume_mute', [
-                            'player_id' => $mid,
-                            'muted'     => $muted
-                        ]);
-                    } catch (Throwable $inner) {
-                        $this->SendDebug('Mute member failed', $mid . ': ' . $inner->getMessage(), 0);
-                    }
-                }
-                return;
-            }
-
-            throw $e;
-        }
+        $this->maCall('players/cmd/volume_mute', [
+            'player_id' => $this->playerId(),
+            'muted'     => $muted
+        ]);
     }
 
     // --------- intern ---------
@@ -431,12 +372,7 @@ class MusicAssistantPlayer extends IPSModule
             IPS_CreateVariableProfile(self::REPEAT_PROFILE, VARIABLETYPE_STRING);
         }
 
-        // Associations zurücksetzen
-        $p = IPS_GetVariableProfile(self::REPEAT_PROFILE);
-        foreach (($p['Associations'] ?? []) as $assoc) {
-            IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, (string)$assoc['Value'], '', '', -1);
-        }
-
+        // Associations zurücksetzen (defensiv: keine Deletes)
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'off', 'Off', 'ban', -1);
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'one', 'One', 'arrows-repeat-1', -1);
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', 'arrows-repeat', -1);
@@ -444,7 +380,7 @@ class MusicAssistantPlayer extends IPSModule
 
     private function ensureVolumeButtonProfiles(): void
     {
-        // VolumeUp (Integer)
+        // VolumeUp
         if (IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
             $p = IPS_GetVariableProfile(self::VOLUP_PROFILE);
             if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
@@ -454,11 +390,11 @@ class MusicAssistantPlayer extends IPSModule
         if (!IPS_VariableProfileExists(self::VOLUP_PROFILE)) {
             IPS_CreateVariableProfile(self::VOLUP_PROFILE, VARIABLETYPE_INTEGER);
         }
-        // Associations einfach setzen (überschreibt vorhandene sauber)
+        // Associations nur setzen (keine Löschversuche)
         IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 0, '', '', -1);
         IPS_SetVariableProfileAssociation(self::VOLUP_PROFILE, 1, 'Up', 'volume-up', -1);
 
-        // VolumeDown (Integer)
+        // VolumeDown
         if (IPS_VariableProfileExists(self::VOLDOWN_PROFILE)) {
             $p = IPS_GetVariableProfile(self::VOLDOWN_PROFILE);
             if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
@@ -475,11 +411,11 @@ class MusicAssistantPlayer extends IPSModule
     private function ExecuteTransport(int $value): void
     {
         switch ($value) {
-            case 0: $this->Previous(); break;
-            case 1: $this->Stop();     break;
-            case 2: $this->Play();     break;
-            case 3: $this->Pause();    break;
-            case 4: $this->Next();     break;
+            case 0: $this->maCall('players/cmd/previous', ['player_id' => $this->playerId()]); break;
+            case 1: $this->maCall('players/cmd/stop',     ['player_id' => $this->playerId()]); break;
+            case 2: $this->maCall('players/cmd/play',     ['player_id' => $this->playerId()]); break;
+            case 3: $this->maCall('players/cmd/pause',    ['player_id' => $this->playerId()]); break;
+            case 4: $this->maCall('players/cmd/next',     ['player_id' => $this->playerId()]); break;
             default: break;
         }
     }
@@ -505,12 +441,10 @@ class MusicAssistantPlayer extends IPSModule
                     $this->SetBuffer('QueueId', $qid);
                     return $qid;
                 }
-
                 if ($qid !== '' && $qid === $playerId) {
                     $this->SetBuffer('QueueId', $qid);
                     return $qid;
                 }
-
                 if ($qid !== '' && isset($q['players']) && is_array($q['players'])) {
                     foreach ($q['players'] as $p) {
                         if ((string)$p === $playerId) {
@@ -524,53 +458,6 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->SetBuffer('QueueId', $playerId);
         return $playerId;
-    }
-
-    private function getSyncGroupMembers(string $syncGroupId): array
-    {
-        $resp   = $this->maCall('players/all');
-        $result = $resp['result'];
-
-        if (!is_array($result) || !$this->isList($result)) {
-            return [];
-        }
-
-        foreach ($result as $p) {
-            $pid = (string)($p['player_id'] ?? $p['id'] ?? '');
-            if ($pid !== $syncGroupId) {
-                continue;
-            }
-
-            $candidates = [
-                $p['group_members'] ?? null,
-                $p['members'] ?? null,
-                $p['players'] ?? null,
-                $p['child_player_ids'] ?? null,
-                $p['group_childs'] ?? null
-            ];
-
-            foreach ($candidates as $cand) {
-                if (!is_array($cand)) continue;
-
-                $out = [];
-                foreach ($cand as $x) {
-                    if (is_string($x) && $x !== '') {
-                        $out[] = $x;
-                    } elseif (is_array($x)) {
-                        $id = (string)($x['player_id'] ?? $x['id'] ?? '');
-                        if ($id !== '') {
-                            $out[] = $id;
-                        }
-                    }
-                }
-
-                return array_values(array_unique($out));
-            }
-
-            return [];
-        }
-
-        return [];
     }
 
     private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): void
