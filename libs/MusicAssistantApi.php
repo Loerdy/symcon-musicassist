@@ -23,11 +23,43 @@ trait MusicAssistantApi
         return (string)$id;
     }
 
+    private function maGetTimeoutMs(int $fallback): int
+    {
+        // optional: per Property konfigurierbar
+        if (method_exists($this, 'ReadPropertyInteger')) {
+            $v = (int)@$this->ReadPropertyInteger('HttpTimeoutMs');
+            if ($v > 0) {
+                return $v;
+            }
+        }
+        return $fallback;
+    }
+
+    private function maGetConnectTimeoutMs(int $fallback): int
+    {
+        if (method_exists($this, 'ReadPropertyInteger')) {
+            $v = (int)@$this->ReadPropertyInteger('HttpConnectTimeoutMs');
+            if ($v > 0) {
+                return $v;
+            }
+        }
+        return $fallback;
+    }
+
+    private function maSemaphoreName(): string
+    {
+        // pro Instanz serialisieren
+        return 'MA_API_' . (string)$this->InstanceID;
+    }
+
     /**
      * @return array{raw:mixed, result:mixed, success:bool, http_code:int, body:string}
      */
-    protected function maCall(string $command, array $args = [], int $timeoutMs = 8000): array
+    protected function maCall(string $command, array $args = [], int $timeoutMs = 20000): array
     {
+        $timeoutMs = $this->maGetTimeoutMs($timeoutMs);
+        $connectTimeoutMs = $this->maGetConnectTimeoutMs(5000);
+
         $payload = [
             'message_id' => $this->maNextMessageId(),
             'command'    => $command,
@@ -46,30 +78,41 @@ trait MusicAssistantApi
         $reqJson = json_encode($payload, JSON_UNESCAPED_SLASHES);
         $this->SendDebug('MA Request', $reqJson, 0);
 
-        $ch = curl_init($this->maApiUrl());
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER     => true,
-            CURLOPT_POST               => true,
-            CURLOPT_HTTPHEADER         => $headers,
-            CURLOPT_POSTFIELDS         => $reqJson,
-            CURLOPT_TIMEOUT_MS         => $timeoutMs,
-            CURLOPT_CONNECTTIMEOUT_MS  => 3000,
-            CURLOPT_FOLLOWLOCATION     => true
-        ]);
+        // Serialisieren: PollState + RequestAction dürfen nicht parallel laufen
+        if (!IPS_SemaphoreEnter($this->maSemaphoreName(), 15000)) {
+            throw new Exception('MA API semaphore timeout (parallel requests blocked)');
+        }
 
-        $respBody = curl_exec($ch);
-        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err      = (string)curl_error($ch);
-        curl_close($ch);
+        try {
+            $ch = curl_init($this->maApiUrl());
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER     => true,
+                CURLOPT_POST               => true,
+                CURLOPT_HTTPHEADER         => $headers,
+                CURLOPT_POSTFIELDS         => $reqJson,
+                CURLOPT_TIMEOUT_MS         => $timeoutMs,
+                CURLOPT_CONNECTTIMEOUT_MS  => $connectTimeoutMs,
+                CURLOPT_FOLLOWLOCATION     => true
+            ]);
+
+            $respBody = curl_exec($ch);
+            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $err      = (string)curl_error($ch);
+            curl_close($ch);
+        } finally {
+            IPS_SemaphoreLeave($this->maSemaphoreName());
+        }
 
         if ($respBody === false || $respBody === null) {
             throw new Exception('HTTP request failed: ' . $err);
         }
 
         $body = (string)$respBody;
-        $this->SendDebug('MA HTTP', 'Code=' . $httpCode . ' Body=' . $body, 0);
 
+        // Debug Body nicht komplett loggen (kann riesig werden) -> nur Snippet
         $trim = trim($body);
+        $snippet = substr($trim, 0, 800);
+        $this->SendDebug('MA HTTP', 'Code=' . $httpCode . ' BodySnippet=' . $snippet, 0);
 
         if (($trim === '' && ($httpCode === 200 || $httpCode === 204)) || $trim === 'null') {
             return [
@@ -83,7 +126,6 @@ trait MusicAssistantApi
 
         $data = json_decode($body, true);
         if (!is_array($data)) {
-            $snippet = substr($trim, 0, 300);
             throw new Exception('Invalid JSON response from Music Assistant. HTTP ' . $httpCode . ' Body: ' . $snippet);
         }
 
