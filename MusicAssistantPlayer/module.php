@@ -47,10 +47,13 @@ class MusicAssistantPlayer extends IPSModule
         $this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20);
 
         $vidPlaylist = @$this->GetIDForIdent('Playlist');
-        if ($vidPlaylist > 0) IPS_SetIcon($vidPlaylist, 'list-music');
-
+        if ($vidPlaylist > 0) {
+            IPS_SetIcon($vidPlaylist, 'list-music');
+        }
         $vidRadio = @$this->GetIDForIdent('Radio');
-        if ($vidRadio > 0) IPS_SetIcon($vidRadio, 'radio');
+        if ($vidRadio > 0) {
+            IPS_SetIcon($vidRadio, 'radio');
+        }
 
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
@@ -79,7 +82,9 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('NowArtist', 'Interpret', VARIABLETYPE_STRING, '~Artist', 120, true);
         $this->MaintainVariable('NowAlbum',  'Album',     VARIABLETYPE_STRING, '',        130, true);
         $vidAlbum = @$this->GetIDForIdent('NowAlbum');
-        if ($vidAlbum > 0) IPS_SetIcon($vidAlbum, 'album');
+        if ($vidAlbum > 0) {
+            IPS_SetIcon($vidAlbum, 'album');
+        }
 
         if (@$this->GetIDForIdent('Repeat') > 0 && (string)@$this->GetValue('Repeat') === '') {
             $this->SetValue('Repeat', 'off');
@@ -88,7 +93,6 @@ class MusicAssistantPlayer extends IPSModule
         $sec = (int)$this->ReadPropertyInteger('StateSyncInterval');
         $this->SetTimerInterval('PollState', ($sec > 0) ? $sec * 1000 : 0);
 
-        // Formular-Konfigfeld initial befüllen (best effort)
         $this->UpdateConfigView();
     }
 
@@ -105,9 +109,10 @@ class MusicAssistantPlayer extends IPSModule
 
                 ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
                 [
-                    'type' => 'MultiLineTextBox',
+                    'type' => 'TextBox',
                     'name' => 'ConfigView',
                     'caption' => '',
+                    'multiline' => true,
                     'enabled' => false,
                     'value' => ''
                 ]
@@ -269,7 +274,6 @@ class MusicAssistantPlayer extends IPSModule
         ];
 
         $text = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        // Feld im Formular aktualisieren
         $this->UpdateFormField('ConfigView', 'value', $text);
     }
 
@@ -365,8 +369,6 @@ class MusicAssistantPlayer extends IPSModule
         if ((string)$this->GetValue($ident) !== $value) $this->SetValue($ident, $value);
     }
 
-    // --------- MA Commands ---------
-
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
@@ -418,8 +420,6 @@ class MusicAssistantPlayer extends IPSModule
     {
         $this->maCall('players/cmd/group_volume_down', ['player_id' => $this->playerId()]);
     }
-
-    // --------- helpers ---------
 
     private function getSyncGroupMembers(string $syncGroupId): array
     {
