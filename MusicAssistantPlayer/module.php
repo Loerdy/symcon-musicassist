@@ -18,27 +18,29 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('Host', '127.0.0.1');
         $this->RegisterPropertyInteger('Port', 8095);
         $this->RegisterPropertyString('Token', '');
+
+        // Player binding
         $this->RegisterPropertyString('PlayerID', '');
 
-        // Playlists
+        // Playlists / Radios (vom Configurator übergeben)
         $this->RegisterPropertyString('PlaylistProfile', '');
         $this->RegisterPropertyString('PlaylistMap', '{}');
 
-        // Radios
         $this->RegisterPropertyString('RadioProfile', '');
         $this->RegisterPropertyString('RadioMap', '{}');
 
-        // State Sync (Polling) - Sekunden, 0 = aus
+        // Polling (0 = aus)
         $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
+        // API buffers
         $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('QueueId', '');
 
-        // Timer zum Zurücksetzen der Auswahl auf 0 ("-")
+        // Timer: Auswahl zurück auf "-"
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
 
-        // Timer für State Polling
+        // Timer: Polling
         $this->RegisterTimer('PollState', 0, 'MA_PollState($_IPS["TARGET"]);');
     }
 
@@ -46,26 +48,24 @@ class MusicAssistantPlayer extends IPSModule
     {
         parent::ApplyChanges();
 
-        // Queue-Cache leeren, damit SyncGroup/Player-Wechsel sauber ist
+        // Cache bei Änderungen immer leeren
         $this->SetBuffer('QueueId', '');
 
-        // Auswahl-Variablen
+        // Auswahl-Variablen (Integer-Profile aus Configurator)
         $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
         $this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20);
 
-        // Icons direkt an den Variablen setzen (UI-Kosmetik)
+        // Icons direkt an den Variablen
         $vidPlaylist = @$this->GetIDForIdent('Playlist');
         if ($vidPlaylist > 0) {
             IPS_SetIcon($vidPlaylist, 'list-music');
         }
-
         $vidRadio = @$this->GetIDForIdent('Radio');
         if ($vidRadio > 0) {
             IPS_SetIcon($vidRadio, 'radio');
         }
 
-        // Transport-Variable mit Legacy Profil ~PlaybackPreviousNext
-        // Werte-Mapping: 0=Previous, 1=Stop, 2=Play, 3=Pause, 4=Next
+        // Transport (Legacy)
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
 
@@ -82,11 +82,10 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
         $this->EnableAction('Mute');
 
-        // Volume (Rollback-Variante: Slider + 2 Buttons)
+        // Volume (Slider + Buttons)
         $this->MaintainVariable('VolumeLevel', 'Volume', VARIABLETYPE_INTEGER, '~Volume', 70, true);
         $this->EnableAction('VolumeLevel');
 
-        // Buttons: group_volume_up / group_volume_down
         $this->ensureVolumeButtonProfiles();
         $this->MaintainVariable('VolumeUp', 'Volume +', VARIABLETYPE_INTEGER, self::VOLUP_PROFILE, 80, true);
         $this->EnableAction('VolumeUp');
@@ -98,18 +97,14 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('NowTitle',  'Titel',     VARIABLETYPE_STRING, '~Song',   110, true);
         $this->MaintainVariable('NowArtist', 'Interpret', VARIABLETYPE_STRING, '~Artist', 120, true);
         $this->MaintainVariable('NowAlbum',  'Album',     VARIABLETYPE_STRING, '',        130, true);
-
         $vidAlbum = @$this->GetIDForIdent('NowAlbum');
         if ($vidAlbum > 0) {
             IPS_SetIcon($vidAlbum, 'album');
         }
 
-        // Initialwert Repeat
-        if (@$this->GetIDForIdent('Repeat') > 0) {
-            $cur = (string)@$this->GetValue('Repeat');
-            if ($cur === '') {
-                $this->SetValue('Repeat', 'off');
-            }
+        // Repeat Initialwert (falls leer)
+        if (@$this->GetIDForIdent('Repeat') > 0 && (string)@$this->GetValue('Repeat') === '') {
+            $this->SetValue('Repeat', 'off');
         }
 
         // Polling-Timer setzen
@@ -117,34 +112,87 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetTimerInterval('PollState', ($sec > 0) ? $sec * 1000 : 0);
     }
 
+    public function GetConfigurationForm(): string
+    {
+        $form = [
+            'elements' => [
+                ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
+                ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
+                ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
+
+                ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
+                ['type' => 'NumberSpinner', 'name' => 'StateSyncInterval', 'caption' => 'Polling (Sek.)'],
+
+                ['type' => 'Label', 'caption' => 'Hinweis: Nach Änderung der Player ID: Übernehmen, dann optional Queue-Cache leeren und PollState ausführen.'],
+            ],
+            'actions' => [
+                ['type' => 'Button', 'caption' => 'Konfiguration anzeigen (Log/Debug)', 'onClick' => 'IPS_RequestAction($id, "ShowConfig", true);'],
+                ['type' => 'Button', 'caption' => 'Queue-Cache leeren', 'onClick' => 'IPS_RequestAction($id, "ClearQueueCache", true);'],
+                ['type' => 'Button', 'caption' => 'PollState jetzt', 'onClick' => 'IPS_RequestAction($id, "PollNow", true);'],
+            ]
+        ];
+
+        return json_encode($form);
+    }
+
     public function RequestAction($Ident, $Value): void
     {
         switch ($Ident) {
+            case 'ShowConfig':
+                $this->ShowConfig();
+                break;
+
+            case 'ClearQueueCache':
+                $this->ClearQueueCache();
+                break;
+
+            case 'PollNow':
+                $this->PollState();
+                break;
+
             case 'Playlist':
-                $itemId = (int)$Value;
-                $uri = $this->resolveUriFromMap($itemId, 'PlaylistMap', 'music/playlists/library_items');
-                $this->PlayMediaUri($uri);
-                $this->SetValue('Playlist', $itemId);
-                $this->SetTimerInterval('ResetPlaylist', 5000);
+                try {
+                    $itemId = (int)$Value;
+                    if ($itemId > 0) {
+                        $uri = $this->resolveUriFromMap($itemId, 'PlaylistMap', 'music/playlists/library_items');
+                        $this->PlayMediaUri($uri);
+                        $this->SetValue('Playlist', $itemId);
+                        $this->SetTimerInterval('ResetPlaylist', 5000);
+                        $this->PollState();
+                    }
+                } catch (Throwable $e) {
+                    $this->SendDebug('Playlist start failed', $e->getMessage(), 0);
+                    IPS_LogMessage('MusicAssistantPlayer', 'Playlist start failed: ' . $e->getMessage());
+                }
                 break;
 
             case 'Radio':
-                $itemId = (int)$Value;
-                $uri = $this->resolveUriFromMap($itemId, 'RadioMap', 'music/radios/library_items');
-                $this->PlayMediaUri($uri);
-                $this->SetValue('Radio', $itemId);
-                $this->SetTimerInterval('ResetRadio', 5000);
+                try {
+                    $itemId = (int)$Value;
+                    if ($itemId > 0) {
+                        $uri = $this->resolveUriFromMap($itemId, 'RadioMap', 'music/radios/library_items');
+                        $this->PlayMediaUri($uri);
+                        $this->SetValue('Radio', $itemId);
+                        $this->SetTimerInterval('ResetRadio', 5000);
+                        $this->PollState();
+                    }
+                } catch (Throwable $e) {
+                    $this->SendDebug('Radio start failed', $e->getMessage(), 0);
+                    IPS_LogMessage('MusicAssistantPlayer', 'Radio start failed: ' . $e->getMessage());
+                }
                 break;
 
             case 'Transport':
                 $this->ExecuteTransport((int)$Value);
                 $this->SetValue('Transport', (int)$Value);
+                $this->PollState();
                 break;
 
             case 'Shuffle':
                 $enabled = (bool)$Value;
                 $this->SetShuffle($enabled);
                 $this->SetValue('Shuffle', $enabled);
+                $this->PollState();
                 break;
 
             case 'Repeat':
@@ -154,6 +202,7 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 $this->SetRepeat($mode);
                 $this->SetValue('Repeat', $mode);
+                $this->PollState();
                 break;
 
             case 'Mute':
@@ -161,6 +210,7 @@ class MusicAssistantPlayer extends IPSModule
                 try {
                     $this->SetMute($muted);
                     $this->SetValue('Mute', $muted);
+                    $this->PollState();
                 } catch (Throwable $e) {
                     $this->SendDebug('Mute failed', $e->getMessage(), 0);
                     IPS_LogMessage('MusicAssistantPlayer', 'Mute failed: ' . $e->getMessage());
@@ -169,23 +219,38 @@ class MusicAssistantPlayer extends IPSModule
 
             case 'VolumeLevel':
                 $level = max(0, min(100, (int)$Value));
-                $this->SetVolumeLevel($level);
-                // anschließend echten Wert spiegeln (falls MA intern anders setzt)
-                $this->PollState();
+                try {
+                    $this->SetVolumeLevel($level);
+                    // nicht blind setzen -> per PollState den echten Wert spiegeln
+                    $this->PollState();
+                } catch (Throwable $e) {
+                    $this->SendDebug('VolumeSet failed', $e->getMessage(), 0);
+                    IPS_LogMessage('MusicAssistantPlayer', 'VolumeSet failed: ' . $e->getMessage());
+                }
                 break;
 
             case 'VolumeUp':
                 if ((int)$Value === 1) {
-                    $this->GroupVolumeUp();
-                    $this->PollState();
+                    try {
+                        $this->GroupVolumeUp();
+                        $this->PollState();
+                    } catch (Throwable $e) {
+                        $this->SendDebug('VolumeUp failed', $e->getMessage(), 0);
+                        IPS_LogMessage('MusicAssistantPlayer', 'VolumeUp failed: ' . $e->getMessage());
+                    }
                 }
                 $this->SetValue('VolumeUp', 0);
                 break;
 
             case 'VolumeDown':
                 if ((int)$Value === 1) {
-                    $this->GroupVolumeDown();
-                    $this->PollState();
+                    try {
+                        $this->GroupVolumeDown();
+                        $this->PollState();
+                    } catch (Throwable $e) {
+                        $this->SendDebug('VolumeDown failed', $e->getMessage(), 0);
+                        IPS_LogMessage('MusicAssistantPlayer', 'VolumeDown failed: ' . $e->getMessage());
+                    }
                 }
                 $this->SetValue('VolumeDown', 0);
                 break;
@@ -212,6 +277,34 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
+    // ----- Config helpers (Buttons im Form) -----
+
+    public function ShowConfig(): void
+    {
+        $cfg = [
+            'InstanceID'         => $this->InstanceID,
+            'Host'               => $this->ReadPropertyString('Host'),
+            'Port'               => $this->ReadPropertyInteger('Port'),
+            'PlayerID'           => $this->ReadPropertyString('PlayerID'),
+            'StateSyncInterval'  => $this->ReadPropertyInteger('StateSyncInterval'),
+            'PlaylistProfile'    => $this->ReadPropertyString('PlaylistProfile'),
+            'RadioProfile'       => $this->ReadPropertyString('RadioProfile'),
+            'QueueIdCache'       => (string)$this->GetBuffer('QueueId'),
+            'MsgId'              => (string)$this->GetBuffer('MsgId'),
+        ];
+
+        $text = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        $this->SendDebug('InstanceConfig', $text, 0);
+        IPS_LogMessage('MusicAssistantPlayer', "Instance {$this->InstanceID} config:\n" . $text);
+    }
+
+    public function ClearQueueCache(): void
+    {
+        $this->SetBuffer('QueueId', '');
+        $this->SendDebug('QueueCache', 'cleared', 0);
+        IPS_LogMessage('MusicAssistantPlayer', "Instance {$this->InstanceID}: QueueId cache cleared");
+    }
+
     /**
      * Polling: Shuffle/Repeat + NowPlaying + Volume (aus players/all) übernehmen.
      */
@@ -220,13 +313,13 @@ class MusicAssistantPlayer extends IPSModule
         try {
             $queueId = $this->getQueueIdForPlayer();
 
+            // Queue state (shuffle/repeat/nowplaying)
             $resp   = $this->maCall('player_queues/all');
             $queues = $resp['result'] ?? null;
 
             if (is_array($queues) && $this->isList($queues)) {
                 foreach ($queues as $q) {
-                    $qid = (string)($q['queue_id'] ?? '');
-                    if ($qid !== $queueId) {
+                    if ((string)($q['queue_id'] ?? '') !== $queueId) {
                         continue;
                     }
 
@@ -241,50 +334,39 @@ class MusicAssistantPlayer extends IPSModule
                     // Repeat
                     if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
                         $repeat = strtolower(trim((string)$q['repeat_mode']));
-                        if (in_array($repeat, ['off', 'one', 'all'], true)) {
-                            if ((string)$this->GetValue('Repeat') !== $repeat) {
-                                $this->SetValue('Repeat', $repeat);
-                            }
+                        if (in_array($repeat, ['off', 'one', 'all'], true) && (string)$this->GetValue('Repeat') !== $repeat) {
+                            $this->SetValue('Repeat', $repeat);
                         }
                     }
 
-                    // Now Playing - leeren wenn nichts spielt
+                    // Now Playing
                     $state = strtolower(trim((string)($q['state'] ?? '')));
                     $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
 
-                    $title  = '';
-                    $artist = '';
-                    $album  = '';
-
+                    $title = $artist = $album = '';
                     if ($state !== 'idle' && $hasCurrent) {
                         $mi = $q['current_item']['media_item'] ?? null;
                         if (is_array($mi)) {
                             $title = (string)($mi['name'] ?? '');
-
                             if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
                                 $a0 = $mi['artists'][0];
-                                if (is_array($a0)) {
-                                    $artist = (string)($a0['name'] ?? '');
-                                } elseif (is_string($a0)) {
-                                    $artist = $a0;
-                                }
+                                $artist = is_array($a0) ? (string)($a0['name'] ?? '') : (string)$a0;
                             }
-
                             if (isset($mi['album']) && is_array($mi['album'])) {
                                 $album = (string)($mi['album']['name'] ?? '');
                             }
                         }
                     }
 
-                    $this->setIfChangedString('NowTitle',  $title);
+                    $this->setIfChangedString('NowTitle', $title);
                     $this->setIfChangedString('NowArtist', $artist);
-                    $this->setIfChangedString('NowAlbum',  $album);
+                    $this->setIfChangedString('NowAlbum', $album);
 
                     break;
                 }
             }
 
-            // Volume zuverlässig aus players/all holen
+            // Volume bevorzugt aus players/all (Feldnamen variieren je nach Player)
             $this->updateVolumeFromPlayersAll();
         } catch (Throwable $e) {
             $this->SendDebug('PollState failed', $e->getMessage(), 0);
@@ -309,7 +391,6 @@ class MusicAssistantPlayer extends IPSModule
                     continue;
                 }
 
-                // mögliche Feldnamen abdecken
                 $vol = null;
                 foreach (['volume_level', 'volume', 'volumeLevel', 'group_volume_level', 'group_volume', 'groupVolumeLevel'] as $k) {
                     if (isset($p[$k])) {
@@ -333,8 +414,7 @@ class MusicAssistantPlayer extends IPSModule
 
     private function setIfChangedString(string $ident, string $value): void
     {
-        $vid = @$this->GetIDForIdent($ident);
-        if ($vid <= 0) {
+        if (@$this->GetIDForIdent($ident) <= 0) {
             return;
         }
         if ((string)$this->GetValue($ident) !== $value) {
@@ -357,19 +437,14 @@ class MusicAssistantPlayer extends IPSModule
     }
 
     /**
-     * Mute mit SyncGroup-Fallback:
-     * - direkt probieren
-     * - bei 500 (SyncGroup) -> Mitglieder muten
+     * Mute mit SyncGroup-Fallback (MA gibt bei syncgroup_* häufig 500 beim direkten mute)
      */
     public function SetMute(bool $muted): void
     {
         $playerId = $this->playerId();
 
         try {
-            $this->maCall('players/cmd/volume_mute', [
-                'player_id' => $playerId,
-                'muted'     => $muted
-            ]);
+            $this->maCall('players/cmd/volume_mute', ['player_id' => $playerId, 'muted' => $muted]);
             return;
         } catch (Throwable $e) {
             if (str_starts_with($playerId, 'syncgroup_')) {
@@ -377,33 +452,25 @@ class MusicAssistantPlayer extends IPSModule
                 if (count($members) === 0) {
                     throw $e;
                 }
-
                 foreach ($members as $mid) {
                     try {
-                        $this->maCall('players/cmd/volume_mute', [
-                            'player_id' => $mid,
-                            'muted'     => $muted
-                        ]);
+                        $this->maCall('players/cmd/volume_mute', ['player_id' => $mid, 'muted' => $muted]);
                     } catch (Throwable $inner) {
                         $this->SendDebug('Mute member failed', $mid . ': ' . $inner->getMessage(), 0);
                     }
                 }
                 return;
             }
-
             throw $e;
         }
     }
 
     public function SetVolumeLevel(int $level): void
     {
-        $this->maCall('players/cmd/volume_set', [
-            'player_id'    => $this->playerId(),
-            'volume_level' => $level
-        ]);
+        $this->maCall('players/cmd/volume_set', ['player_id' => $this->playerId(), 'volume_level' => $level]);
     }
 
-    // Buttons (Rollback-Variante): Group Volume Up/Down
+    // Rollback-Variante für Buttons: group_volume_up/down
     public function GroupVolumeUp(): void
     {
         $this->maCall('players/cmd/group_volume_up', ['player_id' => $this->playerId()]);
@@ -414,7 +481,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/group_volume_down', ['player_id' => $this->playerId()]);
     }
 
-    // --------- intern ---------
+    // --------- internal helpers ---------
 
     private function getSyncGroupMembers(string $syncGroupId): array
     {
@@ -500,7 +567,7 @@ class MusicAssistantPlayer extends IPSModule
             IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
         }
 
-        // Nur Wert 1 als "Button" (kein Wert 0 -> verhindert Lösch-Warnungen)
+        // Nur Wert 1 als "Button" (kein Wert 0 -> keine Lösch-Warnungen)
         IPS_SetVariableProfileAssociation($profile, 1, $caption, $icon, -1);
     }
 
@@ -631,7 +698,7 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Media URI is empty');
         }
 
-        $queueId = $this->playerId();
+        $queueId = $this->playerId(); // MA akzeptiert hier in deinem Setup die PlayerID als queue_id (SyncGroup etc.)
         $this->maCall('player_queues/play_media', [
             'queue_id' => $queueId,
             'media'    => $uri,
