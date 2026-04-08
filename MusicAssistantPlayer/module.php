@@ -125,8 +125,14 @@ class MusicAssistantPlayer extends IPSModule
 
                 ['type' => 'Label', 'caption' => 'Hinweis: Nach Änderung der Player ID: Übernehmen, dann optional Queue-Cache leeren und PollState ausführen.'],
 
-                // PopupAlert (Text wird per Action gesetzt)
-                ['type' => 'PopupAlert', 'name' => 'ConfigPopup', 'caption' => 'Instanz-Konfiguration', 'text' => '']
+                // Symcon 9: PopupAlert benötigt closeCaption
+                [
+                    'type' => 'PopupAlert',
+                    'name' => 'ConfigPopup',
+                    'caption' => 'Instanz-Konfiguration',
+                    'text' => '',
+                    'closeCaption' => 'OK'
+                ]
             ],
             'actions' => [
                 ['type' => 'Button', 'caption' => 'Konfiguration anzeigen (Popup)', 'onClick' => 'IPS_RequestAction($id, "ShowConfigPopup", true);'],
@@ -296,12 +302,8 @@ class MusicAssistantPlayer extends IPSModule
         ];
 
         $text = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-
-        // Text ins Popup schreiben
         $this->UpdateFormField('ConfigPopup', 'text', $text);
-
-        // Popup öffnen: je nach Version funktioniert "visible" oder das Setzen des Texts reicht.
-        $this->UpdateFormField('ConfigPopup', 'visible', true);
+        // Symcon 9: kein "visible" togglen nötig/gewünscht
     }
 
     public function ClearQueueCache(): void
