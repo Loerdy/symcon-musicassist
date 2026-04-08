@@ -157,6 +157,7 @@ class MusicAssistantPlayer extends IPSModule
                 break;
 
             case 'RefreshCover':
+                // erzwingt Cover-Reload
                 $this->SetBuffer('CoverUrl', '');
                 $this->PollState();
                 $this->UpdateConfigView();
@@ -344,37 +345,24 @@ class MusicAssistantPlayer extends IPSModule
                         }
                     }
 
-                    // Now Playing + Cover
+                    // Now Playing
                     $state = strtolower(trim((string)($q['state'] ?? '')));
                     $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
 
                     $title = $artist = $album = '';
-                    $coverPathOrUrl = '';
-
                     if ($state !== 'idle' && $hasCurrent) {
                         $mi = $q['current_item']['media_item'] ?? null;
                         if (is_array($mi)) {
                             $title = (string)($mi['name'] ?? '');
+
                             if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
                                 $a0 = $mi['artists'][0];
                                 $artist = is_array($a0) ? (string)($a0['name'] ?? '') : (string)$a0;
                             }
+
                             if (isset($mi['album']) && is_array($mi['album'])) {
                                 $album = (string)($mi['album']['name'] ?? '');
                             }
-
-                            // Fallback Cover aus metadata.images[0].path
-                            if (isset($mi['metadata']['images']) && is_array($mi['metadata']['images']) && count($mi['metadata']['images']) > 0) {
-                                $img0 = $mi['metadata']['images'][0];
-                                if (is_array($img0) && isset($img0['path'])) {
-                                    $coverPathOrUrl = (string)$img0['path'];
-                                }
-                            }
-                        }
-
-                        // bevorzugt current_item.image.path
-                        if (isset($q['current_item']['image']) && is_array($q['current_item']['image']) && isset($q['current_item']['image']['path'])) {
-                            $coverPathOrUrl = (string)$q['current_item']['image']['path'];
                         }
                     }
 
@@ -382,6 +370,51 @@ class MusicAssistantPlayer extends IPSModule
                     $this->setIfChangedString('NowArtist', $artist);
                     $this->setIfChangedString('NowAlbum', $album);
 
+                    // Cover robust extrahieren
+                    $coverPathOrUrl = '';
+
+                    // 1) current_item.image.path
+                    if (isset($q['current_item']['image']) && is_array($q['current_item']['image']) && isset($q['current_item']['image']['path'])) {
+                        $coverPathOrUrl = (string)$q['current_item']['image']['path'];
+                    }
+
+                    // 2) media_item.image.path
+                    if ($coverPathOrUrl === '' && isset($q['current_item']['media_item']['image']) && is_array($q['current_item']['media_item']['image']) && isset($q['current_item']['media_item']['image']['path'])) {
+                        $coverPathOrUrl = (string)$q['current_item']['media_item']['image']['path'];
+                    }
+
+                    // 3) metadata.images[] (erst remote, dann erstes)
+                    if ($coverPathOrUrl === '' && isset($q['current_item']['media_item']['metadata']['images']) && is_array($q['current_item']['media_item']['metadata']['images'])) {
+                        $imgs = $q['current_item']['media_item']['metadata']['images'];
+
+                        foreach ($imgs as $img) {
+                            if (!is_array($img)) {
+                                continue;
+                            }
+                            $path = (string)($img['path'] ?? '');
+                            $remote = (bool)($img['remotely_accessible'] ?? false);
+                            if ($path !== '' && $remote) {
+                                $coverPathOrUrl = $path;
+                                break;
+                            }
+                        }
+
+                        if ($coverPathOrUrl === '') {
+                            foreach ($imgs as $img) {
+                                if (!is_array($img)) {
+                                    continue;
+                                }
+                                $path = (string)($img['path'] ?? '');
+                                if ($path !== '') {
+                                    $coverPathOrUrl = $path;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Debug: Kandidat und Download-Infos erscheinen im Instanz-Debug
+                    $this->SendDebug('CoverCandidate', $coverPathOrUrl, 0);
                     $this->UpdateCoverIfChanged($coverPathOrUrl);
 
                     break;
@@ -507,9 +540,10 @@ class MusicAssistantPlayer extends IPSModule
 
         $tmp = sys_get_temp_dir() . '/ma_cover_' . $this->InstanceID . '.img';
 
-        // Token Header für wget (falls gesetzt)
         $token = trim($this->ReadPropertyString('Token'));
         $authHeader = ($token !== '') ? (' --header=' . escapeshellarg('Authorization: Bearer ' . $token)) : '';
+
+        $this->SendDebug('CoverFetchURL', $url, 0);
 
         $cmd = 'wget -qO ' . escapeshellarg($tmp)
             . ' --timeout=10'
@@ -519,7 +553,10 @@ class MusicAssistantPlayer extends IPSModule
 
         @shell_exec($cmd);
 
-        if (!is_file($tmp) || filesize($tmp) < 500) {
+        $size = (is_file($tmp)) ? (int)filesize($tmp) : 0;
+        $this->SendDebug('CoverFetchSize', (string)$size, 0);
+
+        if ($size < 500) {
             @unlink($tmp);
             return;
         }
