@@ -27,13 +27,12 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('RadioProfile', '');
         $this->RegisterPropertyString('RadioMap', '{}');
 
-        // Polling in Sekunden (0 = aus)
         $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
         $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('QueueId', '');
         $this->SetBuffer('CoverUrl', '');
-        $this->SetBuffer('CoverRoute', ''); // direct|imageproxy|image|media_image
+        $this->SetBuffer('CoverRoute', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
@@ -243,7 +242,6 @@ class MusicAssistantPlayer extends IPSModule
                     continue;
                 }
 
-                // Shuffle / Repeat
                 if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
                     $shuffle = (bool)$q['shuffle_enabled'];
                     if ((bool)$this->GetValue('Shuffle') !== $shuffle) $this->SetValue('Shuffle', $shuffle);
@@ -256,7 +254,6 @@ class MusicAssistantPlayer extends IPSModule
                     }
                 }
 
-                // Now Playing
                 $state = strtolower(trim((string)($q['state'] ?? '')));
                 $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
 
@@ -281,7 +278,6 @@ class MusicAssistantPlayer extends IPSModule
                 $this->setIfChangedString('NowArtist', $artist);
                 $this->setIfChangedString('NowAlbum', $albumName);
 
-                // Cover: erst Queue/Album-Felder, dann API metadata/update_metadata
                 $cover = $this->extractCoverFromQueueItem($q, $mi);
 
                 if ($cover === '' && is_array($mi)) {
@@ -298,29 +294,31 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
+    private function setIfChangedString(string $ident, string $value): void
+    {
+        if (@$this->GetIDForIdent($ident) <= 0) return;
+        if ((string)$this->GetValue($ident) !== $value) {
+            $this->SetValue($ident, $value);
+        }
+    }
+
     private function extractCoverFromQueueItem(array $queueItem, $mi): string
     {
-        $cover = '';
-
-        // 1) current_item.image.path
         if (isset($queueItem['current_item']['image']['path'])) {
             $cand = (string)$queueItem['current_item']['image']['path'];
             if ($this->isLikelyImagePath($cand)) return $cand;
         }
 
-        // 2) media_item.image.path
         if (is_array($mi) && isset($mi['image']['path'])) {
             $cand = (string)$mi['image']['path'];
             if ($this->isLikelyImagePath($cand)) return $cand;
         }
 
-        // 3) media_item.metadata.images[]
         if (is_array($mi) && isset($mi['metadata']['images']) && is_array($mi['metadata']['images'])) {
-            $cover = $this->pickImageFromImagesArray($mi['metadata']['images']);
-            if ($cover !== '') return $cover;
+            $c = $this->pickImageFromImagesArray($mi['metadata']['images']);
+            if ($c !== '') return $c;
         }
 
-        // 4) album.image.path
         if (is_array($mi) && isset($mi['album']) && is_array($mi['album'])) {
             $alb = $mi['album'];
 
@@ -329,23 +327,17 @@ class MusicAssistantPlayer extends IPSModule
                 if ($this->isLikelyImagePath($cand)) return $cand;
             }
 
-            // 5) album.metadata.images[]
             if (isset($alb['metadata']['images']) && is_array($alb['metadata']['images'])) {
-                $cover = $this->pickImageFromImagesArray($alb['metadata']['images']);
-                if ($cover !== '') return $cover;
+                $c = $this->pickImageFromImagesArray($alb['metadata']['images']);
+                if ($c !== '') return $c;
             }
         }
 
         return '';
     }
 
-    /**
-     * Fallback: metadata/update_metadata auf Album (wenn vorhanden), sonst Track.
-     * Erwartung: Ergebnis enthält dann metadata.images / image.path.
-     */
     private function fetchCoverViaMetadataUpdate(array $trackMi): string
     {
-        // bevorzugt Album updaten (Cover sitzt fast immer am Album)
         $item = null;
 
         if (isset($trackMi['album']) && is_array($trackMi['album'])) {
@@ -367,13 +359,11 @@ class MusicAssistantPlayer extends IPSModule
                 return '';
             }
 
-            // 1) result.image.path
             if (isset($result['image']['path'])) {
                 $cand = (string)$result['image']['path'];
                 if ($this->isLikelyImagePath($cand)) return $cand;
             }
 
-            // 2) result.metadata.images[]
             if (isset($result['metadata']['images']) && is_array($result['metadata']['images'])) {
                 return $this->pickImageFromImagesArray($result['metadata']['images']);
             }
@@ -384,8 +374,6 @@ class MusicAssistantPlayer extends IPSModule
             return '';
         }
     }
-
-    // ---------- Cover helpers ----------
 
     private function isLikelyImagePath(string $path): bool
     {
@@ -450,10 +438,8 @@ class MusicAssistantPlayer extends IPSModule
     {
         $base = $this->maBaseUrl();
 
-        // direkt nutzbar: relativ oder absolute URL
         if (str_starts_with($pathOrUrl, '/')) {
-            $url = $base . $pathOrUrl;
-            $this->FetchCoverToMedia($url);
+            $this->FetchCoverToMedia($base . $pathOrUrl);
             $this->SetBuffer('CoverRoute', 'direct');
             return;
         }
@@ -463,7 +449,6 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
 
-        // lokaler Pfad: Route autodetect
         $route = (string)$this->GetBuffer('CoverRoute');
 
         $candidates = [];
@@ -529,7 +514,7 @@ class MusicAssistantPlayer extends IPSModule
         if ($mid > 0) IPS_SetMediaContent($mid, base64_encode(''));
     }
 
-    // ---------- Commands ----------
+    // ---- API Commands ----
 
     public function SetShuffle(bool $enabled): void
     {
@@ -561,7 +546,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('players/cmd/group_volume_down', ['player_id' => $this->playerId()]);
     }
 
-    // ---------- Profiles / misc ----------
+    // ---- Misc helpers ----
 
     private function ensureRepeatProfile(): void
     {
