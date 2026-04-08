@@ -31,6 +31,7 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('QueueId', '');
+        $this->SetBuffer('CoverUrl', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
@@ -96,6 +97,9 @@ class MusicAssistantPlayer extends IPSModule
             IPS_SetIcon($vidAlbum, 'album');
         }
 
+        // Cover Media-Objekt
+        $this->EnsureCoverMedia();
+
         // Repeat Initialwert
         if (@$this->GetIDForIdent('Repeat') > 0 && (string)@$this->GetValue('Repeat') === '') {
             $this->SetValue('Repeat', 'off');
@@ -111,8 +115,7 @@ class MusicAssistantPlayer extends IPSModule
 
     public function GetConfigurationForm(): string
     {
-        // Hinweis: IPS 9 (dein Build) akzeptiert kein TextBox/MultiLineTextBox/PopupAlert in elements.
-        // Daher Anzeige über Label und UpdateFormField.
+        // IPS 9: Nur unterstützte Standard-Controls (keine TextBox/PopupAlert/MultiLineTextBox)
         $form = [
             'elements' => [
                 ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
@@ -130,6 +133,7 @@ class MusicAssistantPlayer extends IPSModule
                 ['type' => 'Button', 'caption' => 'Konfiguration aktualisieren', 'onClick' => 'IPS_RequestAction($id, "UpdateConfigView", true);'],
                 ['type' => 'Button', 'caption' => 'Queue-Cache leeren', 'onClick' => 'IPS_RequestAction($id, "ClearQueueCache", true);'],
                 ['type' => 'Button', 'caption' => 'PollState jetzt', 'onClick' => 'IPS_RequestAction($id, "PollNow", true);'],
+                ['type' => 'Button', 'caption' => 'Cover neu laden', 'onClick' => 'IPS_RequestAction($id, "RefreshCover", true);'],
             ]
         ];
 
@@ -149,6 +153,13 @@ class MusicAssistantPlayer extends IPSModule
                 break;
 
             case 'PollNow':
+                $this->PollState();
+                $this->UpdateConfigView();
+                break;
+
+            case 'RefreshCover':
+                // erzwingt ein erneutes Laden beim nächsten Poll
+                $this->SetBuffer('CoverUrl', '');
                 $this->PollState();
                 $this->UpdateConfigView();
                 break;
@@ -293,16 +304,14 @@ class MusicAssistantPlayer extends IPSModule
             'PlaylistProfile'   => $this->ReadPropertyString('PlaylistProfile'),
             'RadioProfile'      => $this->ReadPropertyString('RadioProfile'),
             'QueueIdCache'      => (string)$this->GetBuffer('QueueId'),
+            'CoverUrlCache'     => (string)$this->GetBuffer('CoverUrl'),
             'MsgId'             => (string)$this->GetBuffer('MsgId'),
         ];
 
         $text = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-
-        // Label Caption ist oft in der Länge begrenzt -> notfalls kürzen
         if (strlen($text) > 1800) {
             $text = substr($text, 0, 1800) . "\n... (gekürzt)";
         }
-
         $this->UpdateFormField('ConfigView', 'caption', $text);
     }
 
@@ -320,6 +329,7 @@ class MusicAssistantPlayer extends IPSModule
                         continue;
                     }
 
+                    // Shuffle
                     if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
                         $shuffle = (bool)$q['shuffle_enabled'];
                         if ((bool)$this->GetValue('Shuffle') !== $shuffle) {
@@ -327,6 +337,7 @@ class MusicAssistantPlayer extends IPSModule
                         }
                     }
 
+                    // Repeat
                     if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
                         $repeat = strtolower(trim((string)$q['repeat_mode']));
                         if (in_array($repeat, ['off', 'one', 'all'], true) && (string)$this->GetValue('Repeat') !== $repeat) {
@@ -334,10 +345,13 @@ class MusicAssistantPlayer extends IPSModule
                         }
                     }
 
+                    // Now Playing + Cover
                     $state = strtolower(trim((string)($q['state'] ?? '')));
                     $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
 
                     $title = $artist = $album = '';
+                    $coverUrl = '';
+
                     if ($state !== 'idle' && $hasCurrent) {
                         $mi = $q['current_item']['media_item'] ?? null;
                         if (is_array($mi)) {
@@ -349,12 +363,28 @@ class MusicAssistantPlayer extends IPSModule
                             if (isset($mi['album']) && is_array($mi['album'])) {
                                 $album = (string)($mi['album']['name'] ?? '');
                             }
+
+                            // Fallback Cover aus metadata.images[0].path
+                            if (isset($mi['metadata']['images']) && is_array($mi['metadata']['images']) && count($mi['metadata']['images']) > 0) {
+                                $img0 = $mi['metadata']['images'][0];
+                                if (is_array($img0) && isset($img0['path'])) {
+                                    $coverUrl = (string)$img0['path'];
+                                }
+                            }
+                        }
+
+                        // bevorzugt current_item.image.path
+                        if (isset($q['current_item']['image']) && is_array($q['current_item']['image']) && isset($q['current_item']['image']['path'])) {
+                            $coverUrl = (string)$q['current_item']['image']['path'];
                         }
                     }
 
                     $this->setIfChangedString('NowTitle', $title);
                     $this->setIfChangedString('NowArtist', $artist);
                     $this->setIfChangedString('NowAlbum', $album);
+
+                    // Cover aktualisieren (nur wenn URL sich ändert)
+                    $this->UpdateCoverIfChanged($coverUrl);
 
                     break;
                 }
@@ -412,6 +442,92 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ((string)$this->GetValue($ident) !== $value) {
             $this->SetValue($ident, $value);
+        }
+    }
+
+    // --------- Cover handling ---------
+
+    private function EnsureCoverMedia(): void
+    {
+        $mid = @$this->GetIDForIdent('Cover');
+        if ($mid > 0) {
+            $o = IPS_GetObject($mid);
+            if (($o['ObjectType'] ?? 0) === OBJECTTYPE_MEDIA) {
+                return;
+            }
+            // falscher Typ
+            @IPS_DeleteMedia($mid);
+        }
+
+        $mid = IPS_CreateMedia(MEDIATYPE_IMAGE);
+        IPS_SetParent($mid, $this->InstanceID);
+        IPS_SetIdent($mid, 'Cover');
+        IPS_SetName($mid, 'Cover');
+    }
+
+    private function UpdateCoverIfChanged(string $coverUrl): void
+    {
+        $coverUrl = trim($coverUrl);
+        $last = (string)$this->GetBuffer('CoverUrl');
+
+        if ($coverUrl === $last) {
+            return;
+        }
+
+        $this->SetBuffer('CoverUrl', $coverUrl);
+
+        if ($coverUrl === '') {
+            $this->ClearCover();
+            return;
+        }
+
+        $this->SetCoverFromUrl($coverUrl);
+    }
+
+    private function SetCoverFromUrl(string $url): void
+    {
+        $url = trim($url);
+        if ($url === '') {
+            $this->ClearCover();
+            return;
+        }
+
+        // relative -> absolute (MA)
+        if (str_starts_with($url, '/')) {
+            $url = $this->maBaseUrl() . $url;
+        }
+
+        $tmp = sys_get_temp_dir() . '/ma_cover_' . $this->InstanceID . '.img';
+
+        // wget ist auf deiner SymBox vorhanden
+        $cmd = 'wget -qO ' . escapeshellarg($tmp) . ' --timeout=10 ' . escapeshellarg($url) . ' 2>/dev/null';
+        @shell_exec($cmd);
+
+        if (!is_file($tmp) || filesize($tmp) < 500) {
+            @unlink($tmp);
+            return;
+        }
+
+        $data = @file_get_contents($tmp);
+        @unlink($tmp);
+
+        if ($data === false || $data === '') {
+            return;
+        }
+
+        $mid = @$this->GetIDForIdent('Cover');
+        if ($mid <= 0) {
+            return;
+        }
+
+        IPS_SetMediaContent($mid, base64_encode($data));
+    }
+
+    private function ClearCover(): void
+    {
+        $mid = @$this->GetIDForIdent('Cover');
+        if ($mid > 0) {
+            IPS_SetMediaContent($mid, base64_encode(''));
         }
     }
 
