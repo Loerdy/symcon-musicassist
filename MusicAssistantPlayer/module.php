@@ -30,10 +30,14 @@ class MusicAssistantPlayer extends IPSModule
         // Polling in Sekunden (0 = aus)
         $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
+        // Metadata Update (Cover-Fallback) – bewusst selten + langes Timeout
+        $this->RegisterPropertyInteger('MetaUpdateTimeoutMs', 60000);
+        $this->RegisterPropertyInteger('MetaUpdateCooldownSec', 600);
+
         $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('QueueId', '');
         $this->SetBuffer('CoverUrl', '');
-        $this->SetBuffer('CoverRoute', 'direct');
+        $this->SetBuffer('LastMetaUpdateTs', '0');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
@@ -107,6 +111,9 @@ class MusicAssistantPlayer extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
                 ['type' => 'NumberSpinner', 'name' => 'StateSyncInterval', 'caption' => 'Polling (Sek.)'],
 
+                ['type' => 'NumberSpinner', 'name' => 'MetaUpdateTimeoutMs', 'caption' => 'MetaUpdate Timeout (ms)'],
+                ['type' => 'NumberSpinner', 'name' => 'MetaUpdateCooldownSec', 'caption' => 'MetaUpdate Cooldown (s)'],
+
                 ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
                 ['type' => 'Label', 'name' => 'ConfigView', 'caption' => '']
             ],
@@ -139,6 +146,8 @@ class MusicAssistantPlayer extends IPSModule
 
             case 'RefreshCover':
                 $this->SetBuffer('CoverUrl', '');
+                // Cooldown zurücksetzen, damit MetaUpdate sofort einmal probiert werden darf
+                $this->SetBuffer('LastMetaUpdateTs', '0');
                 $this->PollState();
                 $this->UpdateConfigView();
                 break;
@@ -207,14 +216,17 @@ class MusicAssistantPlayer extends IPSModule
     public function UpdateConfigView(): void
     {
         $cfg = [
-            'InstanceID'        => $this->InstanceID,
-            'Host'              => $this->ReadPropertyString('Host'),
-            'Port'              => $this->ReadPropertyInteger('Port'),
-            'PlayerID'          => $this->ReadPropertyString('PlayerID'),
-            'StateSyncInterval' => $this->ReadPropertyInteger('StateSyncInterval'),
-            'QueueIdCache'      => (string)$this->GetBuffer('QueueId'),
-            'CoverUrlCache'     => (string)$this->GetBuffer('CoverUrl'),
-            'MsgId'             => (string)$this->GetBuffer('MsgId'),
+            'InstanceID'           => $this->InstanceID,
+            'Host'                 => $this->ReadPropertyString('Host'),
+            'Port'                 => $this->ReadPropertyInteger('Port'),
+            'PlayerID'             => $this->ReadPropertyString('PlayerID'),
+            'StateSyncInterval'    => $this->ReadPropertyInteger('StateSyncInterval'),
+            'MetaUpdateTimeoutMs'  => $this->ReadPropertyInteger('MetaUpdateTimeoutMs'),
+            'MetaUpdateCooldownSec'=> $this->ReadPropertyInteger('MetaUpdateCooldownSec'),
+            'QueueIdCache'         => (string)$this->GetBuffer('QueueId'),
+            'CoverUrlCache'        => (string)$this->GetBuffer('CoverUrl'),
+            'LastMetaUpdateTs'     => (string)$this->GetBuffer('LastMetaUpdateTs'),
+            'MsgId'                => (string)$this->GetBuffer('MsgId'),
         ];
 
         $text = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -275,11 +287,11 @@ class MusicAssistantPlayer extends IPSModule
                 $this->setIfChangedString('NowArtist', $artist);
                 $this->setIfChangedString('NowAlbum', $albumName);
 
-                // Cover: nur web-fähige Bilder (http(s) oder MA-relative /...)
-                $cover = $this->extractWebCoverFromQueueItem($q, $mi);
+                // Cover: nur web-fähig
+                $cover = $this->extractWebCoverFromQueue($q, $mi);
 
-                // Fallback: metadata/update_metadata (aber danach weiterhin nur web-fähige Cover akzeptieren)
-                if ($cover === '' && is_array($mi)) {
+                // Fallback: metadata/update_metadata (nur selten, nur wenn noch kein Cover)
+                if ($cover === '' && is_array($mi) && $this->metaUpdateAllowedNow()) {
                     $cover = $this->fetchWebCoverViaMetadataUpdate($mi);
                 }
 
@@ -293,6 +305,21 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
+    private function metaUpdateAllowedNow(): bool
+    {
+        $cooldown = (int)$this->ReadPropertyInteger('MetaUpdateCooldownSec');
+        if ($cooldown <= 0) return true;
+
+        $last = (int)$this->GetBuffer('LastMetaUpdateTs');
+        $now = time();
+        return ($now - $last) >= $cooldown;
+    }
+
+    private function setMetaUpdateNow(): void
+    {
+        $this->SetBuffer('LastMetaUpdateTs', (string)time());
+    }
+
     private function setIfChangedString(string $ident, string $value): void
     {
         if (@$this->GetIDForIdent($ident) <= 0) return;
@@ -301,39 +328,33 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    /**
-     * Extrahiert Cover nur dann, wenn es über Web erreichbar ist:
-     * - http(s)://...
-     * - /collage/..., /whatever...
-     * - images[].remotely_accessible == true
-     */
-    private function extractWebCoverFromQueueItem(array $queueItem, $mi): string
+    private function extractWebCoverFromQueue(array $queueItem, $mi): string
     {
-        // 1) current_item.image.path (wenn web-fähig)
+        // 1) current_item.image.path (http(s) oder /...)
         if (isset($queueItem['current_item']['image']['path'])) {
             $cand = (string)$queueItem['current_item']['image']['path'];
-            if ($this->isWebReachableImagePath($cand, null)) return $cand;
+            if ($this->isWebCoverPath($cand, null)) return $cand;
         }
 
         // 2) media_item.image.path
         if (is_array($mi) && isset($mi['image']['path'])) {
             $cand = (string)$mi['image']['path'];
-            if ($this->isWebReachableImagePath($cand, null)) return $cand;
+            if ($this->isWebCoverPath($cand, null)) return $cand;
         }
 
-        // 3) media_item.metadata.images[] -> bevorzugt remotely_accessible
+        // 3) media_item.metadata.images (nur remote/relative/http)
         if (is_array($mi) && isset($mi['metadata']['images']) && is_array($mi['metadata']['images'])) {
             $c = $this->pickWebImageFromImagesArray($mi['metadata']['images']);
             if ($c !== '') return $c;
         }
 
-        // 4) album.image.path + album.metadata.images[]
+        // 4) album.image + album.metadata.images
         if (is_array($mi) && isset($mi['album']) && is_array($mi['album'])) {
             $alb = $mi['album'];
 
             if (isset($alb['image']['path'])) {
                 $cand = (string)$alb['image']['path'];
-                if ($this->isWebReachableImagePath($cand, null)) return $cand;
+                if ($this->isWebCoverPath($cand, null)) return $cand;
             }
 
             if (isset($alb['metadata']['images']) && is_array($alb['metadata']['images'])) {
@@ -347,8 +368,10 @@ class MusicAssistantPlayer extends IPSModule
 
     private function fetchWebCoverViaMetadataUpdate(array $trackMi): string
     {
-        $item = null;
+        // Cooldown setzen, egal ob erfolgreich oder Timeout
+        $this->setMetaUpdateNow();
 
+        $item = null;
         if (isset($trackMi['album']) && is_array($trackMi['album'])) {
             $item = $trackMi['album'];
             $this->SendDebug('CoverMetaUpdateItem', 'album', 0);
@@ -357,22 +380,23 @@ class MusicAssistantPlayer extends IPSModule
             $this->SendDebug('CoverMetaUpdateItem', 'track', 0);
         }
 
+        $timeoutMs = (int)$this->ReadPropertyInteger('MetaUpdateTimeoutMs');
+        if ($timeoutMs < 5000) $timeoutMs = 5000;
+
         try {
             $resp = $this->maCall('metadata/update_metadata', [
                 'item' => $item,
                 'force_refresh' => false
-            ], 20000);
+            ], $timeoutMs);
 
             $result = $resp['result'] ?? null;
             if (!is_array($result)) return '';
 
-            // result.image.path (nur web-fähig)
             if (isset($result['image']['path'])) {
                 $cand = (string)$result['image']['path'];
-                if ($this->isWebReachableImagePath($cand, null)) return $cand;
+                if ($this->isWebCoverPath($cand, null)) return $cand;
             }
 
-            // result.metadata.images[]
             if (isset($result['metadata']['images']) && is_array($result['metadata']['images'])) {
                 return $this->pickWebImageFromImagesArray($result['metadata']['images']);
             }
@@ -384,24 +408,17 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    /**
-     * Ein Image ist web-fähig, wenn:
-     * - http(s)://... oder /...
-     * - oder (remoteFlag === true) und path nicht leer und Bild-Endung/URL
-     */
-    private function isWebReachableImagePath(string $path, ?bool $remoteFlag): bool
+    private function isWebCoverPath(string $path, ?bool $remoteFlag): bool
     {
         $p = trim($path);
         if ($p === '') return false;
 
-        // direkter Webpfad
         if (preg_match('~^https?://~i', $p)) return true;
         if (str_starts_with($p, '/')) return true;
 
-        // Provider-Pfade (D/.../Folder.jpg) sind NICHT web-fähig
-        // -> nur akzeptieren, wenn remoteFlag explizit true wäre (kommt bei solchen Pfaden typischerweise aber nicht vor)
+        // Provider-Dateipfade sind nicht direkt über Web erreichbar
         if ($remoteFlag === true) {
-            // optional: Endung prüfen
+            // nur dann akzeptieren, wenn es dennoch wie ein Bild aussieht
             $noQ = explode('?', $p, 2)[0];
             $pl = strtolower($noQ);
             return (bool)preg_match('~\.(jpg|jpeg|png|webp|gif)$~', $pl);
@@ -417,27 +434,21 @@ class MusicAssistantPlayer extends IPSModule
             if (!is_array($img)) continue;
             $path = (string)($img['path'] ?? '');
             $remote = isset($img['remotely_accessible']) ? (bool)$img['remotely_accessible'] : null;
-
-            if ($remote === true && $this->isWebReachableImagePath($path, true)) {
-                return $path;
-            }
+            if ($remote === true && $this->isWebCoverPath($path, true)) return $path;
         }
 
-        // Fallback: manchmal liefern Provider Web-URLs ohne Flag
+        // fallback: manchmal ohne Flag aber mit http(s) oder /...
         foreach ($imgs as $img) {
             if (!is_array($img)) continue;
             $path = (string)($img['path'] ?? '');
             $remote = isset($img['remotely_accessible']) ? (bool)$img['remotely_accessible'] : null;
-
-            if ($this->isWebReachableImagePath($path, $remote)) {
-                return $path;
-            }
+            if ($this->isWebCoverPath($path, $remote)) return $path;
         }
 
         return '';
     }
 
-    // ----- Cover download to Media -----
+    // ----- Cover media -----
 
     private function EnsureCoverMedia(): void
     {
@@ -466,7 +477,8 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
 
-        $this->FetchCoverToMedia($this->toAbsoluteCoverUrl($pathOrUrl));
+        $url = $this->toAbsoluteCoverUrl($pathOrUrl);
+        $this->FetchCoverToMedia($url);
     }
 
     private function toAbsoluteCoverUrl(string $pathOrUrl): string
@@ -474,7 +486,6 @@ class MusicAssistantPlayer extends IPSModule
         $p = trim($pathOrUrl);
         if (preg_match('~^https?://~i', $p)) return $p;
         if (str_starts_with($p, '/')) return $this->maBaseUrl() . $p;
-        // sollte hier nicht vorkommen, da wir nur web-fähige Cover zulassen
         return $p;
     }
 
