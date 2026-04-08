@@ -126,7 +126,6 @@ class MusicAssistantPlayer extends IPSModule
                 ['type' => 'NumberSpinner', 'name' => 'StateSyncInterval', 'caption' => 'Polling (Sek.)'],
 
                 ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
-                // Inhalt wird per UpdateFormField("ConfigView","caption", ...) gesetzt
                 ['type' => 'Label', 'name' => 'ConfigView', 'caption' => '']
             ],
             'actions' => [
@@ -158,7 +157,6 @@ class MusicAssistantPlayer extends IPSModule
                 break;
 
             case 'RefreshCover':
-                // erzwingt ein erneutes Laden beim nächsten Poll
                 $this->SetBuffer('CoverUrl', '');
                 $this->PollState();
                 $this->UpdateConfigView();
@@ -312,6 +310,7 @@ class MusicAssistantPlayer extends IPSModule
         if (strlen($text) > 1800) {
             $text = substr($text, 0, 1800) . "\n... (gekürzt)";
         }
+
         $this->UpdateFormField('ConfigView', 'caption', $text);
     }
 
@@ -350,7 +349,7 @@ class MusicAssistantPlayer extends IPSModule
                     $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
 
                     $title = $artist = $album = '';
-                    $coverUrl = '';
+                    $coverPathOrUrl = '';
 
                     if ($state !== 'idle' && $hasCurrent) {
                         $mi = $q['current_item']['media_item'] ?? null;
@@ -368,14 +367,14 @@ class MusicAssistantPlayer extends IPSModule
                             if (isset($mi['metadata']['images']) && is_array($mi['metadata']['images']) && count($mi['metadata']['images']) > 0) {
                                 $img0 = $mi['metadata']['images'][0];
                                 if (is_array($img0) && isset($img0['path'])) {
-                                    $coverUrl = (string)$img0['path'];
+                                    $coverPathOrUrl = (string)$img0['path'];
                                 }
                             }
                         }
 
                         // bevorzugt current_item.image.path
                         if (isset($q['current_item']['image']) && is_array($q['current_item']['image']) && isset($q['current_item']['image']['path'])) {
-                            $coverUrl = (string)$q['current_item']['image']['path'];
+                            $coverPathOrUrl = (string)$q['current_item']['image']['path'];
                         }
                     }
 
@@ -383,8 +382,7 @@ class MusicAssistantPlayer extends IPSModule
                     $this->setIfChangedString('NowArtist', $artist);
                     $this->setIfChangedString('NowAlbum', $album);
 
-                    // Cover aktualisieren (nur wenn URL sich ändert)
-                    $this->UpdateCoverIfChanged($coverUrl);
+                    $this->UpdateCoverIfChanged($coverPathOrUrl);
 
                     break;
                 }
@@ -455,7 +453,6 @@ class MusicAssistantPlayer extends IPSModule
             if (($o['ObjectType'] ?? 0) === OBJECTTYPE_MEDIA) {
                 return;
             }
-            // falscher Typ
             @IPS_DeleteMedia($mid);
         }
 
@@ -465,42 +462,61 @@ class MusicAssistantPlayer extends IPSModule
         IPS_SetName($mid, 'Cover');
     }
 
-    private function UpdateCoverIfChanged(string $coverUrl): void
+    private function UpdateCoverIfChanged(string $pathOrUrl): void
     {
-        $coverUrl = trim($coverUrl);
+        $pathOrUrl = trim($pathOrUrl);
         $last = (string)$this->GetBuffer('CoverUrl');
 
-        if ($coverUrl === $last) {
+        if ($pathOrUrl === $last) {
             return;
         }
 
-        $this->SetBuffer('CoverUrl', $coverUrl);
+        $this->SetBuffer('CoverUrl', $pathOrUrl);
 
-        if ($coverUrl === '') {
+        if ($pathOrUrl === '') {
             $this->ClearCover();
             return;
         }
 
-        $this->SetCoverFromUrl($coverUrl);
+        $this->SetCoverFromPathOrUrl($pathOrUrl);
     }
 
-    private function SetCoverFromUrl(string $url): void
+    /**
+     * pathOrUrl kann sein:
+     * - https://... (remote)
+     * - /collage/... oder /imageproxy?... (relativ auf MA)
+     * - O/Artist/.../Folder.jpg (lokaler Pfad -> über /imageproxy?path=...)
+     */
+    private function SetCoverFromPathOrUrl(string $pathOrUrl): void
     {
-        $url = trim($url);
+        $url = trim($pathOrUrl);
         if ($url === '') {
             $this->ClearCover();
             return;
         }
 
-        // relative -> absolute (MA)
+        // relative URL von MA -> absolut
         if (str_starts_with($url, '/')) {
             $url = $this->maBaseUrl() . $url;
         }
 
+        // lokaler Pfad -> imageproxy verwenden
+        if (!preg_match('~^https?://~i', $url)) {
+            $url = $this->maBaseUrl() . '/imageproxy?path=' . rawurlencode($url);
+        }
+
         $tmp = sys_get_temp_dir() . '/ma_cover_' . $this->InstanceID . '.img';
 
-        // wget ist auf deiner SymBox vorhanden
-        $cmd = 'wget -qO ' . escapeshellarg($tmp) . ' --timeout=10 ' . escapeshellarg($url) . ' 2>/dev/null';
+        // Token Header für wget (falls gesetzt)
+        $token = trim($this->ReadPropertyString('Token'));
+        $authHeader = ($token !== '') ? (' --header=' . escapeshellarg('Authorization: Bearer ' . $token)) : '';
+
+        $cmd = 'wget -qO ' . escapeshellarg($tmp)
+            . ' --timeout=10'
+            . $authHeader
+            . ' ' . escapeshellarg($url)
+            . ' 2>/dev/null';
+
         @shell_exec($cmd);
 
         if (!is_file($tmp) || filesize($tmp) < 500) {
