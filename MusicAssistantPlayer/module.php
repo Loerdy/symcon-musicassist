@@ -27,12 +27,13 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('RadioProfile', '');
         $this->RegisterPropertyString('RadioMap', '{}');
 
+        // Polling in Sekunden (0 = aus)
         $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
         $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('QueueId', '');
         $this->SetBuffer('CoverUrl', '');
-        $this->SetBuffer('CoverRoute', ''); // gemerkter Route-Name: direct|imageproxy|image|media_image
+        $this->SetBuffer('CoverRoute', ''); // direct|imageproxy|image|media_image
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
@@ -125,49 +126,22 @@ class MusicAssistantPlayer extends IPSModule
             case 'UpdateConfigView':
                 $this->UpdateConfigView();
                 break;
+
             case 'ClearQueueCache':
                 $this->ClearQueueCache();
                 $this->UpdateConfigView();
                 break;
+
             case 'PollNow':
                 $this->PollState();
                 $this->UpdateConfigView();
                 break;
+
             case 'RefreshCover':
                 $this->SetBuffer('CoverUrl', '');
                 $this->SetBuffer('CoverRoute', '');
                 $this->PollState();
                 $this->UpdateConfigView();
-                break;
-
-            case 'Playlist':
-                try {
-                    $itemId = (int)$Value;
-                    if ($itemId > 0) {
-                        $uri = $this->resolveUriFromMap($itemId, 'PlaylistMap', 'music/playlists/library_items');
-                        $this->PlayMediaUri($uri);
-                        $this->SetValue('Playlist', $itemId);
-                        $this->SetTimerInterval('ResetPlaylist', 5000);
-                        $this->PollState();
-                    }
-                } catch (Throwable $e) {
-                    $this->SendDebug('Playlist start failed', $e->getMessage(), 0);
-                }
-                break;
-
-            case 'Radio':
-                try {
-                    $itemId = (int)$Value;
-                    if ($itemId > 0) {
-                        $uri = $this->resolveUriFromMap($itemId, 'RadioMap', 'music/radios/library_items');
-                        $this->PlayMediaUri($uri);
-                        $this->SetValue('Radio', $itemId);
-                        $this->SetTimerInterval('ResetRadio', 5000);
-                        $this->PollState();
-                    }
-                } catch (Throwable $e) {
-                    $this->SendDebug('Radio start failed', $e->getMessage(), 0);
-                }
                 break;
 
             case 'Transport':
@@ -225,18 +199,6 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    public function ResetPlaylistSelection(): void
-    {
-        $this->SetTimerInterval('ResetPlaylist', 0);
-        if (@$this->GetIDForIdent('Playlist') > 0) $this->SetValue('Playlist', 0);
-    }
-
-    public function ResetRadioSelection(): void
-    {
-        $this->SetTimerInterval('ResetRadio', 0);
-        if (@$this->GetIDForIdent('Radio') > 0) $this->SetValue('Radio', 0);
-    }
-
     public function ClearQueueCache(): void
     {
         $this->SetBuffer('QueueId', '');
@@ -272,130 +234,187 @@ class MusicAssistantPlayer extends IPSModule
             $resp   = $this->maCall('player_queues/all');
             $queues = $resp['result'] ?? null;
 
-            if (is_array($queues) && $this->isList($queues)) {
-                foreach ($queues as $q) {
-                    if ((string)($q['queue_id'] ?? '') !== $queueId) continue;
-
-                    if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
-                        $shuffle = (bool)$q['shuffle_enabled'];
-                        if ((bool)$this->GetValue('Shuffle') !== $shuffle) $this->SetValue('Shuffle', $shuffle);
-                    }
-
-                    if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
-                        $repeat = strtolower(trim((string)$q['repeat_mode']));
-                        if (in_array($repeat, ['off', 'one', 'all'], true) && (string)$this->GetValue('Repeat') !== $repeat) {
-                            $this->SetValue('Repeat', $repeat);
-                        }
-                    }
-
-                    $state = strtolower(trim((string)($q['state'] ?? '')));
-                    $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
-
-                    $title = $artist = $album = '';
-                    if ($state !== 'idle' && $hasCurrent) {
-                        $mi = $q['current_item']['media_item'] ?? null;
-                        if (is_array($mi)) {
-                            $title = (string)($mi['name'] ?? '');
-                            if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
-                                $a0 = $mi['artists'][0];
-                                $artist = is_array($a0) ? (string)($a0['name'] ?? '') : (string)$a0;
-                            }
-                            if (isset($mi['album']) && is_array($mi['album'])) {
-                                $album = (string)($mi['album']['name'] ?? '');
-                            }
-                        }
-                    }
-
-                    $this->setIfChangedString('NowTitle', $title);
-                    $this->setIfChangedString('NowArtist', $artist);
-                    $this->setIfChangedString('NowAlbum', $album);
-
-                    // Cover candidate (nur Bilder)
-                    $cover = '';
-
-                    if (isset($q['current_item']['image']['path'])) {
-                        $cand = (string)$q['current_item']['image']['path'];
-                        if ($this->isLikelyImagePath($cand)) $cover = $cand;
-                    }
-
-                    if ($cover === '' && isset($q['current_item']['media_item']['image']['path'])) {
-                        $cand = (string)$q['current_item']['media_item']['image']['path'];
-                        if ($this->isLikelyImagePath($cand)) $cover = $cand;
-                    }
-
-                    if ($cover === '' && isset($q['current_item']['media_item']['metadata']['images']) && is_array($q['current_item']['media_item']['metadata']['images'])) {
-                        $imgs = $q['current_item']['media_item']['metadata']['images'];
-
-                        foreach ($imgs as $img) {
-                            if (!is_array($img)) continue;
-                            $path = (string)($img['path'] ?? '');
-                            $remote = (bool)($img['remotely_accessible'] ?? false);
-                            if ($remote && $this->isLikelyImagePath($path)) { $cover = $path; break; }
-                        }
-                        if ($cover === '') {
-                            foreach ($imgs as $img) {
-                                if (!is_array($img)) continue;
-                                $path = (string)($img['path'] ?? '');
-                                if ($this->isLikelyImagePath($path)) { $cover = $path; break; }
-                            }
-                        }
-                    }
-
-                    $this->SendDebug('CoverCandidate', $cover, 0);
-                    $this->UpdateCoverIfChanged($cover);
-
-                    break;
-                }
+            if (!is_array($queues) || !$this->isList($queues)) {
+                return;
             }
 
-            $this->updateVolumeFromPlayersAll();
+            foreach ($queues as $q) {
+                if ((string)($q['queue_id'] ?? '') !== $queueId) {
+                    continue;
+                }
+
+                // Shuffle / Repeat
+                if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
+                    $shuffle = (bool)$q['shuffle_enabled'];
+                    if ((bool)$this->GetValue('Shuffle') !== $shuffle) $this->SetValue('Shuffle', $shuffle);
+                }
+
+                if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
+                    $repeat = strtolower(trim((string)$q['repeat_mode']));
+                    if (in_array($repeat, ['off', 'one', 'all'], true) && (string)$this->GetValue('Repeat') !== $repeat) {
+                        $this->SetValue('Repeat', $repeat);
+                    }
+                }
+
+                // Now Playing
+                $state = strtolower(trim((string)($q['state'] ?? '')));
+                $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
+
+                $title = $artist = $albumName = '';
+                $mi = null;
+
+                if ($state !== 'idle' && $hasCurrent) {
+                    $mi = $q['current_item']['media_item'] ?? null;
+                    if (is_array($mi)) {
+                        $title = (string)($mi['name'] ?? '');
+                        if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
+                            $a0 = $mi['artists'][0];
+                            $artist = is_array($a0) ? (string)($a0['name'] ?? '') : (string)$a0;
+                        }
+                        if (isset($mi['album']) && is_array($mi['album'])) {
+                            $albumName = (string)($mi['album']['name'] ?? '');
+                        }
+                    }
+                }
+
+                $this->setIfChangedString('NowTitle', $title);
+                $this->setIfChangedString('NowArtist', $artist);
+                $this->setIfChangedString('NowAlbum', $albumName);
+
+                // Cover: erst Queue/Album-Felder, dann API metadata/update_metadata
+                $cover = $this->extractCoverFromQueueItem($q, $mi);
+
+                if ($cover === '' && is_array($mi)) {
+                    $cover = $this->fetchCoverViaMetadataUpdate($mi);
+                }
+
+                $this->SendDebug('CoverCandidate', $cover, 0);
+                $this->UpdateCoverIfChanged($cover);
+
+                break;
+            }
         } catch (Throwable $e) {
             $this->SendDebug('PollState failed', $e->getMessage(), 0);
         }
     }
 
-    private function updateVolumeFromPlayersAll(): void
+    private function extractCoverFromQueueItem(array $queueItem, $mi): string
     {
-        try {
-            $pid = $this->playerId();
-            $resp = $this->maCall('players/all');
-            $players = $resp['result'] ?? null;
-            if (!is_array($players) || !$this->isList($players)) return;
+        $cover = '';
 
-            foreach ($players as $p) {
-                $id = (string)($p['player_id'] ?? $p['id'] ?? '');
-                if ($id !== $pid) continue;
+        // 1) current_item.image.path
+        if (isset($queueItem['current_item']['image']['path'])) {
+            $cand = (string)$queueItem['current_item']['image']['path'];
+            if ($this->isLikelyImagePath($cand)) return $cand;
+        }
 
-                $vol = null;
-                foreach (['volume_level', 'volume', 'volumeLevel', 'group_volume_level', 'group_volume', 'groupVolumeLevel'] as $k) {
-                    if (isset($p[$k])) { $vol = (int)$p[$k]; break; }
-                }
-                if ($vol !== null && @$this->GetIDForIdent('VolumeLevel') > 0) {
-                    $vol = max(0, min(100, $vol));
-                    if ((int)$this->GetValue('VolumeLevel') !== $vol) $this->SetValue('VolumeLevel', $vol);
-                }
-                break;
+        // 2) media_item.image.path
+        if (is_array($mi) && isset($mi['image']['path'])) {
+            $cand = (string)$mi['image']['path'];
+            if ($this->isLikelyImagePath($cand)) return $cand;
+        }
+
+        // 3) media_item.metadata.images[]
+        if (is_array($mi) && isset($mi['metadata']['images']) && is_array($mi['metadata']['images'])) {
+            $cover = $this->pickImageFromImagesArray($mi['metadata']['images']);
+            if ($cover !== '') return $cover;
+        }
+
+        // 4) album.image.path
+        if (is_array($mi) && isset($mi['album']) && is_array($mi['album'])) {
+            $alb = $mi['album'];
+
+            if (isset($alb['image']['path'])) {
+                $cand = (string)$alb['image']['path'];
+                if ($this->isLikelyImagePath($cand)) return $cand;
             }
+
+            // 5) album.metadata.images[]
+            if (isset($alb['metadata']['images']) && is_array($alb['metadata']['images'])) {
+                $cover = $this->pickImageFromImagesArray($alb['metadata']['images']);
+                if ($cover !== '') return $cover;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Fallback: metadata/update_metadata auf Album (wenn vorhanden), sonst Track.
+     * Erwartung: Ergebnis enthält dann metadata.images / image.path.
+     */
+    private function fetchCoverViaMetadataUpdate(array $trackMi): string
+    {
+        // bevorzugt Album updaten (Cover sitzt fast immer am Album)
+        $item = null;
+
+        if (isset($trackMi['album']) && is_array($trackMi['album'])) {
+            $item = $trackMi['album'];
+            $this->SendDebug('CoverMetaUpdateItem', 'album', 0);
+        } else {
+            $item = $trackMi;
+            $this->SendDebug('CoverMetaUpdateItem', 'track', 0);
+        }
+
+        try {
+            $resp = $this->maCall('metadata/update_metadata', [
+                'item' => $item,
+                'force_refresh' => false
+            ], 20000);
+
+            $result = $resp['result'] ?? null;
+            if (!is_array($result)) {
+                return '';
+            }
+
+            // 1) result.image.path
+            if (isset($result['image']['path'])) {
+                $cand = (string)$result['image']['path'];
+                if ($this->isLikelyImagePath($cand)) return $cand;
+            }
+
+            // 2) result.metadata.images[]
+            if (isset($result['metadata']['images']) && is_array($result['metadata']['images'])) {
+                return $this->pickImageFromImagesArray($result['metadata']['images']);
+            }
+
+            return '';
         } catch (Throwable $e) {
-            $this->SendDebug('updateVolumeFromPlayersAll failed', $e->getMessage(), 0);
+            $this->SendDebug('CoverMetaUpdateFailed', $e->getMessage(), 0);
+            return '';
         }
     }
 
-    private function setIfChangedString(string $ident, string $value): void
-    {
-        if (@$this->GetIDForIdent($ident) <= 0) return;
-        if ((string)$this->GetValue($ident) !== $value) $this->SetValue($ident, $value);
-    }
-
-    // ---------- Cover ----------
+    // ---------- Cover helpers ----------
 
     private function isLikelyImagePath(string $path): bool
     {
-        $p = strtolower(trim($path));
+        $p = trim($path);
         if ($p === '') return false;
-        if (preg_match('~^https?://~', $p)) return true;
+
+        $pNoQuery = explode('?', $p, 2)[0];
+        $pl = strtolower($pNoQuery);
+
+        if (preg_match('~^https?://~i', $p)) return true;
         if (str_starts_with($p, '/')) return true;
-        return (bool)preg_match('~\.(jpg|jpeg|png|webp|gif)$~', $p);
+
+        return (bool)preg_match('~\.(jpg|jpeg|png|webp|gif)$~', $pl);
+    }
+
+    private function pickImageFromImagesArray(array $imgs): string
+    {
+        foreach ($imgs as $img) {
+            if (!is_array($img)) continue;
+            $path = (string)($img['path'] ?? '');
+            $remote = (bool)($img['remotely_accessible'] ?? false);
+            if ($remote && $this->isLikelyImagePath($path)) return $path;
+        }
+        foreach ($imgs as $img) {
+            if (!is_array($img)) continue;
+            $path = (string)($img['path'] ?? '');
+            if ($this->isLikelyImagePath($path)) return $path;
+        }
+        return '';
     }
 
     private function EnsureCoverMedia(): void
@@ -431,7 +450,7 @@ class MusicAssistantPlayer extends IPSModule
     {
         $base = $this->maBaseUrl();
 
-        // direkt nutzbar (relative oder absolute URL)
+        // direkt nutzbar: relativ oder absolute URL
         if (str_starts_with($pathOrUrl, '/')) {
             $url = $base . $pathOrUrl;
             $this->FetchCoverToMedia($url);
@@ -444,15 +463,14 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
 
-        // lokaler Pfad: Route autodetect (merkt sich erfolgreichen Pfad)
+        // lokaler Pfad: Route autodetect
         $route = (string)$this->GetBuffer('CoverRoute');
 
         $candidates = [];
-        if ($route === 'imageproxy')      $candidates[] = $base . '/imageproxy?path=' . rawurlencode($pathOrUrl);
-        else if ($route === 'image')      $candidates[] = $base . '/image?path=' . rawurlencode($pathOrUrl);
-        else if ($route === 'media_image')$candidates[] = $base . '/media/image?path=' . rawurlencode($pathOrUrl);
+        if ($route === 'imageproxy')       $candidates[] = $base . '/imageproxy?path=' . rawurlencode($pathOrUrl);
+        else if ($route === 'image')       $candidates[] = $base . '/image?path=' . rawurlencode($pathOrUrl);
+        else if ($route === 'media_image') $candidates[] = $base . '/media/image?path=' . rawurlencode($pathOrUrl);
 
-        // fallback-Reihenfolge
         $candidates[] = $base . '/imageproxy?path=' . rawurlencode($pathOrUrl);
         $candidates[] = $base . '/image?path=' . rawurlencode($pathOrUrl);
         $candidates[] = $base . '/media/image?path=' . rawurlencode($pathOrUrl);
@@ -462,16 +480,13 @@ class MusicAssistantPlayer extends IPSModule
             $this->SendDebug('CoverFetchHTTP', $u . ' -> ' . $code, 0);
             if ($code >= 200 && $code < 300) {
                 if (str_contains($u, '/imageproxy?')) $this->SetBuffer('CoverRoute', 'imageproxy');
-                elseif (str_contains($u, '/image?')) $this->SetBuffer('CoverRoute', 'image');
+                elseif (str_contains($u, '/image?'))  $this->SetBuffer('CoverRoute', 'image');
                 else $this->SetBuffer('CoverRoute', 'media_image');
                 return;
             }
         }
     }
 
-    /**
-     * Lädt URL per wget, setzt MediaContent. Wenn $returnHttpCode=true, gibt HTTP-Code zurück.
-     */
     private function FetchCoverToMedia(string $url, bool $returnHttpCode = false): int
     {
         $tmp = sys_get_temp_dir() . '/ma_cover_' . $this->InstanceID . '.img';
@@ -479,7 +494,6 @@ class MusicAssistantPlayer extends IPSModule
         $token = trim($this->ReadPropertyString('Token'));
         $authHeader = ($token !== '') ? (' --header=' . escapeshellarg('Authorization: Bearer ' . $token)) : '';
 
-        // HTTP-Code ermitteln
         $cmd = 'wget -S -qO ' . escapeshellarg($tmp)
             . ' --timeout=10'
             . $authHeader
@@ -490,9 +504,7 @@ class MusicAssistantPlayer extends IPSModule
         $out = (string)@shell_exec($cmd);
 
         $code = 0;
-        if (preg_match('~HTTP/\\d\\.\\d\\s+(\\d{3})~', $out, $m)) {
-            $code = (int)$m[1];
-        }
+        if (preg_match('~HTTP/\\d\\.\\d\\s+(\\d{3})~', $out, $m)) $code = (int)$m[1];
 
         $size = (is_file($tmp)) ? (int)filesize($tmp) : 0;
         $this->SendDebug('CoverFetchSize', (string)$size, 0);
@@ -502,9 +514,7 @@ class MusicAssistantPlayer extends IPSModule
             @unlink($tmp);
             if ($data !== false && $data !== '') {
                 $mid = @$this->GetIDForIdent('Cover');
-                if ($mid > 0) {
-                    IPS_SetMediaContent($mid, base64_encode($data));
-                }
+                if ($mid > 0) IPS_SetMediaContent($mid, base64_encode($data));
             }
         } else {
             @unlink($tmp);
@@ -519,7 +529,7 @@ class MusicAssistantPlayer extends IPSModule
         if ($mid > 0) IPS_SetMediaContent($mid, base64_encode(''));
     }
 
-    // --------- MA Commands ---------
+    // ---------- Commands ----------
 
     public function SetShuffle(bool $enabled): void
     {
@@ -550,6 +560,8 @@ class MusicAssistantPlayer extends IPSModule
     {
         $this->maCall('players/cmd/group_volume_down', ['player_id' => $this->playerId()]);
     }
+
+    // ---------- Profiles / misc ----------
 
     private function ensureRepeatProfile(): void
     {
