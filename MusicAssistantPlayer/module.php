@@ -370,20 +370,26 @@ class MusicAssistantPlayer extends IPSModule
                     $this->setIfChangedString('NowArtist', $artist);
                     $this->setIfChangedString('NowAlbum', $album);
 
-                    // Cover robust extrahieren
+                    // Cover: nur Bilder akzeptieren, mp3/sonstiges ignorieren
                     $coverPathOrUrl = '';
 
                     // 1) current_item.image.path
-                    if (isset($q['current_item']['image']) && is_array($q['current_item']['image']) && isset($q['current_item']['image']['path'])) {
-                        $coverPathOrUrl = (string)$q['current_item']['image']['path'];
+                    if (isset($q['current_item']['image']['path'])) {
+                        $cand = (string)$q['current_item']['image']['path'];
+                        if ($this->isLikelyImagePath($cand)) {
+                            $coverPathOrUrl = $cand;
+                        }
                     }
 
                     // 2) media_item.image.path
-                    if ($coverPathOrUrl === '' && isset($q['current_item']['media_item']['image']) && is_array($q['current_item']['media_item']['image']) && isset($q['current_item']['media_item']['image']['path'])) {
-                        $coverPathOrUrl = (string)$q['current_item']['media_item']['image']['path'];
+                    if ($coverPathOrUrl === '' && isset($q['current_item']['media_item']['image']['path'])) {
+                        $cand = (string)$q['current_item']['media_item']['image']['path'];
+                        if ($this->isLikelyImagePath($cand)) {
+                            $coverPathOrUrl = $cand;
+                        }
                     }
 
-                    // 3) metadata.images[] (erst remote, dann erstes)
+                    // 3) metadata.images[] (erst remote, dann erstes Bild)
                     if ($coverPathOrUrl === '' && isset($q['current_item']['media_item']['metadata']['images']) && is_array($q['current_item']['media_item']['metadata']['images'])) {
                         $imgs = $q['current_item']['media_item']['metadata']['images'];
 
@@ -393,7 +399,7 @@ class MusicAssistantPlayer extends IPSModule
                             }
                             $path = (string)($img['path'] ?? '');
                             $remote = (bool)($img['remotely_accessible'] ?? false);
-                            if ($path !== '' && $remote) {
+                            if ($remote && $this->isLikelyImagePath($path)) {
                                 $coverPathOrUrl = $path;
                                 break;
                             }
@@ -405,7 +411,7 @@ class MusicAssistantPlayer extends IPSModule
                                     continue;
                                 }
                                 $path = (string)($img['path'] ?? '');
-                                if ($path !== '') {
+                                if ($this->isLikelyImagePath($path)) {
                                     $coverPathOrUrl = $path;
                                     break;
                                 }
@@ -413,7 +419,6 @@ class MusicAssistantPlayer extends IPSModule
                         }
                     }
 
-                    // Debug: Kandidat und Download-Infos erscheinen im Instanz-Debug
                     $this->SendDebug('CoverCandidate', $coverPathOrUrl, 0);
                     $this->UpdateCoverIfChanged($coverPathOrUrl);
 
@@ -477,6 +482,27 @@ class MusicAssistantPlayer extends IPSModule
     }
 
     // --------- Cover handling ---------
+
+    private function isLikelyImagePath(string $path): bool
+    {
+        $p = strtolower(trim($path));
+        if ($p === '') {
+            return false;
+        }
+
+        // URL ohne Endung trotzdem zulassen (CDN)
+        if (preg_match('~^https?://~', $p)) {
+            return true;
+        }
+
+        // relative URLs von MA
+        if (str_starts_with($p, '/')) {
+            return true;
+        }
+
+        // typische Bild-Endungen
+        return (bool)preg_match('~\.(jpg|jpeg|png|webp|gif)$~', $p);
+    }
 
     private function EnsureCoverMedia(): void
     {
