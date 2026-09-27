@@ -400,10 +400,18 @@ class MusicAssistantPlayer extends IPSModule
                 }
 
                 $muted = null;
-                if (is_bool($p['group_volume_muted'] ?? null)) {
-                    $muted = $p['group_volume_muted'];
-                } elseif (is_bool($p['volume_muted'] ?? null)) {
-                    $muted = $p['volume_muted'];
+                if (($p['type'] ?? '') === 'group') {
+                    if (is_bool($p['group_volume_muted'] ?? null)) {
+                        $muted = $p['group_volume_muted'];
+                    } elseif (is_bool($p['volume_muted'] ?? null)) {
+                        $muted = $p['volume_muted'];
+                    }
+                } else {
+                    if (is_bool($p['volume_muted'] ?? null)) {
+                        $muted = $p['volume_muted'];
+                    } elseif (is_bool($p['group_volume_muted'] ?? null)) {
+                        $muted = $p['group_volume_muted'];
+                    }
                 }
 
                 $this->SendDebug(
