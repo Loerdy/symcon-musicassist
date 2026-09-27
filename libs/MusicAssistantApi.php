@@ -114,6 +114,14 @@ trait MusicAssistantApi
         $snippet = substr($trim, 0, 800);
         $this->SendDebug('MA HTTP', 'Code=' . $httpCode . ' BodySnippet=' . $snippet, 0);
 
+        if ($httpCode < 200 || $httpCode >= 300) {
+            $message = 'HTTP request failed with status ' . $httpCode;
+            if ($snippet !== '') {
+                $message .= ' Body: ' . $snippet;
+            }
+            throw new Exception($message);
+        }
+
         if (($trim === '' && ($httpCode === 200 || $httpCode === 204)) || $trim === 'null') {
             return [
                 'raw' => ['result' => null],
