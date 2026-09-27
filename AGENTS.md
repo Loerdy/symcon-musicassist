@@ -252,3 +252,43 @@ aus der vorhandenen Codebasis bzw. Dokumentation hervorgeht:
 
 Stattdessen die fehlende Information benennen und erklären, was für
 eine sichere Implementierung noch benötigt wird.
+
+## Music Assistant API
+
+Die für dieses Projekt maßgebliche Music-Assistant-API-Dokumentation
+wird vom lokalen Music-Assistant-Server bereitgestellt.
+
+Aktuelle API-Dokumentation:
+
+http://192.168.29.15:8095/api-docs
+
+Diese lokale Dokumentation entspricht der tatsächlich eingesetzten
+Music-Assistant-Version und ist für die Entwicklung dieses Projekts
+maßgeblich.
+
+Öffentliche oder über eine Internetsuche gefundene Music-Assistant-
+API-Dokumentationen können veraltet sein und dürfen nicht als
+maßgebliche Referenz für API-Endpunkte, Befehle, Parameter oder
+Antwortstrukturen verwendet werden.
+
+Vor Änderungen an Music-Assistant-API-Aufrufen:
+
+1. Zuerst die lokale API-Dokumentation unter
+   `http://192.168.29.15:8095/api-docs` prüfen.
+2. API-Befehle, Parameter und Antwortstrukturen mit dieser Version
+   abgleichen.
+3. Keine API-Endpunkte oder Parameter aufgrund älterer öffentlicher
+   Dokumentation verändern.
+4. Keine Music-Assistant-API-Funktionen oder Datenstrukturen erfinden.
+
+Falls die lokale API-Dokumentation nicht erreichbar ist, muss dies
+ausdrücklich angegeben werden. In diesem Fall keine Bewertung der
+vorhandenen Music-Assistant-API-Aufrufe anhand älterer öffentlicher
+Dokumentation vornehmen.
+
+Die bestehende Implementierung in
+
+`libs/MusicAssistantApi.php`
+
+ist zusätzlich als Ausgangspunkt für die Kommunikation mit Music
+Assistant zu berücksichtigen.
