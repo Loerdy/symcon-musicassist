@@ -314,6 +314,16 @@ class MusicAssistantPlayer extends IPSModule
             }
 
             $state = strtolower(trim((string)($q['state'] ?? '')));
+            $transportStates = ['idle' => 1, 'playing' => 2, 'paused' => 3];
+            if (isset($transportStates[$state])) {
+                $transport = $transportStates[$state];
+                if (@$this->GetIDForIdent('Transport') > 0 && (int)$this->GetValue('Transport') !== $transport) {
+                    $this->SetValue('Transport', $transport);
+                }
+            } else {
+                $this->SendDebug('PollState unknown queue state', $state, 0);
+            }
+
             $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
 
             $title = $artist = $album = '';
