@@ -638,7 +638,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->maCall('player_queues/play_media', [
             'queue_id' => $queueId,
             'media'    => $uri,
-            'enqueue'  => 'replace'
+            'option'   => 'replace'
         ]);
     }
 
