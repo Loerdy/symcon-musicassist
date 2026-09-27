@@ -117,7 +117,7 @@ class MusicAssistantConfigurator extends IPSModule
         $map = [];
         $count = 0;
         foreach ($items as $pl) {
-            if ($count >= 128) break;
+            if ($count >= 127) break;
 
             $idStr = (string)($pl['item_id'] ?? '');
             $id    = (int)$idStr;
@@ -168,7 +168,7 @@ class MusicAssistantConfigurator extends IPSModule
         $map = [];
         $count = 0;
         foreach ($items as $r) {
-            if ($count >= 128) break;
+            if ($count >= 127) break;
 
             $idStr = (string)($r['item_id'] ?? '');
             $id    = (int)$idStr;
