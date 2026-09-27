@@ -406,6 +406,18 @@ class MusicAssistantPlayer extends IPSModule
                     $muted = $p['volume_muted'];
                 }
 
+                $this->SendDebug(
+                    'Mute poll',
+                    'PlayerID=' . $pid .
+                    ' player_id=' . $id .
+                    ' name=' . (string)($p['name'] ?? '') .
+                    ' type=' . (string)($p['type'] ?? '') .
+                    ' volume_muted=' . json_encode($p['volume_muted'] ?? null) .
+                    ' group_volume_muted=' . json_encode($p['group_volume_muted'] ?? null) .
+                    ' selected=' . json_encode($muted),
+                    0
+                );
+
                 if ($muted !== null && @$this->GetIDForIdent('Mute') > 0) {
                     if ((bool)$this->GetValue('Mute') !== $muted) {
                         $this->SetValue('Mute', $muted);
