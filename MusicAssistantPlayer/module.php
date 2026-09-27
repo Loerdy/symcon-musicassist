@@ -398,6 +398,19 @@ class MusicAssistantPlayer extends IPSModule
                         $this->SetValue('VolumeLevel', $vol);
                     }
                 }
+
+                $muted = null;
+                if (is_bool($p['group_volume_muted'] ?? null)) {
+                    $muted = $p['group_volume_muted'];
+                } elseif (is_bool($p['volume_muted'] ?? null)) {
+                    $muted = $p['volume_muted'];
+                }
+
+                if ($muted !== null && @$this->GetIDForIdent('Mute') > 0) {
+                    if ((bool)$this->GetValue('Mute') !== $muted) {
+                        $this->SetValue('Mute', $muted);
+                    }
+                }
                 break;
             }
         } catch (Throwable $e) {
