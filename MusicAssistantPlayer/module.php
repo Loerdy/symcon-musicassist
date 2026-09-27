@@ -30,7 +30,6 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
         $this->SetBuffer('MsgId', '0');
-        $this->SetBuffer('QueueId', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
@@ -40,9 +39,6 @@ class MusicAssistantPlayer extends IPSModule
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
-
-        // Cache bei Änderungen immer leeren
-        $this->SetBuffer('QueueId', '');
 
         // Auswahl-Variablen
         $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
@@ -128,7 +124,6 @@ class MusicAssistantPlayer extends IPSModule
             ],
             'actions' => [
                 ['type' => 'Button', 'caption' => 'Konfiguration aktualisieren', 'onClick' => 'IPS_RequestAction($id, "UpdateConfigView", true);'],
-                ['type' => 'Button', 'caption' => 'Queue-Cache leeren', 'onClick' => 'IPS_RequestAction($id, "ClearQueueCache", true);'],
                 ['type' => 'Button', 'caption' => 'PollState jetzt', 'onClick' => 'IPS_RequestAction($id, "PollNow", true);'],
             ]
         ];
@@ -140,11 +135,6 @@ class MusicAssistantPlayer extends IPSModule
     {
         switch ($Ident) {
             case 'UpdateConfigView':
-                $this->UpdateConfigView();
-                break;
-
-            case 'ClearQueueCache':
-                $this->ClearQueueCache();
                 $this->UpdateConfigView();
                 break;
 
@@ -276,12 +266,6 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    public function ClearQueueCache(): void
-    {
-        $this->SetBuffer('QueueId', '');
-        $this->SendDebug('QueueCache', 'cleared', 0);
-    }
-
     public function UpdateConfigView(): void
     {
         $cfg = [
@@ -292,7 +276,6 @@ class MusicAssistantPlayer extends IPSModule
             'StateSyncInterval' => $this->ReadPropertyInteger('StateSyncInterval'),
             'PlaylistProfile'   => $this->ReadPropertyString('PlaylistProfile'),
             'RadioProfile'      => $this->ReadPropertyString('RadioProfile'),
-            'QueueIdCache'      => (string)$this->GetBuffer('QueueId'),
             'MsgId'             => (string)$this->GetBuffer('MsgId'),
         ];
 
@@ -309,60 +292,52 @@ class MusicAssistantPlayer extends IPSModule
     public function PollState(): void
     {
         try {
-            $queueId = $this->getQueueIdForPlayer();
+            try {
+                $q = $this->getActiveQueueForPlayer();
+            } catch (Throwable $e) {
+                $this->SendDebug('PollState queue failed', $e->getMessage(), 0);
+                return;
+            }
 
-            $resp   = $this->maCall('player_queues/all');
-            $queues = $resp['result'] ?? null;
-
-            if (is_array($queues) && $this->isList($queues)) {
-                foreach ($queues as $q) {
-                    if ((string)($q['queue_id'] ?? '') !== $queueId) {
-                        continue;
-                    }
-
-                    if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
-                        $shuffle = (bool)$q['shuffle_enabled'];
-                        if ((bool)$this->GetValue('Shuffle') !== $shuffle) {
-                            $this->SetValue('Shuffle', $shuffle);
-                        }
-                    }
-
-                    if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
-                        $repeat = strtolower(trim((string)$q['repeat_mode']));
-                        if (in_array($repeat, ['off', 'one', 'all'], true) && (string)$this->GetValue('Repeat') !== $repeat) {
-                            $this->SetValue('Repeat', $repeat);
-                        }
-                    }
-
-                    $state = strtolower(trim((string)($q['state'] ?? '')));
-                    $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
-
-                    $title = $artist = $album = '';
-                    if ($state !== 'idle' && $hasCurrent) {
-                        $mi = $q['current_item']['media_item'] ?? null;
-                        if (is_array($mi)) {
-                            $title = (string)($mi['name'] ?? '');
-                            if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
-                                $a0 = $mi['artists'][0];
-                                $artist = is_array($a0) ? (string)($a0['name'] ?? '') : (string)$a0;
-                            }
-                            if (isset($mi['album']) && is_array($mi['album'])) {
-                                $album = (string)($mi['album']['name'] ?? '');
-                            }
-                        }
-                    }
-
-                    $this->setIfChangedString('NowTitle', $title);
-                    $this->setIfChangedString('NowArtist', $artist);
-                    $this->setIfChangedString('NowAlbum', $album);
-
-                    break;
+            if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
+                $shuffle = (bool)$q['shuffle_enabled'];
+                if ((bool)$this->GetValue('Shuffle') !== $shuffle) {
+                    $this->SetValue('Shuffle', $shuffle);
                 }
             }
 
-            $this->updateVolumeFromPlayersAll();
+            if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
+                $repeat = strtolower(trim((string)$q['repeat_mode']));
+                if (in_array($repeat, ['off', 'one', 'all'], true) && (string)$this->GetValue('Repeat') !== $repeat) {
+                    $this->SetValue('Repeat', $repeat);
+                }
+            }
+
+            $state = strtolower(trim((string)($q['state'] ?? '')));
+            $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
+
+            $title = $artist = $album = '';
+            if ($state !== 'idle' && $hasCurrent) {
+                $mi = $q['current_item']['media_item'] ?? null;
+                if (is_array($mi)) {
+                    $title = (string)($mi['name'] ?? '');
+                    if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
+                        $a0 = $mi['artists'][0];
+                        $artist = is_array($a0) ? (string)($a0['name'] ?? '') : (string)$a0;
+                    }
+                    if (isset($mi['album']) && is_array($mi['album'])) {
+                        $album = (string)($mi['album']['name'] ?? '');
+                    }
+                }
+            }
+
+            $this->setIfChangedString('NowTitle', $title);
+            $this->setIfChangedString('NowArtist', $artist);
+            $this->setIfChangedString('NowAlbum', $album);
         } catch (Throwable $e) {
             $this->SendDebug('PollState failed', $e->getMessage(), 0);
+        } finally {
+            $this->updateVolumeFromPlayersAll();
         }
     }
 
@@ -440,13 +415,13 @@ class MusicAssistantPlayer extends IPSModule
 
     public function SetShuffle(bool $enabled): void
     {
-        $queueId = $this->playerId();
+        $queueId = $this->getQueueIdForPlayer();
         $this->maCall('player_queues/shuffle', ['queue_id' => $queueId, 'shuffle_enabled' => $enabled]);
     }
 
     public function SetRepeat(string $mode): void
     {
-        $queueId = $this->playerId();
+        $queueId = $this->getQueueIdForPlayer();
         $this->maCall('player_queues/repeat', ['queue_id' => $queueId, 'repeat_mode' => $mode]);
     }
 
@@ -545,42 +520,29 @@ class MusicAssistantPlayer extends IPSModule
 
     private function getQueueIdForPlayer(): string
     {
+        $queue = $this->getActiveQueueForPlayer();
+        return trim($queue['queue_id']);
+    }
+
+    private function getActiveQueueForPlayer(): array
+    {
         $playerId = $this->playerId();
 
-        $cached = trim((string)$this->GetBuffer('QueueId'));
-        if ($cached !== '') {
-            return $cached;
+        $resp = $this->maCall('player_queues/get_active_queue', ['player_id' => $playerId]);
+        if (!($resp['success'] ?? false)) {
+            throw new Exception('Failed to resolve active queue for PlayerID=' . $playerId);
         }
 
-        $resp   = $this->maCall('player_queues/all');
-        $result = $resp['result'];
+        $result = $resp['result'] ?? null;
+        $queueId = is_array($result) && is_string($result['queue_id'] ?? null)
+            ? trim($result['queue_id'])
+            : '';
 
-        if (is_array($result) && $this->isList($result)) {
-            foreach ($result as $q) {
-                $qid = (string)($q['queue_id'] ?? $q['id'] ?? '');
-                $pid = (string)($q['player_id'] ?? $q['player'] ?? $q['playerId'] ?? '');
-
-                if ($qid !== '' && $pid === $playerId) {
-                    $this->SetBuffer('QueueId', $qid);
-                    return $qid;
-                }
-                if ($qid !== '' && $qid === $playerId) {
-                    $this->SetBuffer('QueueId', $qid);
-                    return $qid;
-                }
-                if ($qid !== '' && isset($q['players']) && is_array($q['players'])) {
-                    foreach ($q['players'] as $p) {
-                        if ((string)$p === $playerId) {
-                            $this->SetBuffer('QueueId', $qid);
-                            return $qid;
-                        }
-                    }
-                }
-            }
+        if ($queueId === '') {
+            throw new Exception('No valid active queue found for PlayerID=' . $playerId);
         }
 
-        $this->SetBuffer('QueueId', $playerId);
-        return $playerId;
+        return $result;
     }
 
     private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): void
@@ -655,7 +617,7 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Media URI is empty');
         }
 
-        $queueId = $this->playerId();
+        $queueId = $this->getQueueIdForPlayer();
         $this->maCall('player_queues/play_media', [
             'queue_id' => $queueId,
             'media'    => $uri,
