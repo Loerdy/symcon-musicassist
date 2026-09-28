@@ -20,7 +20,6 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->RegisterPropertyString('Host', '127.0.0.1');
         $this->RegisterPropertyInteger('Port', 8095);
-        $this->RegisterPropertyString('Token', '');
 
         $this->RegisterPropertyString('PlayerID', '');
 
@@ -29,9 +28,6 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->RegisterPropertyString('RadioProfile', '');
         $this->RegisterPropertyString('RadioMap', '{}');
-
-        // Veraltete Kompatibilitäts-Property für bestehende Instanzen; funktional nicht mehr verwendet.
-        $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');

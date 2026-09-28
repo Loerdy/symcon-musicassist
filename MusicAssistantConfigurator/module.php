@@ -17,7 +17,6 @@ class MusicAssistantConfigurator extends IPSModule
 
         $this->RegisterPropertyString('Host', '127.0.0.1');
         $this->RegisterPropertyInteger('Port', 8095);
-        $this->RegisterPropertyString('Token', '');
         $this->RegisterPropertyInteger('TargetCategoryID', 0);
 
         $this->RegisterAttributeString('ProfileNames', '');
