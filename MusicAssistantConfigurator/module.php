@@ -163,14 +163,13 @@ class MusicAssistantConfigurator extends IPSModule
 
         $newPlayerId = 0;
         try {
-            $existingPlayerId = $this->findExistingPlayerInstance($playerId);
+            $connectionId = $this->getConfiguratorConnectionId();
+            $existingPlayerId = $this->findExistingPlayerInstance($playerId, $connectionId);
             if ($existingPlayerId > 0) {
                 return 'Player existiert bereits als Instanz ' . $existingPlayerId . '.';
             }
 
             $targetCategoryId = $this->getValidTargetCategoryId();
-            $connectionId = $this->findUniqueConnectionInstance();
-            $this->validateConnectionInstance($connectionId);
             if (!IPS_IsModuleCompatible(self::PLAYER_MODULE_ID, self::CONNECTION_MODULE_ID)) {
                 throw new Exception('MusicAssistantPlayer und MusicAssistantConnection sind nicht kompatibel.');
             }
@@ -195,7 +194,7 @@ class MusicAssistantConfigurator extends IPSModule
                 throw new Exception('Player konnte nicht in den ausgewählten Zielordner verschoben werden.');
             }
 
-            $this->validateConnectionInstance($connectionId);
+            $this->validateConfiguratorConnection($connectionId);
             if (!IPS_IsInstanceCompatible($newPlayerId, $connectionId)
                 || !IPS_ConnectInstance($newPlayerId, $connectionId)) {
                 throw new Exception('Player konnte nicht mit der MusicAssistantConnection verbunden werden.');
@@ -408,7 +407,9 @@ class MusicAssistantConfigurator extends IPSModule
     private function buildPlayerListValues(): array
     {
         $players = [];
+        $connectionId = 0;
         try {
+            $connectionId = $this->getConfiguratorConnectionId();
             $result = $this->sendApiRequest('players/all');
 
             if (is_array($result) && $this->isList($result)) {
@@ -429,7 +430,7 @@ class MusicAssistantConfigurator extends IPSModule
             $provider = (string)($p['provider'] ?? '');
             $avail    = (bool)($p['available'] ?? false);
 
-            $instanceId = $this->findExistingPlayerInstance($playerId);
+            $instanceId = $this->findExistingPlayerInstance($playerId, $connectionId);
 
             $row = [
                 'name'        => $name,
@@ -474,33 +475,31 @@ class MusicAssistantConfigurator extends IPSModule
         ];
     }
 
-    private function findUniqueConnectionInstance(): int
+    private function getConfiguratorConnectionId(): int
     {
-        $matches = [];
-        foreach (IPS_GetInstanceListByModuleID(self::CONNECTION_MODULE_ID) as $connectionId) {
-            if ($this->connectionMatchesServer((int)$connectionId)) {
-                $matches[] = (int)$connectionId;
-            }
+        $configurator = IPS_GetInstance($this->InstanceID);
+        if (!is_array($configurator)) {
+            throw new Exception('Die Configurator-Instanz konnte nicht gelesen werden.');
         }
-        if (count($matches) === 0) {
-            throw new Exception('Keine passende MusicAssistantConnection für Host und Port gefunden.');
+        $connectionId = (int)($configurator['ConnectionID'] ?? 0);
+        if ($connectionId <= 0) {
+            throw new Exception('Der Configurator ist nicht mit einer MusicAssistantConnection verbunden.');
         }
-        if (count($matches) > 1) {
-            throw new Exception('Mehrere passende MusicAssistantConnections für Host und Port gefunden.');
+        if (!IPS_InstanceExists($connectionId)) {
+            throw new Exception('Die MusicAssistantConnection des Configurators ist nicht mehr vorhanden.');
         }
-        return $matches[0];
+        $connection = IPS_GetInstance($connectionId);
+        if (!is_array($connection)
+            || ($connection['ModuleInfo']['ModuleID'] ?? null) !== self::CONNECTION_MODULE_ID) {
+            throw new Exception('Der Configurator ist nicht mit einer gültigen MusicAssistantConnection verbunden.');
+        }
+        return $connectionId;
     }
 
-    private function validateConnectionInstance(int $connectionId): void
+    private function validateConfiguratorConnection(int $connectionId): void
     {
-        if (!IPS_InstanceExists($connectionId)) {
-            throw new Exception('Die passende MusicAssistantConnection ist nicht mehr vorhanden.');
-        }
-        $instance = @IPS_GetInstance($connectionId);
-        if (!is_array($instance)
-            || ($instance['ModuleInfo']['ModuleID'] ?? null) !== self::CONNECTION_MODULE_ID
-            || !$this->connectionMatchesServer($connectionId)) {
-            throw new Exception('Die passende MusicAssistantConnection wurde zwischenzeitlich geändert.');
+        if ($this->getConfiguratorConnectionId() !== $connectionId) {
+            throw new Exception('Die MusicAssistantConnection des Configurators wurde zwischenzeitlich geändert.');
         }
     }
 
@@ -662,16 +661,17 @@ class MusicAssistantConfigurator extends IPSModule
         }
     }
 
-    private function findExistingPlayerInstance(string $playerId): int
+    private function findExistingPlayerInstance(string $playerId, int $connectionId): int
     {
         $ids = IPS_GetInstanceListByModuleID(self::PLAYER_MODULE_ID);
         foreach ($ids as $id) {
+            $instance = IPS_GetInstance($id);
+            if (!is_array($instance) || (int)($instance['ConnectionID'] ?? 0) !== $connectionId) {
+                continue;
+            }
             $cfg = IPS_GetConfiguration($id);
             $arr = json_decode($cfg, true);
-            if (is_array($arr) && (string)($arr['PlayerID'] ?? '') === $playerId
-                && $this->normalizeServerHost((string)($arr['Host'] ?? ''))
-                    === $this->normalizeServerHost($this->ReadPropertyString('Host'))
-                && (int)($arr['Port'] ?? 0) === $this->ReadPropertyInteger('Port')) {
+            if (is_array($arr) && (string)($arr['PlayerID'] ?? '') === $playerId) {
                 return (int)$id;
             }
         }
