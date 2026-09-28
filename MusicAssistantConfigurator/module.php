@@ -85,9 +85,6 @@ class MusicAssistantConfigurator extends IPSModule
 
         $form = [
             'elements' => [
-                ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
-                ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
-                ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
                 [
                     'type'    => 'SelectCategory',
                     'name'    => 'TargetCategoryID',

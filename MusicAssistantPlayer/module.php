@@ -155,10 +155,6 @@ class MusicAssistantPlayer extends IPSModule
         // Daher Anzeige über Label und UpdateFormField.
         $form = [
             'elements' => [
-                ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
-                ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
-                ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
-
                 ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
                 ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
                 // Inhalt wird per UpdateFormField("ConfigView","caption", ...) gesetzt
@@ -349,8 +345,6 @@ class MusicAssistantPlayer extends IPSModule
     {
         $cfg = [
             'InstanceID'        => $this->InstanceID,
-            'Host'              => $this->ReadPropertyString('Host'),
-            'Port'              => $this->ReadPropertyInteger('Port'),
             'PlayerID'          => $this->ReadPropertyString('PlayerID'),
             'PlaylistProfile'   => $this->ReadPropertyString('PlaylistProfile'),
             'RadioProfile'      => $this->ReadPropertyString('RadioProfile'),
