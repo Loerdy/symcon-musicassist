@@ -165,8 +165,7 @@ class MusicAssistantPlayer extends IPSModule
                     $this->updateTransportFromQueueState($data['state']);
                 }
                 if (array_key_exists('current_item', $data)) {
-                    $state = array_key_exists('state', $data) ? $data['state'] : null;
-                    if ($this->updateMetadataFromQueueItem($data['current_item'], $state)) {
+                    if ($this->updateMetadataFromQueueItem($data['current_item'])) {
                         $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
                     }
                 }
@@ -378,7 +377,7 @@ class MusicAssistantPlayer extends IPSModule
             $state = $q['state'] ?? '';
             $this->updateTransportFromQueueState($state);
             $currentItem = $q['current_item'] ?? null;
-            $this->updateMetadataFromQueueItem(is_array($currentItem) ? $currentItem : null, $state);
+            $this->updateMetadataFromQueueItem(is_array($currentItem) ? $currentItem : null);
         } catch (Throwable $e) {
             $this->SendDebug('PollState failed', $e->getMessage(), 0);
         } finally {
@@ -480,15 +479,14 @@ class MusicAssistantPlayer extends IPSModule
         return true;
     }
 
-    private function updateMetadataFromQueueItem($currentItem, $state): bool
+    private function updateMetadataFromQueueItem($currentItem): bool
     {
         if ($currentItem !== null && !is_array($currentItem)) {
             return false;
         }
 
         $title = $artist = $album = '';
-        $normalizedState = is_string($state) ? strtolower(trim($state)) : null;
-        if ($normalizedState !== 'idle' && is_array($currentItem)) {
+        if (is_array($currentItem)) {
             $mediaItem = $currentItem['media_item'] ?? null;
             if (is_array($mediaItem)) {
                 $title = (string)($mediaItem['name'] ?? '');
