@@ -35,6 +35,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetBuffer('RegisteredPlayerID', '');
         $this->SetBuffer('ParentRetryAttempts', '0');
         $this->SetBuffer('ParentUnavailableLogged', '0');
+        $this->SetBuffer('QueueMetadata', '{}');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
@@ -185,6 +186,14 @@ class MusicAssistantPlayer extends IPSModule
                     if ($this->updateMetadataFromQueueItem($data['current_item'])) {
                         $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
                     }
+                    if ($data['current_item'] === null) {
+                        $this->SetBuffer('QueueMetadata', '{}');
+                    } elseif (is_array($data['current_item'])) {
+                        $this->cacheDisplayedMetadata(true);
+                    }
+                }
+                if (array_key_exists('state', $data)) {
+                    $this->updateMetadataVisibilityFromQueueState($data['state'], $hasCurrentItem);
                 }
                 try {
                     if ($hasCurrentItem) {
@@ -461,6 +470,50 @@ class MusicAssistantPlayer extends IPSModule
         $changed = $this->setIfChangedString('NowTitle', $title);
         $changed = $this->setIfChangedString('NowArtist', $artist) || $changed;
         return $this->setIfChangedString('NowAlbum', $album) || $changed;
+    }
+
+    private function updateMetadataVisibilityFromQueueState($state, bool $hasCurrentItem): void
+    {
+        $normalizedState = is_string($state) ? strtolower(trim($state)) : '';
+        if ($normalizedState === 'idle') {
+            if (!$hasCurrentItem) {
+                $this->cacheDisplayedMetadata(false);
+            }
+            $this->updateMetadataFromQueueItem(null);
+            return;
+        }
+        if (!$hasCurrentItem && in_array($normalizedState, ['playing', 'paused'], true)) {
+            $metadata = json_decode($this->GetBuffer('QueueMetadata'), true);
+            if (is_array($metadata)) {
+                $this->setIfChangedString('NowTitle', (string)($metadata['title'] ?? ''));
+                $this->setIfChangedString('NowArtist', (string)($metadata['artist'] ?? ''));
+                $this->setIfChangedString('NowAlbum', (string)($metadata['album'] ?? ''));
+            }
+        }
+    }
+
+    private function readStringVariable(string $ident): string
+    {
+        if (@$this->GetIDForIdent($ident) <= 0) {
+            return '';
+        }
+        return (string)$this->GetValue($ident);
+    }
+
+    private function cacheDisplayedMetadata(bool $allowEmpty): void
+    {
+        $metadata = [
+            'title'  => $this->readStringVariable('NowTitle'),
+            'artist' => $this->readStringVariable('NowArtist'),
+            'album'  => $this->readStringVariable('NowAlbum')
+        ];
+        if (!$allowEmpty && $metadata['title'] === '' && $metadata['artist'] === '' && $metadata['album'] === '') {
+            return;
+        }
+        $this->SetBuffer(
+            'QueueMetadata',
+            json_encode($metadata, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)
+        );
     }
 
     private function updateCoverFromQueueItem($currentItem, $state): void
