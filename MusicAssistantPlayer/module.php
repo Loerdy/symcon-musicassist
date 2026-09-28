@@ -7,6 +7,7 @@ class MusicAssistantPlayer extends IPSModule
 {
     use MusicAssistantApi;
 
+    private const CONNECTION_MODULE_ID = '{880534D6-998A-704B-DFD1-ABCD3D23B811}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const REPEAT_PROFILE  = 'MA.RepeatMode';
@@ -43,7 +44,9 @@ class MusicAssistantPlayer extends IPSModule
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+        $this->ensureConnectionParent();
         $this->registerParentStatusMessage();
+        $this->registerWithParent();
 
         // Auswahl-Variablen
         $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
@@ -108,7 +111,6 @@ class MusicAssistantPlayer extends IPSModule
 
         // Konfig-Anzeige initial aktualisieren
         $this->UpdateConfigView();
-        $this->registerWithParent();
     }
 
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
@@ -562,6 +564,95 @@ class MusicAssistantPlayer extends IPSModule
             $this->SetBuffer('RegisteredPlayerID', '');
         }
         $this->SetBuffer('ParentInstanceId', (string)$parentId);
+    }
+
+    private function ensureConnectionParent(): void
+    {
+        $host = $this->normalizeServerHost($this->ReadPropertyString('Host'));
+        $port = $this->ReadPropertyInteger('Port');
+        if ($host === '' || $port <= 0 || $port > 65535) {
+            $this->SendDebug('Parent', 'Host/Port nicht für automatische Parent-Zuordnung geeignet', 0);
+            return;
+        }
+
+        $instance = IPS_GetInstance($this->InstanceID);
+        $parentId = (int)($instance['ConnectionID'] ?? 0);
+        $matches = [];
+        foreach (IPS_GetInstanceListByModuleID(self::CONNECTION_MODULE_ID) as $connectionId) {
+            if ($this->connectionMatchesServer((int)$connectionId)) {
+                $matches[] = (int)$connectionId;
+            }
+        }
+
+        if ($parentId > 0 && in_array($parentId, $matches, true)) {
+            return;
+        }
+        if (count($matches) === 0) {
+            $message = $parentId > 0
+                ? 'Bestehende Parent-Verbindung passt nicht zu Host/Port; unverändert'
+                : 'Keine passende MusicAssistantConnection gefunden';
+            $this->SendDebug('Parent', $message, 0);
+            return;
+        }
+        if (count($matches) > 1) {
+            $this->SendDebug('Parent', 'Mehrere passende MusicAssistantConnections gefunden; keine Verbindung geändert', 0);
+            return;
+        }
+
+        if ($parentId > 0) {
+            $registeredPlayerId = $this->GetBuffer('RegisteredPlayerID');
+            if ($registeredPlayerId !== ''
+                && !$this->sendRegistrationRequest('UnregisterPlayer', $registeredPlayerId)) {
+                $this->SendDebug('Parent', 'Parent-Wechsel abgebrochen; Abmeldung beim bisherigen Parent fehlgeschlagen', 0);
+                return;
+            }
+            if (!IPS_DisconnectInstance($this->InstanceID)) {
+                $this->SendDebug('Parent', 'Parent-Wechsel abgebrochen; bisherige Verbindung konnte nicht getrennt werden', 0);
+                return;
+            }
+            $this->SetBuffer('RegisteredPlayerID', '');
+        }
+
+        if (IPS_ConnectInstance($this->InstanceID, $matches[0])) {
+            $message = $parentId > 0
+                ? 'Auf passende MusicAssistantConnection gewechselt: '
+                : 'Passende MusicAssistantConnection verbunden: ';
+            $this->SendDebug('Parent', $message . $matches[0], 0);
+            return;
+        }
+
+        if ($parentId > 0 && IPS_ConnectInstance($this->InstanceID, $parentId)) {
+            $this->SendDebug('Parent', 'Verbindung mit passender Connection fehlgeschlagen; bisheriger Parent wiederhergestellt', 0);
+            return;
+        }
+        $this->SendDebug('Parent', 'Verbindung mit MusicAssistantConnection fehlgeschlagen: ' . $matches[0], 0);
+    }
+
+    private function connectionMatchesServer(int $connectionId): bool
+    {
+        if (!IPS_InstanceExists($connectionId)) {
+            return false;
+        }
+        $connection = IPS_GetInstance($connectionId);
+        if (($connection['ModuleInfo']['ModuleID'] ?? null) !== self::CONNECTION_MODULE_ID) {
+            return false;
+        }
+        $configuration = json_decode(IPS_GetConfiguration($connectionId), true);
+        return is_array($configuration)
+            && $this->normalizeServerHost((string)($configuration['Host'] ?? ''))
+                === $this->normalizeServerHost($this->ReadPropertyString('Host'))
+            && (int)($configuration['Port'] ?? 0) === $this->ReadPropertyInteger('Port');
+    }
+
+    private function normalizeServerHost(string $host): string
+    {
+        $host = trim($host);
+        if (strlen($host) >= 2 && $host[0] === '[' && substr($host, -1) === ']') {
+            $host = substr($host, 1, -1);
+        }
+        $host = strtolower(rtrim($host, '.'));
+        $packedAddress = @inet_pton($host);
+        return $packedAddress === false ? $host : bin2hex($packedAddress);
     }
 
     private function registerWithParent(): void

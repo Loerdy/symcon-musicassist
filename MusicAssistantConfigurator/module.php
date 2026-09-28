@@ -291,11 +291,25 @@ class MusicAssistantConfigurator extends IPSModule
         foreach ($ids as $id) {
             $cfg = IPS_GetConfiguration($id);
             $arr = json_decode($cfg, true);
-            if (is_array($arr) && (string)($arr['PlayerID'] ?? '') === $playerId) {
+            if (is_array($arr) && (string)($arr['PlayerID'] ?? '') === $playerId
+                && $this->normalizeServerHost((string)($arr['Host'] ?? ''))
+                    === $this->normalizeServerHost($this->ReadPropertyString('Host'))
+                && (int)($arr['Port'] ?? 0) === $this->ReadPropertyInteger('Port')) {
                 return (int)$id;
             }
         }
         return 0;
+    }
+
+    private function normalizeServerHost(string $host): string
+    {
+        $host = trim($host);
+        if (strlen($host) >= 2 && $host[0] === '[' && substr($host, -1) === ']') {
+            $host = substr($host, 1, -1);
+        }
+        $host = strtolower(rtrim($host, '.'));
+        $packedAddress = @inet_pton($host);
+        return $packedAddress === false ? $host : bin2hex($packedAddress);
     }
 
     private function isList(array $arr): bool
