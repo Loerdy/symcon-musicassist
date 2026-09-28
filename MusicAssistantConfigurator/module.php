@@ -73,13 +73,16 @@ class MusicAssistantConfigurator extends IPSModule
                         ['caption' => 'Available', 'name' => 'available', 'width' => '90px']
                     ],
                     'values'  => $values
-                ]
-            ],
-            'actions' => [
+                ],
                 [
                     'type'    => 'Button',
                     'caption' => 'Ausgewählten Player erstellen',
                     'onClick' => 'echo MA_CreatePlayer($id, (string)($Players["player_id"] ?? ""), (string)($Players["name"] ?? ""));'
+                ],
+                [
+                    'type'    => 'Button',
+                    'caption' => 'Alle fehlenden Player erstellen',
+                    'onClick' => 'echo MA_CreateMissingPlayers($id);'
                 ],
                 [
                     'type'    => 'Button',
@@ -92,7 +95,7 @@ class MusicAssistantConfigurator extends IPSModule
         return json_encode($form);
     }
 
-    public function CreatePlayer(string $playerId, string $name): string
+    public function CreatePlayer(string $playerId, string $name, bool $reloadForm = true): string
     {
         $playerId = trim($playerId);
         if ($playerId === '') {
@@ -145,10 +148,12 @@ class MusicAssistantConfigurator extends IPSModule
 
             $createdPlayerId = $newPlayerId;
             $newPlayerId = 0;
-            try {
-                $this->ReloadForm();
-            } catch (Throwable $e) {
-                $this->SendDebug('CreatePlayer', 'Formular konnte nach der Erstellung nicht aktualisiert werden', 0);
+            if ($reloadForm) {
+                try {
+                    $this->ReloadForm();
+                } catch (Throwable $e) {
+                    $this->SendDebug('CreatePlayer', 'Formular konnte nach der Erstellung nicht aktualisiert werden', 0);
+                }
             }
             return 'Player wurde als Instanz ' . $createdPlayerId . ' erstellt.';
         } catch (Throwable $e) {
@@ -165,6 +170,44 @@ class MusicAssistantConfigurator extends IPSModule
         } finally {
             IPS_SemaphoreLeave($semaphore);
         }
+    }
+
+    public function CreateMissingPlayers(): string
+    {
+        $created = 0;
+        $existing = 0;
+        $failures = [];
+        foreach ($this->buildPlayersConfiguratorValues() as $player) {
+            if ((int)($player['instanceID'] ?? 0) > 0) {
+                $existing++;
+                continue;
+            }
+            $playerId = (string)($player['player_id'] ?? '');
+            $name = (string)($player['name'] ?? $playerId);
+            try {
+                $result = $this->CreatePlayer($playerId, $name, false);
+                if (strpos($result, 'existiert bereits') !== false) {
+                    $existing++;
+                } else {
+                    $created++;
+                }
+            } catch (Throwable $e) {
+                $failures[] = $name . ': ' . $e->getMessage();
+            }
+        }
+
+        try {
+            $this->ReloadForm();
+        } catch (Throwable $e) {
+            $this->SendDebug('CreatePlayer', 'Formular konnte nach der Erstellung nicht aktualisiert werden', 0);
+        }
+
+        $summary = 'Erstellt: ' . $created . '; bereits vorhanden: ' . $existing
+            . '; fehlgeschlagen: ' . count($failures) . '.';
+        if (count($failures) > 0) {
+            $summary .= "\n" . implode("\n", $failures);
+        }
+        return $summary;
     }
 
     public function SyncPlaylistsProfile(): void
@@ -322,11 +365,6 @@ class MusicAssistantConfigurator extends IPSModule
             $this->SendDebug('Players', 'players/all failed: ' . $e->getMessage(), 0);
         }
 
-        $playlistProfile = $this->playlistProfileName();
-        $radioProfile    = $this->radioProfileName();
-        $playlistMap     = $this->getPlaylistMap();
-        $radioMap        = $this->getRadioMap();
-
         $rows = [];
         foreach ($players as $p) {
             $playerId = (string)($p['player_id'] ?? $p['id'] ?? '');
@@ -338,48 +376,29 @@ class MusicAssistantConfigurator extends IPSModule
 
             $instanceId = $this->findExistingPlayerInstance($playerId);
 
-            $row = [
+            $rows[] = [
                 'name'       => $name,
                 'player_id'  => $playerId,
                 'provider'   => $provider,
                 'available'  => $avail ? 'Yes' : 'No',
                 'instanceID' => $instanceId
             ];
-            if ($instanceId > 0) {
-                $row['create'] = [
-                    'moduleID' => self::PLAYER_MODULE_ID,
-                    'name'     => 'MA Player - ' . $name,
-                    'configuration' => $this->playerConfiguration(
-                        $playerId,
-                        $playlistProfile,
-                        $playlistMap,
-                        $radioProfile,
-                        $radioMap
-                    )
-                ];
-            }
-            $rows[] = $row;
         }
 
         return $rows;
     }
 
-    private function playerConfiguration(
-        string $playerId,
-        ?string $playlistProfile = null,
-        ?array $playlistMap = null,
-        ?string $radioProfile = null,
-        ?array $radioMap = null
-    ): array {
+    private function playerConfiguration(string $playerId): array
+    {
         return [
             'Host'            => $this->ReadPropertyString('Host'),
             'Port'            => $this->ReadPropertyInteger('Port'),
             'Token'           => $this->ReadPropertyString('Token'),
             'PlayerID'        => $playerId,
-            'PlaylistProfile' => $playlistProfile ?? $this->playlistProfileName(),
-            'PlaylistMap'     => json_encode($playlistMap ?? $this->getPlaylistMap(), JSON_UNESCAPED_SLASHES),
-            'RadioProfile'    => $radioProfile ?? $this->radioProfileName(),
-            'RadioMap'        => json_encode($radioMap ?? $this->getRadioMap(), JSON_UNESCAPED_SLASHES)
+            'PlaylistProfile' => $this->playlistProfileName(),
+            'PlaylistMap'     => json_encode($this->getPlaylistMap(), JSON_UNESCAPED_SLASHES),
+            'RadioProfile'    => $this->radioProfileName(),
+            'RadioMap'        => json_encode($this->getRadioMap(), JSON_UNESCAPED_SLASHES)
         ];
     }
 
