@@ -9,6 +9,7 @@ class MusicAssistantConfigurator extends IPSModule
 
     private const PLAYER_MODULE_ID = '{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}';
     private const CONNECTION_MODULE_ID = '{880534D6-998A-704B-DFD1-ABCD3D23B811}';
+    private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const PARENT_RETRY_PENDING = 0;
     private const PARENT_RETRY_DONE = 1;
@@ -271,8 +272,7 @@ class MusicAssistantConfigurator extends IPSModule
     {
         $profile = $this->playlistProfileName();
 
-        $resp = $this->maCall('music/playlists/library_items');
-        $result = $resp['result'];
+        $result = $this->sendApiRequest('music/playlists/library_items');
 
         $items = [];
         if (is_array($result) && $this->isList($result)) {
@@ -322,8 +322,7 @@ class MusicAssistantConfigurator extends IPSModule
     {
         $profile = $this->radioProfileName();
 
-        $resp = $this->maCall('music/radios/library_items');
-        $result = $resp['result'];
+        $result = $this->sendApiRequest('music/radios/library_items');
 
         $items = [];
         if (is_array($result) && $this->isList($result)) {
@@ -410,8 +409,7 @@ class MusicAssistantConfigurator extends IPSModule
     {
         $players = [];
         try {
-            $resp = $this->maCall('players/all');
-            $result = $resp['result'];
+            $result = $this->sendApiRequest('players/all');
 
             if (is_array($result) && $this->isList($result)) {
                 $players = $result;
@@ -605,6 +603,44 @@ class MusicAssistantConfigurator extends IPSModule
         return $this->normalizeServerHost((string)($configuration['Host'] ?? ''))
                 === $this->normalizeServerHost($this->ReadPropertyString('Host'))
             && (int)($configuration['Port'] ?? 0) === $this->ReadPropertyInteger('Port');
+    }
+
+    private function sendApiRequest(string $apiCommand, array $params = [])
+    {
+        try {
+            $response = $this->SendDataToParent(json_encode([
+                'DataID' => self::CONNECTION_REQUEST,
+                'Command' => 'ApiRequest',
+                'ApiCommand' => $apiCommand,
+                'Params' => (object)$params
+            ], JSON_THROW_ON_ERROR));
+        } catch (Throwable $e) {
+            throw new Exception('ApiRequest konnte nicht erzeugt oder gesendet werden.');
+        }
+
+        if (!is_string($response) || trim($response) === '') {
+            throw new Exception('ApiRequest lieferte keine gültige Antwort.');
+        }
+
+        try {
+            $result = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            throw new Exception('ApiRequest lieferte ungültiges JSON.');
+        }
+        if (!is_array($result)) {
+            throw new Exception('ApiRequest-Antwort ist kein JSON-Objekt.');
+        }
+        if (($result['success'] ?? false) !== true) {
+            $error = is_array($result['error'] ?? null) ? $result['error'] : [];
+            $code = is_string($error['code'] ?? null) && trim($error['code']) !== ''
+                ? trim($error['code'])
+                : 'UNKNOWN_ERROR';
+            $message = is_string($error['message'] ?? null) && trim($error['message']) !== ''
+                ? trim($error['message'])
+                : 'ApiRequest ist fehlgeschlagen.';
+            throw new Exception($code . ': ' . $message);
+        }
+        return $result['result'] ?? null;
     }
 
     private function rollbackCreatedPlayer(int $playerId): void
