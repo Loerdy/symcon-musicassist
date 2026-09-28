@@ -34,6 +34,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('RadioProfile', '');
         $this->RegisterPropertyString('RadioMap', '{}');
 
+        // Veraltete Kompatibilitäts-Property für bestehende Instanzen; funktional nicht mehr verwendet.
         $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
         $this->SetBuffer('MsgId', '0');
@@ -44,7 +45,6 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
-        $this->RegisterTimer('PollState', 0, 'MA_PollState($_IPS["TARGET"]);');
         $this->RegisterTimer('ParentConnectionRetry', 0, 'MA_RetryParentConnection($_IPS["TARGET"]);');
     }
 
@@ -117,10 +117,6 @@ class MusicAssistantPlayer extends IPSModule
             $this->SetValue('Repeat', 'off');
         }
 
-        // Polling-Timer
-        $sec = (int)$this->ReadPropertyInteger('StateSyncInterval');
-        $this->SetTimerInterval('PollState', ($sec > 0) ? $sec * 1000 : 0);
-
         // Konfig-Anzeige initial aktualisieren
         $this->UpdateConfigView();
     }
@@ -164,15 +160,12 @@ class MusicAssistantPlayer extends IPSModule
                 ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
 
                 ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
-                ['type' => 'NumberSpinner', 'name' => 'StateSyncInterval', 'caption' => 'Polling (Sek.)'],
-
                 ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
                 // Inhalt wird per UpdateFormField("ConfigView","caption", ...) gesetzt
                 ['type' => 'Label', 'name' => 'ConfigView', 'caption' => '']
             ],
             'actions' => [
                 ['type' => 'Button', 'caption' => 'Konfiguration aktualisieren', 'onClick' => 'IPS_RequestAction($id, "UpdateConfigView", true);'],
-                ['type' => 'Button', 'caption' => 'PollState jetzt', 'onClick' => 'IPS_RequestAction($id, "PollNow", true);'],
             ]
         ];
 
@@ -238,11 +231,6 @@ class MusicAssistantPlayer extends IPSModule
                 $this->UpdateConfigView();
                 break;
 
-            case 'PollNow':
-                $this->PollState();
-                $this->UpdateConfigView();
-                break;
-
             case 'Playlist':
                 try {
                     $itemId = (int)$Value;
@@ -251,7 +239,6 @@ class MusicAssistantPlayer extends IPSModule
                         $this->PlayMediaUri($uri);
                         $this->SetValue('Playlist', $itemId);
                         $this->SetTimerInterval('ResetPlaylist', 5000);
-                        $this->PollState();
                     }
                 } catch (Throwable $e) {
                     $this->SendDebug('Playlist start failed', $e->getMessage(), 0);
@@ -267,7 +254,6 @@ class MusicAssistantPlayer extends IPSModule
                         $this->PlayMediaUri($uri);
                         $this->SetValue('Radio', $itemId);
                         $this->SetTimerInterval('ResetRadio', 5000);
-                        $this->PollState();
                     }
                 } catch (Throwable $e) {
                     $this->SendDebug('Radio start failed', $e->getMessage(), 0);
@@ -278,14 +264,12 @@ class MusicAssistantPlayer extends IPSModule
             case 'Transport':
                 $this->ExecuteTransport((int)$Value);
                 $this->SetValue('Transport', (int)$Value);
-                $this->PollState();
                 break;
 
             case 'Shuffle':
                 $enabled = (bool)$Value;
                 $this->SetShuffle($enabled);
                 $this->SetValue('Shuffle', $enabled);
-                $this->PollState();
                 break;
 
             case 'Repeat':
@@ -295,7 +279,6 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 $this->SetRepeat($mode);
                 $this->SetValue('Repeat', $mode);
-                $this->PollState();
                 break;
 
             case 'Mute':
@@ -303,7 +286,6 @@ class MusicAssistantPlayer extends IPSModule
                 try {
                     $this->SetMute($muted);
                     $this->SetValue('Mute', $muted);
-                    $this->PollState();
                 } catch (Throwable $e) {
                     $this->SendDebug('Mute failed', $e->getMessage(), 0);
                     IPS_LogMessage('MusicAssistantPlayer', 'Mute failed: ' . $e->getMessage());
@@ -314,7 +296,6 @@ class MusicAssistantPlayer extends IPSModule
                 $level = max(0, min(100, (int)$Value));
                 try {
                     $this->SetVolumeLevel($level);
-                    $this->PollState();
                 } catch (Throwable $e) {
                     $this->SendDebug('VolumeSet failed', $e->getMessage(), 0);
                     IPS_LogMessage('MusicAssistantPlayer', 'VolumeSet failed: ' . $e->getMessage());
@@ -325,7 +306,6 @@ class MusicAssistantPlayer extends IPSModule
                 if ((int)$Value === 1) {
                     try {
                         $this->GroupVolumeUp();
-                        $this->PollState();
                     } catch (Throwable $e) {
                         $this->SendDebug('VolumeUp failed', $e->getMessage(), 0);
                     }
@@ -337,7 +317,6 @@ class MusicAssistantPlayer extends IPSModule
                 if ((int)$Value === 1) {
                     try {
                         $this->GroupVolumeDown();
-                        $this->PollState();
                     } catch (Throwable $e) {
                         $this->SendDebug('VolumeDown failed', $e->getMessage(), 0);
                     }
@@ -373,7 +352,6 @@ class MusicAssistantPlayer extends IPSModule
             'Host'              => $this->ReadPropertyString('Host'),
             'Port'              => $this->ReadPropertyInteger('Port'),
             'PlayerID'          => $this->ReadPropertyString('PlayerID'),
-            'StateSyncInterval' => $this->ReadPropertyInteger('StateSyncInterval'),
             'PlaylistProfile'   => $this->ReadPropertyString('PlaylistProfile'),
             'RadioProfile'      => $this->ReadPropertyString('RadioProfile'),
             'MsgId'             => (string)$this->GetBuffer('MsgId'),
@@ -387,86 +365,6 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         $this->UpdateFormField('ConfigView', 'caption', $text);
-    }
-
-    public function PollState(): void
-    {
-        try {
-            try {
-                $q = $this->getActiveQueueForPlayer();
-            } catch (Throwable $e) {
-                $this->SendDebug('PollState queue failed', $e->getMessage(), 0);
-                return;
-            }
-
-            if (array_key_exists('shuffle_enabled', $q)) {
-                $this->updateShuffleState($q['shuffle_enabled']);
-            }
-
-            if (array_key_exists('repeat_mode', $q)) {
-                $this->updateRepeatMode($q['repeat_mode']);
-            }
-
-            $state = $q['state'] ?? '';
-            $this->updateTransportFromQueueState($state);
-            $currentItem = $q['current_item'] ?? null;
-            $this->updateMetadataFromQueueItem(is_array($currentItem) ? $currentItem : null);
-        } catch (Throwable $e) {
-            $this->SendDebug('PollState failed', $e->getMessage(), 0);
-        } finally {
-            $this->updateVolumeFromPlayersAll();
-        }
-    }
-
-    private function updateVolumeFromPlayersAll(): void
-    {
-        try {
-            $pid = $this->playerId();
-
-            $resp = $this->maCall('players/all');
-            $players = $resp['result'] ?? null;
-
-            if (!is_array($players) || !$this->isList($players)) {
-                return;
-            }
-
-            foreach ($players as $p) {
-                $id = (string)($p['player_id'] ?? $p['id'] ?? '');
-                if ($id !== $pid) {
-                    continue;
-                }
-
-                $vol = null;
-                foreach (['volume_level', 'volume', 'volumeLevel', 'group_volume_level', 'group_volume', 'groupVolumeLevel'] as $k) {
-                    if (isset($p[$k])) {
-                        $vol = (int)$p[$k];
-                        break;
-                    }
-                }
-
-                $this->updateVolumeLevel($vol);
-
-                $muted = null;
-                if (($p['type'] ?? '') === 'group') {
-                    if (is_bool($p['group_volume_muted'] ?? null)) {
-                        $muted = $p['group_volume_muted'];
-                    } elseif (is_bool($p['volume_muted'] ?? null)) {
-                        $muted = $p['volume_muted'];
-                    }
-                } else {
-                    if (is_bool($p['volume_muted'] ?? null)) {
-                        $muted = $p['volume_muted'];
-                    } elseif (is_bool($p['group_volume_muted'] ?? null)) {
-                        $muted = $p['group_volume_muted'];
-                    }
-                }
-
-                $this->updateMuteState($muted);
-                break;
-            }
-        } catch (Throwable $e) {
-            $this->SendDebug('updateVolumeFromPlayersAll failed', $e->getMessage(), 0);
-        }
     }
 
     private function updateVolumeLevel($value): bool
