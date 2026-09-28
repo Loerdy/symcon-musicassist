@@ -55,7 +55,12 @@ trait MusicAssistantApi
     /**
      * @return array{raw:mixed, result:mixed, success:bool, http_code:int, body:string}
      */
-    protected function maCall(string $command, array $args = [], int $timeoutMs = 20000): array
+    protected function maCall(
+        string $command,
+        array $args = [],
+        int $timeoutMs = 20000,
+        bool $debugResponseBody = true
+    ): array
     {
         $timeoutMs = $this->maGetTimeoutMs($timeoutMs);
         $connectTimeoutMs = $this->maGetConnectTimeoutMs(5000);
@@ -112,7 +117,11 @@ trait MusicAssistantApi
         // Debug Body nicht komplett loggen (kann riesig werden) -> nur Snippet
         $trim = trim($body);
         $snippet = substr($trim, 0, 800);
-        $this->SendDebug('MA HTTP', 'Code=' . $httpCode . ' BodySnippet=' . $snippet, 0);
+        if ($debugResponseBody) {
+            $this->SendDebug('MA HTTP', 'Code=' . $httpCode . ' BodySnippet=' . $snippet, 0);
+        } else {
+            $this->SendDebug('MA HTTP', 'Code=' . $httpCode, 0);
+        }
 
         if ($httpCode < 200 || $httpCode >= 300) {
             $message = 'HTTP request failed with status ' . $httpCode;

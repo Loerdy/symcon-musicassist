@@ -1,13 +1,35 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/../libs/MusicAssistantApi.php';
+
 class MusicAssistantConnection extends IPSModule
 {
+    use MusicAssistantApi;
+
     private const WEBSOCKET_MODULE = '{D68FD31F-0E90-7019-F16C-1949BD3079EF}';
     private const WEBSOCKET_TX = '{79827379-F36E-4ADA-8A95-5F8D1DC92FA9}';
     private const WEBSOCKET_RX = '{018EF6B5-AB94-40C6-AA53-46943E824ACF}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
+    private const API_COMMANDS = [
+        'players/cmd/previous',
+        'players/cmd/stop',
+        'players/cmd/play',
+        'players/cmd/pause',
+        'players/cmd/next',
+        'players/cmd/volume_set',
+        'players/cmd/group_volume_up',
+        'players/cmd/group_volume_down',
+        'players/cmd/volume_mute',
+        'players/all',
+        'player_queues/get_active_queue',
+        'player_queues/shuffle',
+        'player_queues/repeat',
+        'player_queues/play_media',
+        'music/playlists/library_items',
+        'music/radios/library_items'
+    ];
 
     public function Create(): void
     {
@@ -15,6 +37,7 @@ class MusicAssistantConnection extends IPSModule
         $this->RegisterPropertyString('Host', '127.0.0.1');
         $this->RegisterPropertyInteger('Port', 8095);
         $this->RegisterPropertyString('Token', '');
+        $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('GreetingUrl', '');
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
@@ -198,19 +221,24 @@ class MusicAssistantConnection extends IPSModule
     public function ForwardData($JSONString): string
     {
         $request = json_decode($JSONString, true);
-        if (!is_array($request) || ($request['DataID'] ?? null) !== self::CONNECTION_REQUEST
+        if (!is_array($request) || ($request['DataID'] ?? null) !== self::CONNECTION_REQUEST) {
+            return json_encode(['success' => false]);
+        }
+
+        $command = $request['Command'] ?? null;
+        if ($command === 'ApiRequest') {
+            return $this->handleApiRequest($request);
+        }
+        if (!in_array($command, ['RegisterPlayer', 'UnregisterPlayer'], true)
             || !is_string($request['PlayerID'] ?? null)
             || trim($request['PlayerID']) === '') {
             return json_encode(['success' => false]);
         }
 
         $playerId = trim($request['PlayerID']);
-        if (($request['Command'] ?? null) === 'UnregisterPlayer') {
+        if ($command === 'UnregisterPlayer') {
             $this->unregisterPlayer($playerId);
             return json_encode(['success' => true]);
-        }
-        if (($request['Command'] ?? null) !== 'RegisterPlayer') {
-            return json_encode(['success' => false]);
         }
 
         $players = $this->readJsonBuffer('RegisteredPlayers');
@@ -224,6 +252,54 @@ class MusicAssistantConnection extends IPSModule
             $this->startPlayerResync($playerId);
         }
         return json_encode(['success' => true]);
+    }
+
+    private function handleApiRequest(array $request): string
+    {
+        $allowedFields = ['DataID', 'Command', 'ApiCommand', 'Params'];
+        if (count(array_diff(array_keys($request), $allowedFields)) > 0
+            || !is_string($request['ApiCommand'] ?? null)
+            || trim($request['ApiCommand']) === '') {
+            return $this->apiErrorResponse('INVALID_REQUEST', 'Ungültige API-Anfrage.');
+        }
+
+        $apiCommand = trim($request['ApiCommand']);
+        if (!in_array($apiCommand, self::API_COMMANDS, true)) {
+            return $this->apiErrorResponse('COMMAND_NOT_ALLOWED', 'API-Command ist nicht freigegeben.');
+        }
+
+        $params = $request['Params'] ?? [];
+        if (!is_array($params)
+            || (count($params) > 0 && array_keys($params) === range(0, count($params) - 1))) {
+            return $this->apiErrorResponse('INVALID_REQUEST', 'Params muss ein JSON-Objekt sein.');
+        }
+
+        try {
+            $response = $this->maCall($apiCommand, $params, 20000, false);
+            if (($response['success'] ?? false) !== true) {
+                $this->SendDebug('ApiRequest', 'Music-Assistant-Fehler für Command: ' . $apiCommand, 0);
+                return $this->apiErrorResponse('API_ERROR', 'Music-Assistant-Anfrage fehlgeschlagen.');
+            }
+            return json_encode([
+                'success'   => true,
+                'result'    => $response['result'] ?? null,
+                'http_code' => (int)($response['http_code'] ?? 0)
+            ], JSON_UNESCAPED_SLASHES);
+        } catch (Throwable $e) {
+            $this->SendDebug('ApiRequest', 'HTTP-Anfrage fehlgeschlagen für Command: ' . $apiCommand, 0);
+            return $this->apiErrorResponse('API_ERROR', 'Music-Assistant-Anfrage fehlgeschlagen.');
+        }
+    }
+
+    private function apiErrorResponse(string $code, string $message): string
+    {
+        return json_encode([
+            'success' => false,
+            'error' => [
+                'code' => $code,
+                'message' => $message
+            ]
+        ], JSON_UNESCAPED_SLASHES);
     }
 
     public function CheckConnection(): void
