@@ -563,7 +563,7 @@ class MusicAssistantConfigurator extends IPSModule
         $connectionId = 0;
         try {
             $connectionId = $this->getConfiguratorConnectionId();
-            $result = $this->sendApiRequest('players/all');
+            $result = @$this->sendApiRequest('players/all');
 
             if (is_array($result) && $this->isList($result)) {
                 $players = $result;
