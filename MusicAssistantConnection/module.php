@@ -275,6 +275,11 @@ class MusicAssistantConnection extends IPSModule
         }
 
         try {
+            $this->SendDebug(
+                'ApiRequest',
+                'Command=' . $apiCommand,
+                0
+            );
             $response = $this->maCall($apiCommand, $params, 20000, false);
             if (($response['success'] ?? false) !== true) {
                 $this->SendDebug('ApiRequest', 'Music-Assistant-Fehler für Command: ' . $apiCommand, 0);
