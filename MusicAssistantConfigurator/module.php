@@ -95,7 +95,12 @@ class MusicAssistantConfigurator extends IPSModule
         return json_encode($form);
     }
 
-    public function CreatePlayer(string $playerId, string $name, bool $reloadForm = true): string
+    public function CreatePlayer(string $playerId, string $name): string
+    {
+        return $this->createPlayerInternal($playerId, $name, true);
+    }
+
+    private function createPlayerInternal(string $playerId, string $name, bool $reloadForm): string
     {
         $playerId = trim($playerId);
         if ($playerId === '') {
@@ -185,7 +190,7 @@ class MusicAssistantConfigurator extends IPSModule
             $playerId = (string)($player['player_id'] ?? '');
             $name = (string)($player['name'] ?? $playerId);
             try {
-                $result = $this->CreatePlayer($playerId, $name, false);
+                $result = $this->createPlayerInternal($playerId, $name, false);
                 if (strpos($result, 'existiert bereits') !== false) {
                     $existing++;
                 } else {
