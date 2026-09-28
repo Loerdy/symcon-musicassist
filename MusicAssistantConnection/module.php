@@ -19,6 +19,8 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthStarted', '0');
         $this->SetBuffer('ConnectionGeneration', '0');
         $this->SetBuffer('ParentInstanceId', '0');
+        $this->SetBuffer('ParentReconnectPending', '0');
+        $this->SetBuffer('ParentReconnectAttempted', '0');
         $this->RegisterTimer('CheckConnection', 0, 'MAC_CheckConnection($_IPS["TARGET"]);');
         $this->RequireParent(self::WEBSOCKET_MODULE);
     }
@@ -33,11 +35,15 @@ class MusicAssistantConnection extends IPSModule
         $this->SetStatus($this->isConfigured() ? 104 : 201);
         $this->SetTimerInterval('CheckConnection', $this->isConfigured() ? 5000 : 0);
 
-        // Ein Tokenwechsel braucht bei unverändertem, verbundenem Parent keine neue Begrüßung.
+        // Eine bekannte, unveränderte Sitzung kann z. B. nach einem Tokenwechsel weiterverwendet werden.
         if ($this->isConfigured() && $this->HasActiveParent()
             && $this->GetBuffer('GreetingUrl') === $this->webSocketUrl()
+            && (int)$this->GetBuffer('ConnectionGeneration') > 0
             && $this->GetBuffer('AuthMessageId') === '' && $this->GetStatus() !== 102) {
             $this->authenticate();
+        } elseif ($this->isConfigured() && $this->HasActiveParent()
+            && $this->GetBuffer('ParentReconnectAttempted') !== '1') {
+            $this->SetBuffer('ParentReconnectPending', '1');
         }
     }
 
@@ -101,6 +107,8 @@ class MusicAssistantConnection extends IPSModule
             $this->SetBuffer('AuthMessageId', '');
             $this->SetBuffer('AuthGeneration', '');
             $this->SetBuffer('AuthStarted', '0');
+            $this->SetBuffer('ParentReconnectPending', '0');
+            $this->SetBuffer('ParentReconnectAttempted', '0');
             $this->SetStatus(104);
             $this->SendDebug('WebSocket', 'Server-Begrüßung empfangen', 0);
             $this->authenticate();
@@ -138,6 +146,10 @@ class MusicAssistantConnection extends IPSModule
     {
         if (!$this->isConfigured() || !$this->HasActiveParent()) {
             $this->handleConnectionLost();
+            return;
+        }
+        if ($this->GetBuffer('ParentReconnectPending') === '1') {
+            $this->reconnectParent();
             return;
         }
         $started = (int)$this->GetBuffer('AuthStarted');
@@ -201,6 +213,7 @@ class MusicAssistantConnection extends IPSModule
         }
         if ($previousParentId !== $parentId) {
             $this->SetBuffer('GreetingUrl', '');
+            $this->SetBuffer('ParentReconnectAttempted', '0');
         }
         $this->SetBuffer('ParentInstanceId', (string)$parentId);
     }
@@ -220,6 +233,21 @@ class MusicAssistantConnection extends IPSModule
         if ($wasConnected) {
             $this->SendDebug('WebSocket', 'Verbindung verloren; Sitzung invalidiert', 0);
         }
+    }
+
+    private function reconnectParent(): void
+    {
+        $parentId = (int)$this->GetBuffer('ParentInstanceId');
+        $this->SetBuffer('ParentReconnectPending', '0');
+        $this->SetBuffer('ParentReconnectAttempted', '1');
+        $this->handleConnectionLost();
+
+        if ($parentId <= 0 || !IPS_ApplyChanges($parentId)) {
+            $this->SetStatus(203);
+            $this->SendDebug('WebSocket', 'Kontrollierter Reconnect konnte nicht gestartet werden', 0);
+            return;
+        }
+        $this->SendDebug('WebSocket', 'Kontrollierter Reconnect nach Modulinitialisierung gestartet', 0);
     }
 
     private function isConfigured(): bool
