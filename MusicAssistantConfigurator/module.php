@@ -43,7 +43,7 @@ class MusicAssistantConfigurator extends IPSModule
 
     public function GetConfigurationForm(): string
     {
-        $values = $this->buildPlayersConfiguratorValues();
+        $values = $this->buildPlayerListValues();
 
         $form = [
             'elements' => [
@@ -63,16 +63,22 @@ class MusicAssistantConfigurator extends IPSModule
                 ],
 
                 [
-                    'type'    => 'Configurator',
-                    'name'    => 'Players',
-                    'caption' => 'Player',
-                    'columns' => [
-                        ['caption' => 'Name',      'name' => 'name',      'width' => '250px'],
-                        ['caption' => 'Player ID', 'name' => 'player_id', 'width' => '260px'],
-                        ['caption' => 'Provider',  'name' => 'provider',  'width' => '160px'],
-                        ['caption' => 'Available', 'name' => 'available', 'width' => '90px']
+                    'type'                        => 'List',
+                    'name'                        => 'Players',
+                    'caption'                     => 'Player',
+                    'add'                         => false,
+                    'delete'                      => false,
+                    'changeOrder'                 => false,
+                    'loadValuesFromConfiguration' => false,
+                    'columns'                     => [
+                        ['caption' => 'Name',        'name' => 'name',        'width' => '220px'],
+                        ['caption' => 'Player ID',   'name' => 'player_id',   'width' => '300px'],
+                        ['caption' => 'Provider',    'name' => 'provider',    'width' => '150px'],
+                        ['caption' => 'Verfügbar',   'name' => 'available',   'width' => '90px'],
+                        ['caption' => 'Status',      'name' => 'status',      'width' => '130px'],
+                        ['caption' => 'Instanz-ID',  'name' => 'instance_id', 'width' => '90px']
                     ],
-                    'values'  => $values
+                    'values'                      => $values
                 ],
                 [
                     'type'    => 'Button',
@@ -182,7 +188,7 @@ class MusicAssistantConfigurator extends IPSModule
         $created = 0;
         $existing = 0;
         $failures = [];
-        foreach ($this->buildPlayersConfiguratorValues() as $player) {
+        foreach ($this->buildPlayerListValues() as $player) {
             if ((int)($player['instanceID'] ?? 0) > 0) {
                 $existing++;
                 continue;
@@ -354,7 +360,7 @@ class MusicAssistantConfigurator extends IPSModule
         return is_array($arr) ? $arr : [];
     }
 
-    private function buildPlayersConfiguratorValues(): array
+    private function buildPlayerListValues(): array
     {
         $players = [];
         try {
@@ -382,11 +388,15 @@ class MusicAssistantConfigurator extends IPSModule
             $instanceId = $this->findExistingPlayerInstance($playerId);
 
             $rows[] = [
-                'name'       => $name,
-                'player_id'  => $playerId,
-                'provider'   => $provider,
-                'available'  => $avail ? 'Yes' : 'No',
-                'instanceID' => $instanceId
+                'name'        => $name,
+                'player_id'   => $playerId,
+                'provider'    => $provider,
+                'available'   => $avail ? 'Ja' : 'Nein',
+                'status'      => $instanceId > 0 ? 'Vorhanden' : 'Nicht angelegt',
+                'instance_id' => $instanceId > 0 ? (string)$instanceId : '-',
+                'instanceID'  => $instanceId,
+                'editable'    => false,
+                'deletable'   => false
             ];
         }
 
