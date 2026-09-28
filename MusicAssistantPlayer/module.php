@@ -169,6 +169,12 @@ class MusicAssistantPlayer extends IPSModule
                         $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
                     }
                 }
+                if (array_key_exists('shuffle_enabled', $data)) {
+                    $this->updateShuffleState($data['shuffle_enabled']);
+                }
+                if (array_key_exists('repeat_mode', $data)) {
+                    $this->updateRepeatMode($data['repeat_mode']);
+                }
             }
             return '';
         }
@@ -360,18 +366,12 @@ class MusicAssistantPlayer extends IPSModule
                 return;
             }
 
-            if (isset($q['shuffle_enabled']) && @$this->GetIDForIdent('Shuffle') > 0) {
-                $shuffle = (bool)$q['shuffle_enabled'];
-                if ((bool)$this->GetValue('Shuffle') !== $shuffle) {
-                    $this->SetValue('Shuffle', $shuffle);
-                }
+            if (array_key_exists('shuffle_enabled', $q)) {
+                $this->updateShuffleState($q['shuffle_enabled']);
             }
 
-            if (isset($q['repeat_mode']) && @$this->GetIDForIdent('Repeat') > 0) {
-                $repeat = strtolower(trim((string)$q['repeat_mode']));
-                if (in_array($repeat, ['off', 'one', 'all'], true) && (string)$this->GetValue('Repeat') !== $repeat) {
-                    $this->SetValue('Repeat', $repeat);
-                }
+            if (array_key_exists('repeat_mode', $q)) {
+                $this->updateRepeatMode($q['repeat_mode']);
             }
 
             $state = $q['state'] ?? '';
@@ -456,6 +456,33 @@ class MusicAssistantPlayer extends IPSModule
             return false;
         }
         $this->SetValue('Mute', $value);
+        return true;
+    }
+
+    private function updateShuffleState($value): bool
+    {
+        if (!is_bool($value) || @$this->GetIDForIdent('Shuffle') <= 0
+            || (bool)$this->GetValue('Shuffle') === $value) {
+            return false;
+        }
+        $this->SetValue('Shuffle', $value);
+        $this->SendDebug('Shuffle', 'Queue-State -> ' . ($value ? 'Ein' : 'Aus'), 0);
+        return true;
+    }
+
+    private function updateRepeatMode($value): bool
+    {
+        $mode = is_string($value) ? strtolower(trim($value)) : '';
+        if (!in_array($mode, ['off', 'one', 'all'], true)) {
+            $this->SendDebug('Repeat', 'Unbekannter Repeat-Modus: ' . $mode, 0);
+            return false;
+        }
+        if (@$this->GetIDForIdent('Repeat') <= 0 || (string)$this->GetValue('Repeat') === $mode) {
+            return false;
+        }
+        $this->SetValue('Repeat', $mode);
+        $captions = ['off' => 'Off', 'one' => 'One', 'all' => 'All'];
+        $this->SendDebug('Repeat', 'Queue-State ' . $mode . ' -> ' . $captions[$mode], 0);
         return true;
     }
 
