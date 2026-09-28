@@ -7,6 +7,7 @@ class MusicAssistantPlayer extends IPSModule
 {
     use MusicAssistantApi;
 
+    private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const REPEAT_PROFILE  = 'MA.RepeatMode';
     private const VOLUP_PROFILE   = 'MA.VolumeUp';
@@ -31,6 +32,8 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
         $this->SetBuffer('MsgId', '0');
+        $this->SetBuffer('ParentInstanceId', '0');
+        $this->SetBuffer('RegisteredPlayerID', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
@@ -40,6 +43,7 @@ class MusicAssistantPlayer extends IPSModule
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+        $this->registerParentStatusMessage();
 
         // Auswahl-Variablen
         $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
@@ -104,6 +108,16 @@ class MusicAssistantPlayer extends IPSModule
 
         // Konfig-Anzeige initial aktualisieren
         $this->UpdateConfigView();
+        $this->registerWithParent();
+    }
+
+    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+    {
+        if ($Message === IM_CHANGESTATUS
+            && $SenderID === (int)$this->GetBuffer('ParentInstanceId')
+            && $this->HasActiveParent()) {
+            $this->registerWithParent();
+        }
     }
 
     public function GetConfigurationForm(): string
@@ -135,11 +149,24 @@ class MusicAssistantPlayer extends IPSModule
     public function ReceiveData($JSONString): string
     {
         $packet = json_decode($JSONString, true);
-        if (!is_array($packet)
-            || ($packet['DataID'] ?? null) !== self::CONNECTION_EVENT
-            || ($packet['Event'] ?? null) !== 'player_updated'
+        if (!is_array($packet) || ($packet['DataID'] ?? null) !== self::CONNECTION_EVENT) {
+            return '';
+        }
+
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if (($packet['Event'] ?? null) === 'queue_updated') {
+            if (is_string($packet['ObjectID'] ?? null)
+                && is_array($packet['PlayerIDs'] ?? null)
+                && in_array($playerId, $packet['PlayerIDs'], true)
+                && is_array($packet['Data'] ?? null)) {
+                $this->SendDebug('queue_updated', 'Passendes Queue-Event empfangen für QueueID=' . $packet['ObjectID'], 0);
+            }
+            return '';
+        }
+
+        if (($packet['Event'] ?? null) !== 'player_updated'
             || !is_string($packet['ObjectID'] ?? null)
-            || $packet['ObjectID'] !== trim($this->ReadPropertyString('PlayerID'))
+            || $packet['ObjectID'] !== $playerId
             || !is_array($packet['Data'] ?? null)) {
             return '';
         }
@@ -457,6 +484,64 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ((string)$this->GetValue($ident) !== $value) {
             $this->SetValue($ident, $value);
+        }
+    }
+
+    private function registerParentStatusMessage(): void
+    {
+        $previousParentId = (int)$this->GetBuffer('ParentInstanceId');
+        $instance = IPS_GetInstance($this->InstanceID);
+        $parentId = (int)($instance['ConnectionID'] ?? 0);
+        if ($previousParentId > 0 && $previousParentId !== $parentId) {
+            $this->UnregisterMessage($previousParentId, IM_CHANGESTATUS);
+        }
+        if ($parentId > 0) {
+            $this->RegisterMessage($parentId, IM_CHANGESTATUS);
+        }
+        if ($previousParentId !== $parentId) {
+            $this->SetBuffer('RegisteredPlayerID', '');
+        }
+        $this->SetBuffer('ParentInstanceId', (string)$parentId);
+    }
+
+    private function registerWithParent(): void
+    {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if (!$this->HasActiveParent()) {
+            return;
+        }
+
+        $registeredPlayerId = $this->GetBuffer('RegisteredPlayerID');
+        if ($registeredPlayerId !== '' && $registeredPlayerId !== $playerId) {
+            if (!$this->sendRegistrationRequest('UnregisterPlayer', $registeredPlayerId)) {
+                return;
+            }
+            $this->SetBuffer('RegisteredPlayerID', '');
+            $this->SendDebug('Registration', 'Abmeldung gesendet: ' . $registeredPlayerId, 0);
+        }
+
+        if ($playerId !== '' && $this->sendRegistrationRequest('RegisterPlayer', $playerId)) {
+            $this->SetBuffer('RegisteredPlayerID', $playerId);
+            $this->SendDebug('Registration', 'Registrierung gesendet: ' . $playerId, 0);
+        }
+    }
+
+    private function sendRegistrationRequest(string $command, string $playerId): bool
+    {
+        try {
+            $response = @$this->SendDataToParent(json_encode([
+                'DataID' => self::CONNECTION_REQUEST,
+                'Command' => $command,
+                'PlayerID' => $playerId
+            ], JSON_THROW_ON_ERROR));
+            if (!is_string($response)) {
+                return false;
+            }
+            $result = json_decode($response, true);
+            return is_array($result) && ($result['success'] ?? false) === true;
+        } catch (Throwable $e) {
+            $this->SendDebug('Registration', 'Registrierungsanfrage konnte nicht gesendet werden', 0);
+            return false;
         }
     }
 
