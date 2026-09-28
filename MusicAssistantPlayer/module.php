@@ -160,6 +160,16 @@ class MusicAssistantPlayer extends IPSModule
                 && in_array($playerId, $packet['PlayerIDs'], true)
                 && is_array($packet['Data'] ?? null)) {
                 $this->SendDebug('queue_updated', 'Passendes Queue-Event empfangen für QueueID=' . $packet['ObjectID'], 0);
+                $data = $packet['Data'];
+                if (array_key_exists('state', $data)) {
+                    $this->updateTransportFromQueueState($data['state']);
+                }
+                if (array_key_exists('current_item', $data)) {
+                    $state = array_key_exists('state', $data) ? $data['state'] : null;
+                    if ($this->updateMetadataFromQueueItem($data['current_item'], $state)) {
+                        $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
+                    }
+                }
             }
             return '';
         }
@@ -365,37 +375,10 @@ class MusicAssistantPlayer extends IPSModule
                 }
             }
 
-            $state = strtolower(trim((string)($q['state'] ?? '')));
-            $transportStates = ['idle' => 1, 'playing' => 2, 'paused' => 3];
-            if (isset($transportStates[$state])) {
-                $transport = $transportStates[$state];
-                if (@$this->GetIDForIdent('Transport') > 0 && (int)$this->GetValue('Transport') !== $transport) {
-                    $this->SetValue('Transport', $transport);
-                }
-            } else {
-                $this->SendDebug('PollState unknown queue state', $state, 0);
-            }
-
-            $hasCurrent = isset($q['current_item']) && is_array($q['current_item']);
-
-            $title = $artist = $album = '';
-            if ($state !== 'idle' && $hasCurrent) {
-                $mi = $q['current_item']['media_item'] ?? null;
-                if (is_array($mi)) {
-                    $title = (string)($mi['name'] ?? '');
-                    if (isset($mi['artists']) && is_array($mi['artists']) && count($mi['artists']) > 0) {
-                        $a0 = $mi['artists'][0];
-                        $artist = is_array($a0) ? (string)($a0['name'] ?? '') : (string)$a0;
-                    }
-                    if (isset($mi['album']) && is_array($mi['album'])) {
-                        $album = (string)($mi['album']['name'] ?? '');
-                    }
-                }
-            }
-
-            $this->setIfChangedString('NowTitle', $title);
-            $this->setIfChangedString('NowArtist', $artist);
-            $this->setIfChangedString('NowAlbum', $album);
+            $state = $q['state'] ?? '';
+            $this->updateTransportFromQueueState($state);
+            $currentItem = $q['current_item'] ?? null;
+            $this->updateMetadataFromQueueItem(is_array($currentItem) ? $currentItem : null, $state);
         } catch (Throwable $e) {
             $this->SendDebug('PollState failed', $e->getMessage(), 0);
         } finally {
@@ -477,14 +460,66 @@ class MusicAssistantPlayer extends IPSModule
         return true;
     }
 
-    private function setIfChangedString(string $ident, string $value): void
+    private function updateTransportFromQueueState($state): bool
+    {
+        $normalizedState = is_string($state) ? strtolower(trim($state)) : '';
+        $transportStates = ['idle' => 1, 'playing' => 2, 'paused' => 3];
+        if (!isset($transportStates[$normalizedState])) {
+            $this->SendDebug('Transport', 'Unbekannter Queue-State: ' . $normalizedState, 0);
+            return false;
+        }
+
+        $transport = $transportStates[$normalizedState];
+        if (@$this->GetIDForIdent('Transport') <= 0
+            || (int)$this->GetValue('Transport') === $transport) {
+            return false;
+        }
+        $this->SetValue('Transport', $transport);
+        $captions = ['idle' => 'Stop', 'playing' => 'Play', 'paused' => 'Pause'];
+        $this->SendDebug('Transport', 'Queue-State ' . $normalizedState . ' -> ' . $captions[$normalizedState], 0);
+        return true;
+    }
+
+    private function updateMetadataFromQueueItem($currentItem, $state): bool
+    {
+        if ($currentItem !== null && !is_array($currentItem)) {
+            return false;
+        }
+
+        $title = $artist = $album = '';
+        $normalizedState = is_string($state) ? strtolower(trim($state)) : null;
+        if ($normalizedState !== 'idle' && is_array($currentItem)) {
+            $mediaItem = $currentItem['media_item'] ?? null;
+            if (is_array($mediaItem)) {
+                $title = (string)($mediaItem['name'] ?? '');
+                if (isset($mediaItem['artists']) && is_array($mediaItem['artists'])
+                    && count($mediaItem['artists']) > 0) {
+                    $firstArtist = $mediaItem['artists'][0];
+                    $artist = is_array($firstArtist)
+                        ? (string)($firstArtist['name'] ?? '')
+                        : (string)$firstArtist;
+                }
+                if (isset($mediaItem['album']) && is_array($mediaItem['album'])) {
+                    $album = (string)($mediaItem['album']['name'] ?? '');
+                }
+            }
+        }
+
+        $changed = $this->setIfChangedString('NowTitle', $title);
+        $changed = $this->setIfChangedString('NowArtist', $artist) || $changed;
+        return $this->setIfChangedString('NowAlbum', $album) || $changed;
+    }
+
+    private function setIfChangedString(string $ident, string $value): bool
     {
         if (@$this->GetIDForIdent($ident) <= 0) {
-            return;
+            return false;
         }
         if ((string)$this->GetValue($ident) !== $value) {
             $this->SetValue($ident, $value);
+            return true;
         }
+        return false;
     }
 
     private function registerParentStatusMessage(): void
