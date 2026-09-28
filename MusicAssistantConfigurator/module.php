@@ -17,6 +17,7 @@ class MusicAssistantConfigurator extends IPSModule
         $this->RegisterPropertyString('Host', '127.0.0.1');
         $this->RegisterPropertyInteger('Port', 8095);
         $this->RegisterPropertyString('Token', '');
+        $this->RegisterPropertyInteger('TargetCategoryID', 0);
 
         $this->SetBuffer('MsgId', '0');
 
@@ -50,6 +51,11 @@ class MusicAssistantConfigurator extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
                 ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
                 ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
+                [
+                    'type'    => 'SelectCategory',
+                    'name'    => 'TargetCategoryID',
+                    'caption' => 'Zielordner für neue Player'
+                ],
 
                 [
                     'type'    => 'Button',
@@ -125,6 +131,7 @@ class MusicAssistantConfigurator extends IPSModule
                 return 'Player existiert bereits als Instanz ' . $existingPlayerId . '.';
             }
 
+            $targetCategoryId = $this->getValidTargetCategoryId();
             $connectionId = $this->findUniqueConnectionInstance();
             $this->validateConnectionInstance($connectionId);
             if (!IPS_IsModuleCompatible(self::PLAYER_MODULE_ID, self::CONNECTION_MODULE_ID)) {
@@ -146,6 +153,9 @@ class MusicAssistantConfigurator extends IPSModule
             }
             if (!IPS_SetName($newPlayerId, 'MA Player - ' . (trim($name) !== '' ? trim($name) : $playerId))) {
                 throw new Exception('Playername konnte nicht gesetzt werden.');
+            }
+            if ($targetCategoryId > 0 && !IPS_SetParent($newPlayerId, $targetCategoryId)) {
+                throw new Exception('Player konnte nicht in den ausgewählten Zielordner verschoben werden.');
             }
 
             $this->validateConnectionInstance($connectionId);
@@ -387,7 +397,7 @@ class MusicAssistantConfigurator extends IPSModule
 
             $instanceId = $this->findExistingPlayerInstance($playerId);
 
-            $rows[] = [
+            $row = [
                 'name'        => $name,
                 'player_id'   => $playerId,
                 'provider'    => $provider,
@@ -398,9 +408,22 @@ class MusicAssistantConfigurator extends IPSModule
                 'editable'    => false,
                 'deletable'   => false
             ];
+            if ($instanceId > 0) {
+                $row['rowColor'] = '#E8F5E9';
+            }
+            $rows[] = $row;
         }
 
         return $rows;
+    }
+
+    private function getValidTargetCategoryId(): int
+    {
+        $targetCategoryId = $this->ReadPropertyInteger('TargetCategoryID');
+        if ($targetCategoryId < 0 || ($targetCategoryId > 0 && !IPS_CategoryExists($targetCategoryId))) {
+            throw new Exception('Der ausgewählte Zielordner ist keine gültige Kategorie.');
+        }
+        return $targetCategoryId;
     }
 
     private function playerConfiguration(string $playerId): array
