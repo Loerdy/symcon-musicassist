@@ -1,12 +1,8 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../libs/MusicAssistantApi.php';
-
 class MusicAssistantConfigurator extends IPSModule
 {
-    use MusicAssistantApi;
-
     private const PLAYER_MODULE_ID = '{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}';
     private const CONNECTION_MODULE_ID = '{880534D6-998A-704B-DFD1-ABCD3D23B811}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
@@ -24,7 +20,6 @@ class MusicAssistantConfigurator extends IPSModule
         $this->RegisterPropertyString('Token', '');
         $this->RegisterPropertyInteger('TargetCategoryID', 0);
 
-        $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('ParentRetryAttempts', '0');
         $this->SetBuffer('ParentUnavailableLogged', '0');
 

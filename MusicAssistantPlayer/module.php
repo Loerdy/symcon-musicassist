@@ -1,12 +1,8 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../libs/MusicAssistantApi.php';
-
 class MusicAssistantPlayer extends IPSModule
 {
-    use MusicAssistantApi;
-
     private const CONNECTION_MODULE_ID = '{880534D6-998A-704B-DFD1-ABCD3D23B811}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
@@ -37,7 +33,6 @@ class MusicAssistantPlayer extends IPSModule
         // Veraltete Kompatibilitäts-Property für bestehende Instanzen; funktional nicht mehr verwendet.
         $this->RegisterPropertyInteger('StateSyncInterval', 5);
 
-        $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
         $this->SetBuffer('ParentRetryAttempts', '0');
@@ -348,7 +343,6 @@ class MusicAssistantPlayer extends IPSModule
             'PlayerID'          => $this->ReadPropertyString('PlayerID'),
             'PlaylistProfile'   => $this->ReadPropertyString('PlaylistProfile'),
             'RadioProfile'      => $this->ReadPropertyString('RadioProfile'),
-            'MsgId'             => (string)$this->GetBuffer('MsgId'),
         ];
 
         $text = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
