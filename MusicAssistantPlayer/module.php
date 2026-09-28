@@ -698,13 +698,13 @@ class MusicAssistantPlayer extends IPSModule
     public function SetShuffle(bool $enabled): void
     {
         $queueId = $this->getQueueIdForPlayer();
-        $this->maCall('player_queues/shuffle', ['queue_id' => $queueId, 'shuffle_enabled' => $enabled]);
+        $this->sendApiRequest('player_queues/shuffle', ['queue_id' => $queueId, 'shuffle_enabled' => $enabled]);
     }
 
     public function SetRepeat(string $mode): void
     {
         $queueId = $this->getQueueIdForPlayer();
-        $this->maCall('player_queues/repeat', ['queue_id' => $queueId, 'repeat_mode' => $mode]);
+        $this->sendApiRequest('player_queues/repeat', ['queue_id' => $queueId, 'repeat_mode' => $mode]);
     }
 
     public function SetMute(bool $muted): void
@@ -712,7 +712,7 @@ class MusicAssistantPlayer extends IPSModule
         $playerId = $this->playerId();
 
         try {
-            $this->maCall('players/cmd/volume_mute', ['player_id' => $playerId, 'muted' => $muted]);
+            $this->sendApiRequest('players/cmd/volume_mute', ['player_id' => $playerId, 'muted' => $muted]);
             return;
         } catch (Throwable $e) {
             if (str_starts_with($playerId, 'syncgroup_')) {
@@ -722,7 +722,7 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 foreach ($members as $mid) {
                     try {
-                        $this->maCall('players/cmd/volume_mute', ['player_id' => $mid, 'muted' => $muted]);
+                        $this->sendApiRequest('players/cmd/volume_mute', ['player_id' => $mid, 'muted' => $muted]);
                     } catch (Throwable $inner) {
                         $this->SendDebug('Mute member failed', $mid . ': ' . $inner->getMessage(), 0);
                     }
@@ -735,17 +735,17 @@ class MusicAssistantPlayer extends IPSModule
 
     public function SetVolumeLevel(int $level): void
     {
-        $this->maCall('players/cmd/volume_set', ['player_id' => $this->playerId(), 'volume_level' => $level]);
+        $this->sendApiRequest('players/cmd/volume_set', ['player_id' => $this->playerId(), 'volume_level' => $level]);
     }
 
     public function GroupVolumeUp(): void
     {
-        $this->maCall('players/cmd/group_volume_up', ['player_id' => $this->playerId()]);
+        $this->sendApiRequest('players/cmd/group_volume_up', ['player_id' => $this->playerId()]);
     }
 
     public function GroupVolumeDown(): void
     {
-        $this->maCall('players/cmd/group_volume_down', ['player_id' => $this->playerId()]);
+        $this->sendApiRequest('players/cmd/group_volume_down', ['player_id' => $this->playerId()]);
     }
 
     // --------- intern ---------
@@ -791,11 +791,11 @@ class MusicAssistantPlayer extends IPSModule
     {
         $pid = $this->playerId();
         switch ($value) {
-            case 0: $this->maCall('players/cmd/previous', ['player_id' => $pid]); break;
-            case 1: $this->maCall('players/cmd/stop',     ['player_id' => $pid]); break;
-            case 2: $this->maCall('players/cmd/play',     ['player_id' => $pid]); break;
-            case 3: $this->maCall('players/cmd/pause',    ['player_id' => $pid]); break;
-            case 4: $this->maCall('players/cmd/next',     ['player_id' => $pid]); break;
+            case 0: $this->sendApiRequest('players/cmd/previous', ['player_id' => $pid]); break;
+            case 1: $this->sendApiRequest('players/cmd/stop',     ['player_id' => $pid]); break;
+            case 2: $this->sendApiRequest('players/cmd/play',     ['player_id' => $pid]); break;
+            case 3: $this->sendApiRequest('players/cmd/pause',    ['player_id' => $pid]); break;
+            case 4: $this->sendApiRequest('players/cmd/next',     ['player_id' => $pid]); break;
             default: break;
         }
     }
@@ -871,8 +871,7 @@ class MusicAssistantPlayer extends IPSModule
             return $map[$key];
         }
 
-        $resp = $this->maCall($refreshCommand);
-        $result = $resp['result'];
+        $result = $this->sendApiRequest($refreshCommand);
 
         if (is_array($result) && $this->isList($result)) {
             foreach ($result as $it) {
@@ -898,7 +897,7 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         $queueId = $this->getQueueIdForPlayer();
-        $this->maCall('player_queues/play_media', [
+        $this->sendApiRequest('player_queues/play_media', [
             'queue_id' => $queueId,
             'media'    => $uri,
             'option'   => 'replace'
@@ -921,8 +920,7 @@ class MusicAssistantPlayer extends IPSModule
 
     private function getSyncGroupMembers(string $syncGroupId): array
     {
-        $resp   = $this->maCall('players/all');
-        $result = $resp['result'];
+        $result = $this->sendApiRequest('players/all');
 
         if (!is_array($result) || !$this->isList($result)) {
             return [];
