@@ -655,6 +655,44 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
+    private function sendApiRequest(string $apiCommand, array $params = [])
+    {
+        try {
+            $response = $this->SendDataToParent(json_encode([
+                'DataID' => self::CONNECTION_REQUEST,
+                'Command' => 'ApiRequest',
+                'ApiCommand' => $apiCommand,
+                'Params' => (object)$params
+            ], JSON_THROW_ON_ERROR));
+        } catch (Throwable $e) {
+            throw new Exception('ApiRequest konnte nicht erzeugt oder gesendet werden.');
+        }
+
+        if (!is_string($response) || trim($response) === '') {
+            throw new Exception('ApiRequest lieferte keine gültige Antwort.');
+        }
+
+        try {
+            $result = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            throw new Exception('ApiRequest lieferte ungültiges JSON.');
+        }
+        if (!is_array($result)) {
+            throw new Exception('ApiRequest-Antwort ist kein JSON-Objekt.');
+        }
+        if (($result['success'] ?? false) !== true) {
+            $error = is_array($result['error'] ?? null) ? $result['error'] : [];
+            $code = is_string($error['code'] ?? null) && trim($error['code']) !== ''
+                ? trim($error['code'])
+                : 'UNKNOWN_ERROR';
+            $message = is_string($error['message'] ?? null) && trim($error['message']) !== ''
+                ? trim($error['message'])
+                : 'ApiRequest ist fehlgeschlagen.';
+            throw new Exception($code . ': ' . $message);
+        }
+        return $result['result'] ?? null;
+    }
+
     // --------- MA Commands ---------
 
     public function SetShuffle(bool $enabled): void
@@ -772,12 +810,10 @@ class MusicAssistantPlayer extends IPSModule
     {
         $playerId = $this->playerId();
 
-        $resp = $this->maCall('player_queues/get_active_queue', ['player_id' => $playerId]);
-        if (!($resp['success'] ?? false)) {
-            throw new Exception('Failed to resolve active queue for PlayerID=' . $playerId);
-        }
-
-        $result = $resp['result'] ?? null;
+        $result = $this->sendApiRequest(
+            'player_queues/get_active_queue',
+            ['player_id' => $playerId]
+        );
         $queueId = is_array($result) && is_string($result['queue_id'] ?? null)
             ? trim($result['queue_id'])
             : '';
