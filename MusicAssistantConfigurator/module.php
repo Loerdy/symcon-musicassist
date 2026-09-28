@@ -409,7 +409,7 @@ class MusicAssistantConfigurator extends IPSModule
                 'deletable'   => false
             ];
             if ($instanceId > 0) {
-                $row['rowColor'] = '#E8F5E9';
+                $row['rowColor'] = '#C8F7C5';
             }
             $rows[] = $row;
         }
