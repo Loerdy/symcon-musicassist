@@ -15,7 +15,10 @@ class MusicAssistantConnection extends IPSModule
         $this->RegisterPropertyString('Token', '');
         $this->SetBuffer('GreetingUrl', '');
         $this->SetBuffer('AuthMessageId', '');
+        $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
+        $this->SetBuffer('ConnectionGeneration', '0');
+        $this->SetBuffer('ParentInstanceId', '0');
         $this->RegisterTimer('CheckConnection', 0, 'MAC_CheckConnection($_IPS["TARGET"]);');
         $this->RequireParent(self::WEBSOCKET_MODULE);
     }
@@ -23,7 +26,9 @@ class MusicAssistantConnection extends IPSModule
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+        $this->registerParentStatusMessage();
         $this->SetBuffer('AuthMessageId', '');
+        $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
         $this->SetStatus($this->isConfigured() ? 104 : 201);
         $this->SetTimerInterval('CheckConnection', $this->isConfigured() ? 5000 : 0);
@@ -33,6 +38,18 @@ class MusicAssistantConnection extends IPSModule
             && $this->GetBuffer('GreetingUrl') === $this->webSocketUrl()
             && $this->GetBuffer('AuthMessageId') === '' && $this->GetStatus() !== 102) {
             $this->authenticate();
+        }
+    }
+
+    public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
+    {
+        if ($Message !== IM_CHANGESTATUS
+            || $SenderID !== (int)$this->GetBuffer('ParentInstanceId')) {
+            return;
+        }
+
+        if (!$this->HasActiveParent()) {
+            $this->handleConnectionLost();
         }
     }
 
@@ -78,17 +95,27 @@ class MusicAssistantConnection extends IPSModule
             && is_string($message['server_version'] ?? null)
             && is_int($message['schema_version'] ?? null)
             && is_int($message['min_supported_schema_version'] ?? null)) {
+            $generation = (int)$this->GetBuffer('ConnectionGeneration') + 1;
+            $this->SetBuffer('ConnectionGeneration', (string)$generation);
             $this->SetBuffer('GreetingUrl', $this->webSocketUrl());
+            $this->SetBuffer('AuthMessageId', '');
+            $this->SetBuffer('AuthGeneration', '');
+            $this->SetBuffer('AuthStarted', '0');
+            $this->SetStatus(104);
             $this->SendDebug('WebSocket', 'Server-Begrüßung empfangen', 0);
             $this->authenticate();
             return '';
         }
 
         $pending = $this->GetBuffer('AuthMessageId');
-        if ($pending === '' || ($message['message_id'] ?? null) !== $pending) {
-            return ''; // Events und fremde/veraltete Antworten werden in Phase 1 ignoriert.
+        $authGeneration = $this->GetBuffer('AuthGeneration');
+        if ($pending === '' || ($message['message_id'] ?? null) !== $pending
+            || $authGeneration === ''
+            || $authGeneration !== $this->GetBuffer('ConnectionGeneration')) {
+            return ''; // Events und fremde/veraltete Antworten werden in Phase 2 ignoriert.
         }
         $this->SetBuffer('AuthMessageId', '');
+        $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
         if (!array_key_exists('error_code', $message) && !array_key_exists('error', $message)
             && ($message['result']['authenticated'] ?? null) === true) {
@@ -110,15 +137,13 @@ class MusicAssistantConnection extends IPSModule
     public function CheckConnection(): void
     {
         if (!$this->isConfigured() || !$this->HasActiveParent()) {
-            $this->SetBuffer('GreetingUrl', '');
-            $this->SetBuffer('AuthMessageId', '');
-            $this->SetBuffer('AuthStarted', '0');
-            $this->SetStatus($this->isConfigured() ? 104 : 201);
+            $this->handleConnectionLost();
             return;
         }
         $started = (int)$this->GetBuffer('AuthStarted');
         if ($started > 0 && time() - $started >= 15) {
             $this->SetBuffer('AuthMessageId', '');
+            $this->SetBuffer('AuthGeneration', '');
             $this->SetBuffer('AuthStarted', '0');
             $this->SetStatus(203);
             $this->SendDebug('Authentication', 'Keine Bestätigung innerhalb von 15 Sekunden', 0);
@@ -128,6 +153,7 @@ class MusicAssistantConnection extends IPSModule
     private function authenticate(): void
     {
         $this->SetBuffer('AuthMessageId', '');
+        $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
         if (!$this->isConfigured()) {
             $this->SetStatus(201);
@@ -137,6 +163,7 @@ class MusicAssistantConnection extends IPSModule
         try {
             $id = 'auth-' . bin2hex(random_bytes(16));
             $this->SetBuffer('AuthMessageId', $id);
+            $this->SetBuffer('AuthGeneration', $this->GetBuffer('ConnectionGeneration'));
             $this->SetBuffer('AuthStarted', (string)time());
             // json_encode erzeugt hier ASCII (auch für Unicode im Token): Simpel-TX ist verlustfrei.
             $payload = json_encode([
@@ -153,9 +180,45 @@ class MusicAssistantConnection extends IPSModule
             }
         } catch (Throwable $e) {
             $this->SetBuffer('AuthMessageId', '');
+            $this->SetBuffer('AuthGeneration', '');
             $this->SetBuffer('AuthStarted', '0');
             $this->SetStatus(203);
             $this->SendDebug('Authentication', 'Auth-Nachricht konnte nicht gesendet werden', 0);
+        }
+    }
+
+    private function registerParentStatusMessage(): void
+    {
+        $previousParentId = (int)$this->GetBuffer('ParentInstanceId');
+        $instance = IPS_GetInstance($this->InstanceID);
+        $parentId = (int)($instance['ConnectionID'] ?? 0);
+
+        if ($previousParentId > 0 && $previousParentId !== $parentId) {
+            $this->UnregisterMessage($previousParentId, IM_CHANGESTATUS);
+        }
+        if ($parentId > 0) {
+            $this->RegisterMessage($parentId, IM_CHANGESTATUS);
+        }
+        if ($previousParentId !== $parentId) {
+            $this->SetBuffer('GreetingUrl', '');
+        }
+        $this->SetBuffer('ParentInstanceId', (string)$parentId);
+    }
+
+    private function handleConnectionLost(): void
+    {
+        $wasConnected = $this->GetBuffer('GreetingUrl') !== ''
+            || $this->GetBuffer('AuthMessageId') !== ''
+            || $this->GetStatus() === 102;
+
+        $this->SetBuffer('GreetingUrl', '');
+        $this->SetBuffer('AuthMessageId', '');
+        $this->SetBuffer('AuthGeneration', '');
+        $this->SetBuffer('AuthStarted', '0');
+        $this->SetStatus($this->isConfigured() ? 104 : 201);
+
+        if ($wasConnected) {
+            $this->SendDebug('WebSocket', 'Verbindung verloren; Sitzung invalidiert', 0);
         }
     }
 
