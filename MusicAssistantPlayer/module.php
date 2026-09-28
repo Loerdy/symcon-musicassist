@@ -178,6 +178,39 @@ class MusicAssistantPlayer extends IPSModule
                     $this->updateTransportFromQueueState($data['state']);
                 }
                 if (array_key_exists('current_item', $data)) {
+                    $currentItem = $data['current_item'];
+                    if (is_array($currentItem)) {
+                        $artwork = [];
+                        if (array_key_exists('image', $currentItem)) {
+                            $artwork['current_item.image'] = $currentItem['image'];
+                        }
+                        $mediaItem = $currentItem['media_item'] ?? null;
+                        if (is_array($mediaItem)) {
+                            if (array_key_exists('image', $mediaItem)) {
+                                $artwork['current_item.media_item.image'] = $mediaItem['image'];
+                            }
+                            $metadata = $mediaItem['metadata'] ?? null;
+                            if (is_array($metadata)) {
+                                if (array_key_exists('images', $metadata)) {
+                                    $artwork['current_item.media_item.metadata.images'] = $metadata['images'];
+                                }
+                                if (array_key_exists('image', $metadata)) {
+                                    $artwork['current_item.media_item.metadata.image'] = $metadata['image'];
+                                }
+                            }
+                        }
+                        $currentMedia = $currentItem['current_media'] ?? null;
+                        if (is_array($currentMedia) && array_key_exists('image_url', $currentMedia)) {
+                            $artwork['current_item.current_media.image_url'] = $currentMedia['image_url'];
+                        }
+                        if (count($artwork) > 0) {
+                            $this->SendDebug(
+                                'Artwork',
+                                json_encode($artwork, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR),
+                                0
+                            );
+                        }
+                    }
                     if ($this->updateMetadataFromQueueItem($data['current_item'])) {
                         $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
                     }
