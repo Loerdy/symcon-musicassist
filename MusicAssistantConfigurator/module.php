@@ -20,6 +20,8 @@ class MusicAssistantConfigurator extends IPSModule
         $this->RegisterPropertyString('Token', '');
         $this->RegisterPropertyInteger('TargetCategoryID', 0);
 
+        $this->RegisterAttributeString('ProfileNames', '');
+
         $this->SetBuffer('ParentRetryAttempts', '0');
         $this->SetBuffer('ParentUnavailableLogged', '0');
 
@@ -37,6 +39,11 @@ class MusicAssistantConfigurator extends IPSModule
         $this->SetBuffer('ParentUnavailableLogged', '0');
         if ($this->ensureConnectionParent() === self::PARENT_RETRY_PENDING) {
             $this->SetTimerInterval('ParentConnectionRetry', 2000);
+        }
+        try {
+            $this->initializeProfileNames();
+        } catch (Throwable $e) {
+            $this->SendDebug('Profiles', $e->getMessage(), 0);
         }
     }
 
@@ -374,14 +381,169 @@ class MusicAssistantConfigurator extends IPSModule
 
     private function playlistProfileName(): string
     {
-        $key = strtolower(trim($this->ReadPropertyString('Host'))) . ':' . (string)$this->ReadPropertyInteger('Port');
-        return 'MA.Playlists.' . substr(md5($key), 0, 8);
+        $profileNames = $this->readProfileNames() ?? $this->initializeProfileNames();
+        if ($profileNames === null) {
+            throw new Exception('Playlist-/Radio-Profilnamen konnten noch nicht initialisiert werden.');
+        }
+        return $profileNames['playlist'];
     }
 
     private function radioProfileName(): string
     {
+        $profileNames = $this->readProfileNames() ?? $this->initializeProfileNames();
+        if ($profileNames === null) {
+            throw new Exception('Playlist-/Radio-Profilnamen konnten noch nicht initialisiert werden.');
+        }
+        return $profileNames['radio'];
+    }
+
+    private function readProfileNames(): ?array
+    {
+        $value = trim($this->ReadAttributeString('ProfileNames'));
+        if ($value === '') {
+            return null;
+        }
+        try {
+            $profileNames = json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            return null;
+        }
+        if (!is_array($profileNames)
+            || !is_string($profileNames['playlist'] ?? null)
+            || trim($profileNames['playlist']) === ''
+            || !is_string($profileNames['radio'] ?? null)
+            || trim($profileNames['radio']) === '') {
+            return null;
+        }
+        return [
+            'playlist' => trim($profileNames['playlist']),
+            'radio'    => trim($profileNames['radio'])
+        ];
+    }
+
+    private function initializeProfileNames(): ?array
+    {
+        $profileNames = $this->readProfileNames();
+        if ($profileNames !== null) {
+            return $profileNames;
+        }
+
+        $connectionId = 0;
+        try {
+            $connectionId = $this->getConfiguratorConnectionId();
+        } catch (Throwable $e) {
+            // Ein parentloser Legacy-Configurator kann trotzdem vorhandene Profile übernehmen.
+        }
+
+        $playerProfiles = ['profileNames' => null, 'conflict' => false, 'unavailable' => false];
+        if ($connectionId > 0) {
+            $playerProfiles = $this->profileNamesFromConnectedPlayers($connectionId);
+            if ($playerProfiles['profileNames'] !== null
+                && !$playerProfiles['conflict']
+                && !$playerProfiles['unavailable']) {
+                return $this->storeProfileNames($playerProfiles['profileNames'], 'verbundenen Playern');
+            }
+        }
+
+        $legacyProfileNames = $this->legacyProfileNames();
+        if (IPS_VariableProfileExists($legacyProfileNames['playlist'])
+            || IPS_VariableProfileExists($legacyProfileNames['radio'])) {
+            return $this->storeProfileNames($legacyProfileNames, 'bestehenden Legacy-Profilen');
+        }
+
+        if ($playerProfiles['conflict']) {
+            throw new Exception('Widersprüchliche Playlist-/Radio-Profilnamen bei verbundenen Playern gefunden.');
+        }
+
+        if ($playerProfiles['unavailable']) {
+            throw new Exception('Verbundene Player sind während der Profilnamen-Initialisierung noch nicht vollständig verfügbar.');
+        }
+
+        if ($connectionId <= 0) {
+            return null;
+        }
+
+        $suffix = substr(md5('connection:' . $connectionId), 0, 8);
+        return $this->storeProfileNames([
+            'playlist' => 'MA.Playlists.' . $suffix,
+            'radio'    => 'MA.Radios.' . $suffix
+        ], 'der MusicAssistantConnection');
+    }
+
+    private function profileNamesFromConnectedPlayers(int $connectionId): array
+    {
+        $pairs = [];
+        $unavailable = false;
+        foreach (IPS_GetInstanceListByModuleID(self::PLAYER_MODULE_ID) as $playerInstanceId) {
+            if (!IPS_InstanceExists($playerInstanceId)) {
+                $unavailable = true;
+                continue;
+            }
+            $instance = @IPS_GetInstance($playerInstanceId);
+            if (!is_array($instance)) {
+                $unavailable = true;
+                continue;
+            }
+            if (!array_key_exists('ConnectionID', $instance)) {
+                $unavailable = true;
+                continue;
+            }
+            if ((int)($instance['ConnectionID'] ?? 0) !== $connectionId) {
+                continue;
+            }
+            $configurationJson = @IPS_GetConfiguration($playerInstanceId);
+            if (!is_string($configurationJson) || $configurationJson === '') {
+                $unavailable = true;
+                continue;
+            }
+            $configuration = json_decode($configurationJson, true);
+            if (!is_array($configuration)) {
+                $unavailable = true;
+                continue;
+            }
+            $playlist = is_string($configuration['PlaylistProfile'] ?? null)
+                ? trim($configuration['PlaylistProfile'])
+                : '';
+            $radio = is_string($configuration['RadioProfile'] ?? null)
+                ? trim($configuration['RadioProfile'])
+                : '';
+            if ($playlist === '' || $radio === '') {
+                continue;
+            }
+            $pairs[$playlist . "\0" . $radio] = [
+                'playlist' => $playlist,
+                'radio'    => $radio
+            ];
+        }
+        return [
+            'profileNames' => count($pairs) === 1 ? array_values($pairs)[0] : null,
+            'conflict'     => count($pairs) > 1,
+            'unavailable'  => $unavailable
+        ];
+    }
+
+    private function legacyProfileNames(): array
+    {
         $key = strtolower(trim($this->ReadPropertyString('Host'))) . ':' . (string)$this->ReadPropertyInteger('Port');
-        return 'MA.Radios.' . substr(md5($key), 0, 8);
+        $suffix = substr(md5($key), 0, 8);
+        return [
+            'playlist' => 'MA.Playlists.' . $suffix,
+            'radio'    => 'MA.Radios.' . $suffix
+        ];
+    }
+
+    private function storeProfileNames(array $profileNames, string $source): array
+    {
+        $existing = $this->readProfileNames();
+        if ($existing !== null) {
+            return $existing;
+        }
+        $value = json_encode($profileNames, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        if (!$this->WriteAttributeString('ProfileNames', $value)) {
+            throw new Exception('Playlist-/Radio-Profilnamen konnten nicht gespeichert werden.');
+        }
+        $this->SendDebug('Profiles', 'Profilnamen übernommen aus ' . $source, 0);
+        return $profileNames;
     }
 
     private function getPlaylistMap(): array
