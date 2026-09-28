@@ -8,6 +8,7 @@ class MusicAssistantConfigurator extends IPSModule
     use MusicAssistantApi;
 
     private const PLAYER_MODULE_ID = '{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}';
+    private const CONNECTION_MODULE_ID = '{880534D6-998A-704B-DFD1-ABCD3D23B811}';
 
     public function Create(): void
     {
@@ -77,6 +78,11 @@ class MusicAssistantConfigurator extends IPSModule
             'actions' => [
                 [
                     'type'    => 'Button',
+                    'caption' => 'Ausgewählten Player erstellen',
+                    'onClick' => 'echo MA_CreatePlayer($id, (string)($Players["player_id"] ?? ""), (string)($Players["name"] ?? ""));'
+                ],
+                [
+                    'type'    => 'Button',
                     'caption' => 'Player neu laden',
                     'onClick' => 'IPS_RequestAction($id, "ReloadPlayers", true);'
                 ]
@@ -84,6 +90,81 @@ class MusicAssistantConfigurator extends IPSModule
         ];
 
         return json_encode($form);
+    }
+
+    public function CreatePlayer(string $playerId, string $name): string
+    {
+        $playerId = trim($playerId);
+        if ($playerId === '') {
+            throw new Exception('Bitte zuerst einen Player in der Liste auswählen.');
+        }
+
+        $semaphore = 'MusicAssistantConfigurator.CreatePlayer.' . $this->InstanceID;
+        if (!IPS_SemaphoreEnter($semaphore, 5000)) {
+            throw new Exception('Eine andere Player-Erstellung läuft bereits. Bitte erneut versuchen.');
+        }
+
+        $newPlayerId = 0;
+        try {
+            $existingPlayerId = $this->findExistingPlayerInstance($playerId);
+            if ($existingPlayerId > 0) {
+                return 'Player existiert bereits als Instanz ' . $existingPlayerId . '.';
+            }
+
+            $connectionId = $this->findUniqueConnectionInstance();
+            $this->validateConnectionInstance($connectionId);
+            if (!IPS_IsModuleCompatible(self::PLAYER_MODULE_ID, self::CONNECTION_MODULE_ID)) {
+                throw new Exception('MusicAssistantPlayer und MusicAssistantConnection sind nicht kompatibel.');
+            }
+
+            $newPlayerId = IPS_CreateInstance(self::PLAYER_MODULE_ID);
+            if ($newPlayerId <= 0) {
+                throw new Exception('MusicAssistantPlayer konnte nicht erstellt werden.');
+            }
+            if (!IPS_IsInstanceCompatible($newPlayerId, $connectionId)) {
+                throw new Exception('Die ausgewählte MusicAssistantConnection ist nicht mit dem Player kompatibel.');
+            }
+
+            foreach ($this->playerConfiguration($playerId) as $property => $value) {
+                if (!IPS_SetProperty($newPlayerId, $property, $value)) {
+                    throw new Exception('Player-Eigenschaft konnte nicht gesetzt werden: ' . $property);
+                }
+            }
+            if (!IPS_SetName($newPlayerId, 'MA Player - ' . (trim($name) !== '' ? trim($name) : $playerId))) {
+                throw new Exception('Playername konnte nicht gesetzt werden.');
+            }
+
+            $this->validateConnectionInstance($connectionId);
+            if (!IPS_IsInstanceCompatible($newPlayerId, $connectionId)
+                || !IPS_ConnectInstance($newPlayerId, $connectionId)) {
+                throw new Exception('Player konnte nicht mit der MusicAssistantConnection verbunden werden.');
+            }
+            if (!IPS_ApplyChanges($newPlayerId)) {
+                throw new Exception('Player-Konfiguration konnte nicht übernommen werden.');
+            }
+
+            $createdPlayerId = $newPlayerId;
+            $newPlayerId = 0;
+            try {
+                $this->ReloadForm();
+            } catch (Throwable $e) {
+                $this->SendDebug('CreatePlayer', 'Formular konnte nach der Erstellung nicht aktualisiert werden', 0);
+            }
+            return 'Player wurde als Instanz ' . $createdPlayerId . ' erstellt.';
+        } catch (Throwable $e) {
+            if ($newPlayerId > 0 && IPS_InstanceExists($newPlayerId)) {
+                try {
+                    $this->rollbackCreatedPlayer($newPlayerId);
+                } catch (Throwable $rollbackError) {
+                    $this->SendDebug('CreatePlayer', $rollbackError->getMessage(), 0);
+                    throw new Exception($e->getMessage() . ' Rollback fehlgeschlagen: ' . $rollbackError->getMessage());
+                }
+            }
+            $this->SendDebug('CreatePlayer', $e->getMessage(), 0);
+            throw $e;
+        } finally {
+            IPS_SemaphoreLeave($semaphore);
+        }
     }
 
     public function SyncPlaylistsProfile(): void
@@ -257,32 +338,114 @@ class MusicAssistantConfigurator extends IPSModule
 
             $instanceId = $this->findExistingPlayerInstance($playerId);
 
-            $rows[] = [
+            $row = [
                 'name'       => $name,
                 'player_id'  => $playerId,
                 'provider'   => $provider,
                 'available'  => $avail ? 'Yes' : 'No',
-                'instanceID' => $instanceId,
-                'create'     => [
+                'instanceID' => $instanceId
+            ];
+            if ($instanceId > 0) {
+                $row['create'] = [
                     'moduleID' => self::PLAYER_MODULE_ID,
                     'name'     => 'MA Player - ' . $name,
-                    'configuration' => [
-                        'Host'            => $this->ReadPropertyString('Host'),
-                        'Port'            => $this->ReadPropertyInteger('Port'),
-                        'Token'           => $this->ReadPropertyString('Token'),
-                        'PlayerID'        => $playerId,
-
-                        'PlaylistProfile' => $playlistProfile,
-                        'PlaylistMap'     => json_encode($playlistMap, JSON_UNESCAPED_SLASHES),
-
-                        'RadioProfile'    => $radioProfile,
-                        'RadioMap'        => json_encode($radioMap, JSON_UNESCAPED_SLASHES)
-                    ]
-                ]
-            ];
+                    'configuration' => $this->playerConfiguration(
+                        $playerId,
+                        $playlistProfile,
+                        $playlistMap,
+                        $radioProfile,
+                        $radioMap
+                    )
+                ];
+            }
+            $rows[] = $row;
         }
 
         return $rows;
+    }
+
+    private function playerConfiguration(
+        string $playerId,
+        ?string $playlistProfile = null,
+        ?array $playlistMap = null,
+        ?string $radioProfile = null,
+        ?array $radioMap = null
+    ): array {
+        return [
+            'Host'            => $this->ReadPropertyString('Host'),
+            'Port'            => $this->ReadPropertyInteger('Port'),
+            'Token'           => $this->ReadPropertyString('Token'),
+            'PlayerID'        => $playerId,
+            'PlaylistProfile' => $playlistProfile ?? $this->playlistProfileName(),
+            'PlaylistMap'     => json_encode($playlistMap ?? $this->getPlaylistMap(), JSON_UNESCAPED_SLASHES),
+            'RadioProfile'    => $radioProfile ?? $this->radioProfileName(),
+            'RadioMap'        => json_encode($radioMap ?? $this->getRadioMap(), JSON_UNESCAPED_SLASHES)
+        ];
+    }
+
+    private function findUniqueConnectionInstance(): int
+    {
+        $matches = [];
+        foreach (IPS_GetInstanceListByModuleID(self::CONNECTION_MODULE_ID) as $connectionId) {
+            if ($this->connectionMatchesServer((int)$connectionId)) {
+                $matches[] = (int)$connectionId;
+            }
+        }
+        if (count($matches) === 0) {
+            throw new Exception('Keine passende MusicAssistantConnection für Host und Port gefunden.');
+        }
+        if (count($matches) > 1) {
+            throw new Exception('Mehrere passende MusicAssistantConnections für Host und Port gefunden.');
+        }
+        return $matches[0];
+    }
+
+    private function validateConnectionInstance(int $connectionId): void
+    {
+        if (!IPS_InstanceExists($connectionId)) {
+            throw new Exception('Die passende MusicAssistantConnection ist nicht mehr vorhanden.');
+        }
+        $instance = @IPS_GetInstance($connectionId);
+        if (!is_array($instance)
+            || ($instance['ModuleInfo']['ModuleID'] ?? null) !== self::CONNECTION_MODULE_ID
+            || !$this->connectionMatchesServer($connectionId)) {
+            throw new Exception('Die passende MusicAssistantConnection wurde zwischenzeitlich geändert.');
+        }
+    }
+
+    private function connectionMatchesServer(int $connectionId): bool
+    {
+        if (!IPS_InstanceExists($connectionId)) {
+            return false;
+        }
+        $configurationJson = @IPS_GetConfiguration($connectionId);
+        if (!is_string($configurationJson) || $configurationJson === '') {
+            return false;
+        }
+        $configuration = json_decode($configurationJson, true);
+        return is_array($configuration)
+            && $this->normalizeServerHost((string)($configuration['Host'] ?? ''))
+                === $this->normalizeServerHost($this->ReadPropertyString('Host'))
+            && (int)($configuration['Port'] ?? 0) === $this->ReadPropertyInteger('Port');
+    }
+
+    private function rollbackCreatedPlayer(int $playerId): void
+    {
+        $instance = @IPS_GetInstance($playerId);
+        if (is_array($instance) && (int)($instance['ConnectionID'] ?? 0) > 0
+            && !IPS_DisconnectInstance($playerId)) {
+            throw new Exception('Unvollständige Playerinstanz ' . $playerId . ' konnte nicht getrennt werden.');
+        }
+        foreach (IPS_GetChildrenIDs($playerId) as $childId) {
+            $object = IPS_GetObject($childId);
+            if (($object['ObjectType'] ?? -1) !== 2 || !IPS_DeleteVariable($childId)) {
+                throw new Exception('Unterobjekte der unvollständigen Playerinstanz ' . $playerId
+                    . ' konnten nicht entfernt werden.');
+            }
+        }
+        if (!IPS_DeleteInstance($playerId)) {
+            throw new Exception('Unvollständig erstellte Playerinstanz ' . $playerId . ' konnte nicht entfernt werden.');
+        }
     }
 
     private function findExistingPlayerInstance(string $playerId): int
