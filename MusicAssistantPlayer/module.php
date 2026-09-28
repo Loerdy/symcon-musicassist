@@ -180,15 +180,20 @@ class MusicAssistantPlayer extends IPSModule
                 if (array_key_exists('state', $data)) {
                     $this->updateTransportFromQueueState($data['state']);
                 }
-                if (array_key_exists('current_item', $data)) {
+                $hasCurrentItem = array_key_exists('current_item', $data);
+                if ($hasCurrentItem) {
                     if ($this->updateMetadataFromQueueItem($data['current_item'])) {
                         $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
                     }
-                    try {
-                        $this->updateCoverFromQueueItem($data['current_item']);
-                    } catch (Throwable $e) {
-                        $this->SendDebug('Artwork', 'Cover konnte nicht geladen werden: ' . $e->getMessage(), 0);
+                }
+                try {
+                    if ($hasCurrentItem) {
+                        $this->updateCoverFromQueueItem($data['current_item'], $data['state'] ?? null);
+                    } elseif (array_key_exists('state', $data)) {
+                        $this->updateCoverVisibilityFromQueueState($data['state']);
                     }
+                } catch (Throwable $e) {
+                    $this->SendDebug('Artwork', 'Cover konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
                 }
                 if (array_key_exists('shuffle_enabled', $data)) {
                     $this->updateShuffleState($data['shuffle_enabled']);
@@ -458,8 +463,13 @@ class MusicAssistantPlayer extends IPSModule
         return $this->setIfChangedString('NowAlbum', $album) || $changed;
     }
 
-    private function updateCoverFromQueueItem($currentItem): void
+    private function updateCoverFromQueueItem($currentItem, $state): void
     {
+        if ($currentItem === null) {
+            $this->clearCover();
+            return;
+        }
+
         $proxyId = '';
         if (is_array($currentItem) && is_array($currentItem['image'] ?? null)
             && is_string($currentItem['image']['proxy_id'] ?? null)) {
@@ -479,7 +489,7 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ($this->ReadAttributeString('CoverProxyID') === $proxyId
             && $this->coverMediaHasContent($mediaId)) {
-            IPS_SetHidden($mediaId, false);
+            $this->updateCoverVisibilityFromQueueState($state);
             return;
         }
 
@@ -497,13 +507,35 @@ class MusicAssistantPlayer extends IPSModule
         if (!IPS_SetMediaContent($mediaId, $content)) {
             throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
         }
-        if (!IPS_SetHidden($mediaId, false)) {
-            throw new Exception('Cover-Medium konnte nicht eingeblendet werden.');
-        }
         if (!$this->WriteAttributeString('CoverProxyID', $proxyId)) {
             throw new Exception('Cover-Cache konnte nicht gespeichert werden.');
         }
+        $this->updateCoverVisibilityFromQueueState($state);
         $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
+    }
+
+    private function updateCoverVisibilityFromQueueState($state): void
+    {
+        $normalizedState = is_string($state) ? strtolower(trim($state)) : '';
+        if (!in_array($normalizedState, ['idle', 'playing', 'paused'], true)) {
+            return;
+        }
+
+        $mediaId = $this->ensureCoverMedia();
+        if ($mediaId <= 0) {
+            return;
+        }
+        if ($normalizedState === 'idle') {
+            if (!IPS_SetHidden($mediaId, true)) {
+                throw new Exception('Cover-Medium konnte nicht ausgeblendet werden.');
+            }
+            return;
+        }
+        if ($this->ReadAttributeString('CoverProxyID') !== ''
+            && $this->coverMediaHasContent($mediaId)
+            && !IPS_SetHidden($mediaId, false)) {
+            throw new Exception('Cover-Medium konnte nicht eingeblendet werden.');
+        }
     }
 
     private function requestArtwork(string $proxyId): array
