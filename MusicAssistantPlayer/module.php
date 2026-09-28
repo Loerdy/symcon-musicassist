@@ -29,6 +29,8 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('RadioProfile', '');
         $this->RegisterPropertyString('RadioMap', '{}');
 
+        $this->RegisterAttributeString('CoverProxyID', '');
+
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
         $this->SetBuffer('ParentRetryAttempts', '0');
@@ -102,6 +104,7 @@ class MusicAssistantPlayer extends IPSModule
         if ($vidAlbum > 0) {
             IPS_SetIcon($vidAlbum, 'album');
         }
+        $this->ensureCoverMedia();
 
         // Repeat Initialwert
         if (@$this->GetIDForIdent('Repeat') > 0 && (string)@$this->GetValue('Repeat') === '') {
@@ -178,41 +181,13 @@ class MusicAssistantPlayer extends IPSModule
                     $this->updateTransportFromQueueState($data['state']);
                 }
                 if (array_key_exists('current_item', $data)) {
-                    $currentItem = $data['current_item'];
-                    if (is_array($currentItem)) {
-                        $artwork = [];
-                        if (array_key_exists('image', $currentItem)) {
-                            $artwork['current_item.image'] = $currentItem['image'];
-                        }
-                        $mediaItem = $currentItem['media_item'] ?? null;
-                        if (is_array($mediaItem)) {
-                            if (array_key_exists('image', $mediaItem)) {
-                                $artwork['current_item.media_item.image'] = $mediaItem['image'];
-                            }
-                            $metadata = $mediaItem['metadata'] ?? null;
-                            if (is_array($metadata)) {
-                                if (array_key_exists('images', $metadata)) {
-                                    $artwork['current_item.media_item.metadata.images'] = $metadata['images'];
-                                }
-                                if (array_key_exists('image', $metadata)) {
-                                    $artwork['current_item.media_item.metadata.image'] = $metadata['image'];
-                                }
-                            }
-                        }
-                        $currentMedia = $currentItem['current_media'] ?? null;
-                        if (is_array($currentMedia) && array_key_exists('image_url', $currentMedia)) {
-                            $artwork['current_item.current_media.image_url'] = $currentMedia['image_url'];
-                        }
-                        if (count($artwork) > 0) {
-                            $this->SendDebug(
-                                'Artwork',
-                                json_encode($artwork, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR),
-                                0
-                            );
-                        }
-                    }
                     if ($this->updateMetadataFromQueueItem($data['current_item'])) {
                         $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
+                    }
+                    try {
+                        $this->updateCoverFromQueueItem($data['current_item']);
+                    } catch (Throwable $e) {
+                        $this->SendDebug('Artwork', 'Cover konnte nicht geladen werden: ' . $e->getMessage(), 0);
                     }
                 }
                 if (array_key_exists('shuffle_enabled', $data)) {
@@ -481,6 +456,138 @@ class MusicAssistantPlayer extends IPSModule
         $changed = $this->setIfChangedString('NowTitle', $title);
         $changed = $this->setIfChangedString('NowArtist', $artist) || $changed;
         return $this->setIfChangedString('NowAlbum', $album) || $changed;
+    }
+
+    private function updateCoverFromQueueItem($currentItem): void
+    {
+        $proxyId = '';
+        if (is_array($currentItem) && is_array($currentItem['image'] ?? null)
+            && is_string($currentItem['image']['proxy_id'] ?? null)) {
+            $candidate = trim($currentItem['image']['proxy_id']);
+            if (preg_match('/^[a-f0-9]{64}$/D', $candidate) === 1) {
+                $proxyId = $candidate;
+            }
+        }
+        if ($proxyId === '') {
+            $this->clearCover();
+            return;
+        }
+
+        $mediaId = $this->ensureCoverMedia();
+        if ($mediaId <= 0) {
+            throw new Exception('Cover-Medium ist nicht verfügbar.');
+        }
+        if ($this->ReadAttributeString('CoverProxyID') === $proxyId
+            && $this->coverMediaHasContent($mediaId)) {
+            IPS_SetHidden($mediaId, false);
+            return;
+        }
+
+        $response = $this->requestArtwork($proxyId);
+        $content = $response['content'] ?? null;
+        if (($response['proxy_id'] ?? null) !== $proxyId
+            || ($response['content_type'] ?? null) !== 'image/jpeg'
+            || !is_string($content)) {
+            throw new Exception('Artwork-Antwort ist ungültig.');
+        }
+        $binary = base64_decode($content, true);
+        if (!is_string($binary) || $binary === '' || substr($binary, 0, 3) !== "\xFF\xD8\xFF") {
+            throw new Exception('Artwork-Antwort enthält kein gültiges JPEG.');
+        }
+        if (!IPS_SetMediaContent($mediaId, $content)) {
+            throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
+        }
+        if (!IPS_SetHidden($mediaId, false)) {
+            throw new Exception('Cover-Medium konnte nicht eingeblendet werden.');
+        }
+        if (!$this->WriteAttributeString('CoverProxyID', $proxyId)) {
+            throw new Exception('Cover-Cache konnte nicht gespeichert werden.');
+        }
+        $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
+    }
+
+    private function requestArtwork(string $proxyId): array
+    {
+        $response = $this->SendDataToParent(json_encode([
+            'DataID' => self::CONNECTION_REQUEST,
+            'Command' => 'ArtworkRequest',
+            'ProxyID' => $proxyId
+        ], JSON_THROW_ON_ERROR));
+        if (!is_string($response) || trim($response) === '') {
+            throw new Exception('ArtworkRequest lieferte keine gültige Antwort.');
+        }
+        $result = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($result) || ($result['success'] ?? false) !== true) {
+            throw new Exception('ArtworkRequest ist fehlgeschlagen.');
+        }
+        return $result;
+    }
+
+    private function ensureCoverMedia(): int
+    {
+        $mediaId = @$this->GetIDForIdent('Cover');
+        if ($mediaId > 0) {
+            if (!IPS_MediaExists($mediaId)) {
+                $this->SendDebug('Artwork', 'Ident Cover wird bereits von einem anderen Objekttyp verwendet', 0);
+                return 0;
+            }
+            return $mediaId;
+        }
+
+        $mediaId = IPS_CreateMedia(MEDIATYPE_IMAGE);
+        if ($mediaId <= 0) {
+            $this->SendDebug('Artwork', 'Cover-Medium konnte nicht angelegt werden', 0);
+            return 0;
+        }
+        $configured = IPS_SetParent($mediaId, $this->InstanceID);
+        $configured = IPS_SetIdent($mediaId, 'Cover') && $configured;
+        $configured = IPS_SetName($mediaId, 'Cover') && $configured;
+        $configured = IPS_SetPosition($mediaId, 140) && $configured;
+        $configured = IPS_SetMediaCached($mediaId, false) && $configured;
+        $configured = IPS_SetMediaFile(
+            $mediaId,
+            'media/MusicAssistantCover_' . $this->InstanceID . '.jpg',
+            false
+        ) && $configured;
+        $configured = IPS_SetHidden($mediaId, true) && $configured;
+        if (!$configured) {
+            $this->SendDebug('Artwork', 'Cover-Medium konnte nicht vollständig konfiguriert werden', 0);
+            if (!IPS_DeleteMedia($mediaId, true)) {
+                $this->SendDebug('Artwork', 'Unvollständiges Cover-Medium konnte nicht entfernt werden', 0);
+            }
+            return 0;
+        }
+        return $mediaId;
+    }
+
+    private function clearCover(): void
+    {
+        $mediaId = $this->ensureCoverMedia();
+        if ($mediaId <= 0) {
+            return;
+        }
+        $hadContent = $this->coverMediaHasContent($mediaId);
+        $hadProxyId = $this->ReadAttributeString('CoverProxyID') !== '';
+        if ($hadContent && !IPS_SetMediaContent($mediaId, '')) {
+            throw new Exception('Cover-Medium konnte nicht geleert werden.');
+        }
+        if (!IPS_SetHidden($mediaId, true)) {
+            throw new Exception('Cover-Medium konnte nicht ausgeblendet werden.');
+        }
+        if ($hadProxyId && !$this->WriteAttributeString('CoverProxyID', '')) {
+            throw new Exception('Cover-Cache konnte nicht zurückgesetzt werden.');
+        }
+        if ($hadContent || $hadProxyId) {
+            $this->SendDebug('Artwork', 'Cover geleert', 0);
+        }
+    }
+
+    private function coverMediaHasContent(int $mediaId): bool
+    {
+        $media = IPS_GetMedia($mediaId);
+        return is_array($media)
+            && ($media['MediaIsAvailable'] ?? false) === true
+            && (int)($media['MediaSize'] ?? 0) > 0;
     }
 
     private function setIfChangedString(string $ident, string $value): bool

@@ -12,6 +12,7 @@ class MusicAssistantConnection extends IPSModule
     private const WEBSOCKET_RX = '{018EF6B5-AB94-40C6-AA53-46943E824ACF}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
+    private const MAX_ARTWORK_SIZE = 5242880;
     private const API_COMMANDS = [
         'players/cmd/previous',
         'players/cmd/stop',
@@ -229,6 +230,9 @@ class MusicAssistantConnection extends IPSModule
         if ($command === 'ApiRequest') {
             return $this->handleApiRequest($request);
         }
+        if ($command === 'ArtworkRequest') {
+            return $this->handleArtworkRequest($request);
+        }
         if (!in_array($command, ['RegisterPlayer', 'UnregisterPlayer'], true)
             || !is_string($request['PlayerID'] ?? null)
             || trim($request['PlayerID']) === '') {
@@ -294,6 +298,115 @@ class MusicAssistantConnection extends IPSModule
             $this->SendDebug('ApiRequest', 'HTTP-Anfrage fehlgeschlagen für Command: ' . $apiCommand, 0);
             return $this->apiErrorResponse('API_ERROR', 'Music-Assistant-Anfrage fehlgeschlagen.');
         }
+    }
+
+    private function handleArtworkRequest(array $request): string
+    {
+        $allowedFields = ['DataID', 'Command', 'ProxyID'];
+        if (count(array_diff(array_keys($request), $allowedFields)) > 0
+            || !is_string($request['ProxyID'] ?? null)
+            || preg_match('/^[a-f0-9]{64}$/D', $request['ProxyID']) !== 1) {
+            return $this->apiErrorResponse('INVALID_REQUEST', 'Ungültige Artwork-Anfrage.');
+        }
+        if (!$this->isConfigured()) {
+            return $this->apiErrorResponse('NOT_CONFIGURED', 'Music Assistant ist nicht konfiguriert.');
+        }
+
+        try {
+            $proxyId = $request['ProxyID'];
+            $response = $this->downloadArtwork($proxyId, false);
+            if (in_array($response['http_code'], [401, 403], true)
+                && trim($this->ReadPropertyString('Token')) !== '') {
+                $response = $this->downloadArtwork($proxyId, true);
+            }
+            if ($response['http_code'] !== 200
+                || $response['content_type'] !== 'image/jpeg'
+                || $response['body'] === ''
+                || strlen($response['body']) > self::MAX_ARTWORK_SIZE
+                || substr($response['body'], 0, 3) !== "\xFF\xD8\xFF") {
+                $this->SendDebug('Artwork', 'Imageproxy lieferte kein gültiges JPEG', 0);
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+            }
+
+            $this->SendDebug('Artwork', 'Cover über Imageproxy geladen', 0);
+            return json_encode([
+                'success'      => true,
+                'proxy_id'     => $proxyId,
+                'content_type' => 'image/jpeg',
+                'content'      => base64_encode($response['body'])
+            ], JSON_UNESCAPED_SLASHES);
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Imageproxy-Anfrage fehlgeschlagen', 0);
+            return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+        }
+    }
+
+    private function downloadArtwork(string $proxyId, bool $authenticated): array
+    {
+        $host = trim($this->ReadPropertyString('Host'));
+        if (strpos($host, ':') !== false && $host[0] !== '[') {
+            $host = '[' . $host . ']';
+        }
+        $url = sprintf(
+            'http://%s:%d/imageproxy/%s?size=512&fmt=jpg',
+            $host,
+            $this->ReadPropertyInteger('Port'),
+            $proxyId
+        );
+        $headers = ['Accept: image/jpeg'];
+        if ($authenticated) {
+            $headers[] = 'Authorization: Bearer ' . trim($this->ReadPropertyString('Token'));
+        }
+
+        if (!IPS_SemaphoreEnter($this->maSemaphoreName(), 15000)) {
+            throw new Exception('MA API semaphore timeout');
+        }
+        try {
+            $body = '';
+            $sizeExceeded = false;
+            $maxArtworkSize = self::MAX_ARTWORK_SIZE;
+            $ch = curl_init($url);
+            if ($ch === false) {
+                throw new Exception('Imageproxy konnte nicht initialisiert werden.');
+            }
+            curl_setopt_array($ch, [
+                CURLOPT_HTTPGET           => true,
+                CURLOPT_HTTPHEADER        => $headers,
+                CURLOPT_TIMEOUT_MS        => 20000,
+                CURLOPT_CONNECTTIMEOUT_MS => 5000,
+                CURLOPT_FOLLOWLOCATION    => false,
+                CURLOPT_MAXFILESIZE       => self::MAX_ARTWORK_SIZE,
+                CURLOPT_WRITEFUNCTION     => static function ($curl, string $chunk) use (
+                    &$body,
+                    &$sizeExceeded,
+                    $maxArtworkSize
+                ): int {
+                    $chunkLength = strlen($chunk);
+                    if (strlen($body) + $chunkLength > $maxArtworkSize) {
+                        $sizeExceeded = true;
+                        return 0;
+                    }
+                    $body .= $chunk;
+                    return $chunkLength;
+                }
+            ]);
+            $transferSucceeded = curl_exec($ch);
+            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $contentType = strtolower(trim((string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE)));
+            curl_close($ch);
+        } finally {
+            IPS_SemaphoreLeave($this->maSemaphoreName());
+        }
+
+        if ($transferSucceeded === false || $sizeExceeded) {
+            throw new Exception('Imageproxy-Anfrage fehlgeschlagen.');
+        }
+        $contentType = trim(explode(';', $contentType, 2)[0]);
+        return [
+            'http_code'   => $httpCode,
+            'content_type' => $contentType,
+            'body'         => $body
+        ];
     }
 
     private function apiErrorResponse(string $code, string $message): string
