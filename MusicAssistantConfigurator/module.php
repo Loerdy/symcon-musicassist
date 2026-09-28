@@ -456,9 +456,6 @@ class MusicAssistantConfigurator extends IPSModule
     private function playerConfiguration(string $playerId): array
     {
         return [
-            'Host'            => $this->ReadPropertyString('Host'),
-            'Port'            => $this->ReadPropertyInteger('Port'),
-            'Token'           => $this->ReadPropertyString('Token'),
             'PlayerID'        => $playerId,
             'PlaylistProfile' => $this->playlistProfileName(),
             'PlaylistMap'     => json_encode($this->getPlaylistMap(), JSON_UNESCAPED_SLASHES),
