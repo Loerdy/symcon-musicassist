@@ -6,6 +6,7 @@ class MusicAssistantConnection extends IPSModule
     private const WEBSOCKET_MODULE = '{D68FD31F-0E90-7019-F16C-1949BD3079EF}';
     private const WEBSOCKET_TX = '{79827379-F36E-4ADA-8A95-5F8D1DC92FA9}';
     private const WEBSOCKET_RX = '{018EF6B5-AB94-40C6-AA53-46943E824ACF}';
+    private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
 
     public function Create(): void
     {
@@ -71,7 +72,7 @@ class MusicAssistantConnection extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
                 ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
                 ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
-                ['type' => 'Label', 'caption' => 'Phase 1: Anmeldung am WebSocket; keine Weiterleitung an Player.']
+                ['type' => 'Label', 'caption' => 'WebSocket-Anmeldung und Echtzeitaktualisierung von Player-Lautstärke und Mute.']
             ],
             'status' => [
                 ['code' => 102, 'icon' => 'active', 'caption' => 'Authentifiziert'],
@@ -112,6 +113,21 @@ class MusicAssistantConnection extends IPSModule
             $this->SetStatus(104);
             $this->SendDebug('WebSocket', 'Server-Begrüßung empfangen', 0);
             $this->authenticate();
+            return '';
+        }
+
+        if (($message['event'] ?? null) === 'player_updated') {
+            $objectId = $message['object_id'] ?? null;
+            $data = $message['data'] ?? null;
+            if ($this->GetStatus() === 102 && is_string($objectId) && $objectId !== '' && is_array($data)) {
+                $this->SendDataToChildren(json_encode([
+                    'DataID' => self::CONNECTION_EVENT,
+                    'Event' => 'player_updated',
+                    'ObjectID' => $objectId,
+                    'Data' => $data
+                ], JSON_THROW_ON_ERROR));
+                $this->SendDebug('player_updated', 'Weitergeleitet für ObjectID=' . $objectId, 0);
+            }
             return '';
         }
 

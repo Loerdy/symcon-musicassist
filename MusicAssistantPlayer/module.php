@@ -7,6 +7,7 @@ class MusicAssistantPlayer extends IPSModule
 {
     use MusicAssistantApi;
 
+    private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const REPEAT_PROFILE  = 'MA.RepeatMode';
     private const VOLUP_PROFILE   = 'MA.VolumeUp';
     private const VOLDOWN_PROFILE = 'MA.VolumeDown';
@@ -129,6 +130,30 @@ class MusicAssistantPlayer extends IPSModule
         ];
 
         return json_encode($form);
+    }
+
+    public function ReceiveData($JSONString): string
+    {
+        $packet = json_decode($JSONString, true);
+        if (!is_array($packet)
+            || ($packet['DataID'] ?? null) !== self::CONNECTION_EVENT
+            || ($packet['Event'] ?? null) !== 'player_updated'
+            || !is_string($packet['ObjectID'] ?? null)
+            || $packet['ObjectID'] !== trim($this->ReadPropertyString('PlayerID'))
+            || !is_array($packet['Data'] ?? null)) {
+            return '';
+        }
+
+        $data = $packet['Data'];
+        $this->SendDebug('player_updated', 'Passendes Event empfangen für PlayerID=' . $packet['ObjectID'], 0);
+
+        if ($this->updateVolumeLevel($data['volume_level'] ?? null)) {
+            $this->SendDebug('player_updated', 'Volume aktualisiert', 0);
+        }
+        if ($this->updateMuteState($data['volume_muted'] ?? null)) {
+            $this->SendDebug('player_updated', 'Mute aktualisiert', 0);
+        }
+        return '';
     }
 
     public function RequestAction($Ident, $Value): void
@@ -377,12 +402,7 @@ class MusicAssistantPlayer extends IPSModule
                     }
                 }
 
-                if ($vol !== null && @$this->GetIDForIdent('VolumeLevel') > 0) {
-                    $vol = max(0, min(100, $vol));
-                    if ((int)$this->GetValue('VolumeLevel') !== $vol) {
-                        $this->SetValue('VolumeLevel', $vol);
-                    }
-                }
+                $this->updateVolumeLevel($vol);
 
                 $muted = null;
                 if (($p['type'] ?? '') === 'group') {
@@ -399,16 +419,35 @@ class MusicAssistantPlayer extends IPSModule
                     }
                 }
 
-                if ($muted !== null && @$this->GetIDForIdent('Mute') > 0) {
-                    if ((bool)$this->GetValue('Mute') !== $muted) {
-                        $this->SetValue('Mute', $muted);
-                    }
-                }
+                $this->updateMuteState($muted);
                 break;
             }
         } catch (Throwable $e) {
             $this->SendDebug('updateVolumeFromPlayersAll failed', $e->getMessage(), 0);
         }
+    }
+
+    private function updateVolumeLevel($value): bool
+    {
+        if ((!is_int($value) && !is_float($value)) || @$this->GetIDForIdent('VolumeLevel') <= 0) {
+            return false;
+        }
+        $volume = max(0, min(100, (int)$value));
+        if ((int)$this->GetValue('VolumeLevel') === $volume) {
+            return false;
+        }
+        $this->SetValue('VolumeLevel', $volume);
+        return true;
+    }
+
+    private function updateMuteState($value): bool
+    {
+        if (!is_bool($value) || @$this->GetIDForIdent('Mute') <= 0
+            || (bool)$this->GetValue('Mute') === $value) {
+            return false;
+        }
+        $this->SetValue('Mute', $value);
+        return true;
     }
 
     private function setIfChangedString(string $ident, string $value): void
