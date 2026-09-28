@@ -1,0 +1,15 @@
+{
+  "id": "{880534D6-998A-704B-DFD1-ABCD3D23B811}",
+  "name": "MusicAssistant Connection",
+  "type": 2,
+  "vendor": "Music Assistant",
+  "aliases": ["Music Assistant Connection"],
+  "url": "",
+  "parentRequirements": ["{79827379-F36E-4ADA-8A95-5F8D1DC92FA9}"],
+  "childRequirements": ["{3D0660F0-556B-7070-DA8E-CD7C6D19595C}"],
+  "implemented": [
+    "{018EF6B5-AB94-40C6-AA53-46943E824ACF}",
+    "{246666E8-C78A-0E3D-5857-9AB5F5873E2E}"
+  ],
+  "prefix": "MAC"
+}
