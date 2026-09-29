@@ -192,38 +192,6 @@ class MusicAssistantPlayer extends IPSModule
             return '';
         }
 
-        if (($packet['Event'] ?? null) === 'player_updated'
-            && is_string($packet['ObjectID'] ?? null)
-            && is_array($packet['Data'] ?? null)) {
-            $data = $packet['Data'];
-            $debugValue = static function (array $values, string $key): string {
-                if (!array_key_exists($key, $values)) {
-                    return '-';
-                }
-                if (is_bool($values[$key])) {
-                    return $values[$key] ? 'true' : 'false';
-                }
-                if (is_int($values[$key]) || is_float($values[$key]) || is_string($values[$key])) {
-                    return (string)$values[$key];
-                }
-                return $values[$key] === null ? 'null' : gettype($values[$key]);
-            };
-            $this->SendDebug(
-                'Volume Event Diagnose',
-                'PlayerID=' . $playerId
-                    . ' ObjectID=' . $packet['ObjectID']
-                    . ' volume_level_present=' . (array_key_exists('volume_level', $data) ? 'true' : 'false')
-                    . ' volume_level=' . $debugValue($data, 'volume_level')
-                    . ' group_volume_present=' . (array_key_exists('group_volume', $data) ? 'true' : 'false')
-                    . ' group_volume=' . $debugValue($data, 'group_volume')
-                    . ' volume_muted_present=' . (array_key_exists('volume_muted', $data) ? 'true' : 'false')
-                    . ' volume_muted=' . $debugValue($data, 'volume_muted')
-                    . ' group_volume_muted_present=' . (array_key_exists('group_volume_muted', $data) ? 'true' : 'false')
-                    . ' group_volume_muted=' . $debugValue($data, 'group_volume_muted'),
-                0
-            );
-        }
-
         if (($packet['Event'] ?? null) !== 'player_updated'
             || !is_string($packet['ObjectID'] ?? null)
             || $packet['ObjectID'] !== $playerId
@@ -234,7 +202,12 @@ class MusicAssistantPlayer extends IPSModule
         $data = $packet['Data'];
         $this->SendDebug('player_updated', 'Passendes Event empfangen für PlayerID=' . $packet['ObjectID'], 0);
 
-        if ($this->updateVolumeLevel($data['volume_level'] ?? null)) {
+        $volumeLevel = $data['volume_level'] ?? null;
+        if (!is_int($volumeLevel) && !is_float($volumeLevel)
+            && (is_int($data['group_volume'] ?? null) || is_float($data['group_volume'] ?? null))) {
+            $volumeLevel = $data['group_volume'];
+        }
+        if ($this->updateVolumeLevel($volumeLevel)) {
             $this->SendDebug('player_updated', 'Volume aktualisiert', 0);
         }
         if ($this->updateMuteState($data['volume_muted'] ?? null)) {
