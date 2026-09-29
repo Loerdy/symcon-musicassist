@@ -75,22 +75,20 @@ class MusicAssistantConfigurator extends IPSModule
                 ],
 
                 [
-                    'type'                        => 'List',
-                    'name'                        => 'Players',
-                    'caption'                     => 'Player',
-                    'add'                         => false,
-                    'delete'                      => false,
-                    'changeOrder'                 => false,
-                    'loadValuesFromConfiguration' => false,
-                    'columns'                     => [
-                        ['caption' => 'Name',        'name' => 'name',        'width' => '220px'],
-                        ['caption' => 'Player ID',   'name' => 'player_id',   'width' => '300px'],
-                        ['caption' => 'Provider',    'name' => 'provider',    'width' => '150px'],
-                        ['caption' => 'Verfügbar',   'name' => 'available',   'width' => '90px'],
+                    'type'     => 'Configurator',
+                    'name'     => 'Players',
+                    'caption'  => 'Player',
+                    'delete'   => false,
+                    'rowCount' => 0,
+                    'columns'  => [
+                        ['caption' => 'Name',        'name' => 'name',        'width' => 'auto'],
+                        ['caption' => 'Player ID',   'name' => 'player_id',   'width' => '360px'],
+                        ['caption' => 'Provider',    'name' => 'provider',    'width' => '170px'],
+                        ['caption' => 'Verfügbar',   'name' => 'available',   'width' => '85px'],
                         ['caption' => 'Status',      'name' => 'status',      'width' => '130px'],
-                        ['caption' => 'Instanz-ID',  'name' => 'instance_id', 'width' => '90px']
+                        ['caption' => 'Instanz-ID',  'name' => 'instance_id', 'width' => '85px']
                     ],
-                    'values'                      => $values
+                    'values'   => $values
                 ],
                 [
                     'type'    => 'Button',
@@ -540,12 +538,12 @@ class MusicAssistantConfigurator extends IPSModule
                 'status'      => $instanceId > 0 ? 'Vorhanden' : 'Nicht angelegt',
                 'instance_id' => $instanceId > 0 ? (string)$instanceId : '-',
                 'instanceID'  => $instanceId,
-                'editable'    => false,
-                'deletable'   => false
+                'create'      => [
+                    'moduleID'      => self::PLAYER_MODULE_ID,
+                    'configuration' => $this->playerConfiguration($playerId),
+                    'name'          => 'MA Player - ' . $name
+                ]
             ];
-            if ($instanceId > 0) {
-                $row['rowColor'] = '#C8F7C5';
-            }
             $rows[] = $row;
         }
 
