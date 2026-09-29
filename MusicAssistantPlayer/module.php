@@ -157,16 +157,6 @@ class MusicAssistantPlayer extends IPSModule
                 && is_array($packet['Data'] ?? null)) {
                 $this->SendDebug('queue_updated', 'Passendes Queue-Event empfangen für QueueID=' . $packet['ObjectID'], 0);
                 $data = $packet['Data'];
-                $currentItem = $data['current_item'] ?? null;
-                $mediaItem = is_array($currentItem) ? ($currentItem['media_item'] ?? null) : null;
-                $artists = is_array($mediaItem) ? ($mediaItem['artists'] ?? null) : null;
-                if (is_array($artists) && count($artists) > 0) {
-                    $firstArtist = $artists[0];
-                    $artist = is_array($firstArtist)
-                        ? (string)($firstArtist['name'] ?? '')
-                        : (string)$firstArtist;
-                    $this->SendDebug('UTF8 Player RX', 'Artist="' . $artist . '" HEX=' . bin2hex($artist), 0);
-                }
                 if (array_key_exists('state', $data)) {
                     $this->updateTransportFromQueueState($data['state']);
                 }
@@ -638,10 +628,6 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ((string)$this->GetValue($ident) !== $value) {
             $this->SetValue($ident, $value);
-            if ($ident === 'NowArtist') {
-                $storedArtist = (string)$this->GetValue($ident);
-                $this->SendDebug('UTF8 Player Stored', 'Artist="' . $storedArtist . '" HEX=' . bin2hex($storedArtist), 0);
-            }
             return true;
         }
         return false;

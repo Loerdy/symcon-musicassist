@@ -124,7 +124,6 @@ class MusicAssistantConnection extends IPSModule
             || !is_string($packet['Buffer'] ?? null)) {
             return '';
         }
-        $this->debugRawQueueArtist($packet['Buffer']);
         $payload = utf8_decode($packet['Buffer']);
         $message = json_decode($payload, true);
         if (!is_array($message)) {
@@ -175,16 +174,6 @@ class MusicAssistantConnection extends IPSModule
             $queueId = $message['object_id'] ?? null;
             $data = $message['data'] ?? null;
             if ($this->GetStatus() === 102 && is_string($queueId) && $queueId !== '' && is_array($data)) {
-                $currentItem = $data['current_item'] ?? null;
-                $mediaItem = is_array($currentItem) ? ($currentItem['media_item'] ?? null) : null;
-                $artists = is_array($mediaItem) ? ($mediaItem['artists'] ?? null) : null;
-                if (is_array($artists) && count($artists) > 0) {
-                    $firstArtist = $artists[0];
-                    $artist = is_array($firstArtist)
-                        ? (string)($firstArtist['name'] ?? '')
-                        : (string)$firstArtist;
-                    $this->SendDebug('UTF8 Connection', 'Artist="' . $artist . '" HEX=' . bin2hex($artist), 0);
-                }
                 $this->SendDebug('queue_updated', 'Empfangen für QueueID=' . $queueId, 0);
                 $queuePlayers = $this->readJsonBuffer('QueuePlayers');
                 $playerIds = $queuePlayers[$queueId] ?? [];
@@ -229,38 +218,6 @@ class MusicAssistantConnection extends IPSModule
             $this->SendDebug('Authentication', 'Authentifizierung abgelehnt', 0);
         }
         return '';
-    }
-
-    private function debugRawQueueArtist(string $payload): void
-    {
-        if (preg_match('/"event"\s*:\s*"queue_updated"/', $payload) !== 1) {
-            return;
-        }
-
-        $currentItemPosition = strpos($payload, '"current_item"');
-        if ($currentItemPosition === false) {
-            return;
-        }
-
-        $currentItemJson = substr($payload, $currentItemPosition);
-        $artistsPosition = strpos($currentItemJson, '"artists"');
-        if ($artistsPosition === false) {
-            return;
-        }
-
-        $artistsJson = substr($currentItemJson, $artistsPosition);
-        if (preg_match('/"artists"\s*:\s*\[\s*(?:\{.*?"name"\s*:\s*)?"((?:\\\\.|[^"\\\\])*)"/s', $artistsJson, $matches) !== 1) {
-            return;
-        }
-
-        $rawArtist = $matches[1];
-        $unicodeEscaped = preg_match('/\\\\u[0-9a-fA-F]{4}/', $rawArtist) === 1;
-        $this->SendDebug(
-            'UTF8 RAW WebSocket',
-            'ArtistRaw="' . $rawArtist . '" HEX=' . bin2hex($rawArtist)
-                . ' UNICODE_ESCAPED=' . ($unicodeEscaped ? 'yes' : 'no'),
-            0
-        );
     }
 
     public function ForwardData($JSONString): string
