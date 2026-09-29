@@ -33,6 +33,10 @@ class MusicAssistantPlayer extends IPSModule
     public function Destroy(): void
     {
         try {
+            if (IPS_GetKernelRunlevel() !== KR_READY) {
+                return;
+            }
+
             $registeredPlayerId = $this->GetBuffer('RegisteredPlayerID');
             if ($registeredPlayerId !== '' && $this->HasActiveParent()) {
                 if ($this->sendRegistrationRequest('UnregisterPlayer', $registeredPlayerId)) {
@@ -828,7 +832,15 @@ class MusicAssistantPlayer extends IPSModule
         if (!IPS_VariableProfileExists($profile)) {
             IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
         }
-        IPS_SetVariableProfileAssociation($profile, 0, '', '', -1);
+
+        $profileData = IPS_GetVariableProfile($profile);
+        foreach (($profileData['Associations'] ?? []) as $association) {
+            if (isset($association['Value']) && (float)$association['Value'] === 0.0) {
+                IPS_SetVariableProfileAssociation($profile, 0, '', '', -1);
+                break;
+            }
+        }
+
         IPS_SetVariableProfileAssociation($profile, 1, $caption, $icon, -1);
     }
 
