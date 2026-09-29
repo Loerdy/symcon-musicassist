@@ -67,7 +67,7 @@ class MusicAssistantConfigurator extends IPSModule
                     'type'     => 'Configurator',
                     'name'     => 'Players',
                     'caption'  => 'Player',
-                    'delete'   => false,
+                    'delete'   => true,
                     'rowCount' => 0,
                     'columns'  => [
                         ['caption' => 'Name',        'name' => 'name',        'width' => 'auto'],
