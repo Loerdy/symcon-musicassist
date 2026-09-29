@@ -92,7 +92,11 @@ class MusicAssistantPlayer extends IPSModule
         $this->MaintainVariable('VolumeUp', 'Volume +', VARIABLETYPE_INTEGER, self::VOLUP_PROFILE, 80, true);
         $this->EnableAction('VolumeUp');
 
-        $this->MaintainVariable('VolumeDown', 'Volume -', VARIABLETYPE_INTEGER, self::VOLDOWN_PROFILE, 90, true);
+        $this->MaintainVariable('VolumeDown', 'Volume', VARIABLETYPE_INTEGER, self::VOLDOWN_PROFILE, 90, true);
+        $volumeDownId = $this->GetIDForIdent('VolumeDown');
+        if (IPS_GetName($volumeDownId) === 'Volume -') {
+            IPS_SetName($volumeDownId, 'Volume');
+        }
         $this->EnableAction('VolumeDown');
 
         // Now Playing
@@ -125,8 +129,7 @@ class MusicAssistantPlayer extends IPSModule
 
     public function GetConfigurationForm(): string
     {
-        // Hinweis: IPS 9 (dein Build) akzeptiert kein TextBox/MultiLineTextBox/PopupAlert in elements.
-        // Daher Anzeige über Label und UpdateFormField.
+        // Die Konfigurationsanzeige wird kompatibel über Label und UpdateFormField umgesetzt.
         $form = [
             'elements' => [
                 ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
@@ -203,7 +206,12 @@ class MusicAssistantPlayer extends IPSModule
         $data = $packet['Data'];
         $this->SendDebug('player_updated', 'Passendes Event empfangen für PlayerID=' . $packet['ObjectID'], 0);
 
-        if ($this->updateVolumeLevel($data['volume_level'] ?? null)) {
+        $volumeLevel = $data['volume_level'] ?? null;
+        if (!is_int($volumeLevel) && !is_float($volumeLevel)
+            && (is_int($data['group_volume'] ?? null) || is_float($data['group_volume'] ?? null))) {
+            $volumeLevel = $data['group_volume'];
+        }
+        if ($this->updateVolumeLevel($volumeLevel)) {
             $this->SendDebug('player_updated', 'Volume aktualisiert', 0);
         }
         if ($this->updateMuteState($data['volume_muted'] ?? null)) {
@@ -820,6 +828,7 @@ class MusicAssistantPlayer extends IPSModule
         if (!IPS_VariableProfileExists($profile)) {
             IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
         }
+        IPS_SetVariableProfileAssociation($profile, 0, '', '', -1);
         IPS_SetVariableProfileAssociation($profile, 1, $caption, $icon, -1);
     }
 

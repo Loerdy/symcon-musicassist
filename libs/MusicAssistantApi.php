@@ -23,29 +23,6 @@ trait MusicAssistantApi
         return (string)$id;
     }
 
-    private function maGetTimeoutMs(int $fallback): int
-    {
-        // optional: per Property konfigurierbar
-        if (method_exists($this, 'ReadPropertyInteger')) {
-            $v = (int)@$this->ReadPropertyInteger('HttpTimeoutMs');
-            if ($v > 0) {
-                return $v;
-            }
-        }
-        return $fallback;
-    }
-
-    private function maGetConnectTimeoutMs(int $fallback): int
-    {
-        if (method_exists($this, 'ReadPropertyInteger')) {
-            $v = (int)@$this->ReadPropertyInteger('HttpConnectTimeoutMs');
-            if ($v > 0) {
-                return $v;
-            }
-        }
-        return $fallback;
-    }
-
     private function maSemaphoreName(): string
     {
         // pro Instanz serialisieren
@@ -62,9 +39,6 @@ trait MusicAssistantApi
         bool $debugResponseBody = true
     ): array
     {
-        $timeoutMs = $this->maGetTimeoutMs($timeoutMs);
-        $connectTimeoutMs = $this->maGetConnectTimeoutMs(5000);
-
         $payload = [
             'message_id' => $this->maNextMessageId(),
             'command'    => $command,
@@ -83,7 +57,7 @@ trait MusicAssistantApi
         $reqJson = json_encode($payload, JSON_UNESCAPED_SLASHES);
         $this->SendDebug('MA Request', $reqJson, 0);
 
-        // Serialisieren: PollState + RequestAction dürfen nicht parallel laufen
+        // Konkurrierende HTTP-/Artwork-Zugriffe auf dieselbe Connection serialisieren.
         if (!IPS_SemaphoreEnter($this->maSemaphoreName(), 15000)) {
             throw new Exception('MA API semaphore timeout (parallel requests blocked)');
         }
@@ -96,7 +70,7 @@ trait MusicAssistantApi
                 CURLOPT_HTTPHEADER         => $headers,
                 CURLOPT_POSTFIELDS         => $reqJson,
                 CURLOPT_TIMEOUT_MS         => $timeoutMs,
-                CURLOPT_CONNECTTIMEOUT_MS  => $connectTimeoutMs,
+                CURLOPT_CONNECTTIMEOUT_MS  => 5000,
                 CURLOPT_FOLLOWLOCATION     => true
             ]);
 
