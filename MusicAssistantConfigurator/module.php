@@ -7,9 +7,6 @@ class MusicAssistantConfigurator extends IPSModule
     private const CONNECTION_MODULE_ID = '{880534D6-998A-704B-DFD1-ABCD3D23B811}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
-    private const PARENT_RETRY_PENDING = 0;
-    private const PARENT_RETRY_DONE = 1;
-    private const PARENT_RETRY_MAX_ATTEMPTS = 30;
 
     public function Create(): void
     {
@@ -21,24 +18,14 @@ class MusicAssistantConfigurator extends IPSModule
 
         $this->RegisterAttributeString('ProfileNames', '');
 
-        $this->SetBuffer('ParentRetryAttempts', '0');
-        $this->SetBuffer('ParentUnavailableLogged', '0');
-
         // item_id => uri
         $this->SetBuffer('PlaylistMap', '{}');
         $this->SetBuffer('RadioMap', '{}');
-        $this->RegisterTimer('ParentConnectionRetry', 0, 'MA_RetryConfiguratorParent($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
-        $this->SetTimerInterval('ParentConnectionRetry', 0);
-        $this->SetBuffer('ParentRetryAttempts', '0');
-        $this->SetBuffer('ParentUnavailableLogged', '0');
-        if ($this->ensureConnectionParent() === self::PARENT_RETRY_PENDING) {
-            $this->SetTimerInterval('ParentConnectionRetry', 2000);
-        }
         try {
             $this->initializeProfileNames();
         } catch (Throwable $e) {
@@ -53,20 +40,6 @@ class MusicAssistantConfigurator extends IPSModule
             return '';
         }
         return '';
-    }
-
-    public function RetryConfiguratorParent(): void
-    {
-        $attempts = (int)$this->GetBuffer('ParentRetryAttempts') + 1;
-        $this->SetBuffer('ParentRetryAttempts', (string)$attempts);
-        if ($this->ensureConnectionParent() !== self::PARENT_RETRY_PENDING) {
-            $this->SetTimerInterval('ParentConnectionRetry', 0);
-            return;
-        }
-        if ($attempts >= self::PARENT_RETRY_MAX_ATTEMPTS) {
-            $this->SetTimerInterval('ParentConnectionRetry', 0);
-            $this->SendDebug('Parent', 'Automatische Parent-Zuordnung nach 30 Versuchen beendet', 0);
-        }
     }
 
     public function RequestAction($Ident, $Value): void
@@ -653,91 +626,6 @@ class MusicAssistantConfigurator extends IPSModule
         }
     }
 
-    private function ensureConnectionParent(): int
-    {
-        $instance = IPS_GetInstance($this->InstanceID);
-        $parentId = (int)($instance['ConnectionID'] ?? 0);
-        if ($parentId > 0) {
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $host = $this->normalizeServerHost($this->ReadPropertyString('Host'));
-        $port = $this->ReadPropertyInteger('Port');
-        if ($host === '' || $port <= 0 || $port > 65535) {
-            $this->SendDebug('Parent', 'Host/Port nicht für automatische Parent-Zuordnung geeignet', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $connectionIds = IPS_GetInstanceListByModuleID(self::CONNECTION_MODULE_ID);
-        if (count($connectionIds) === 0) {
-            $this->SendDebug('Parent', 'Keine MusicAssistantConnection vorhanden', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $matches = [];
-        $unavailableConnections = [];
-        foreach ($connectionIds as $connectionId) {
-            $matchesServer = $this->connectionMatchesServer((int)$connectionId);
-            if ($matchesServer === null) {
-                $unavailableConnections[] = (int)$connectionId;
-            } elseif ($matchesServer) {
-                $matches[] = (int)$connectionId;
-            }
-        }
-
-        if (count($unavailableConnections) > 0) {
-            if ($this->GetBuffer('ParentUnavailableLogged') !== '1') {
-                $this->SetBuffer('ParentUnavailableLogged', '1');
-                $this->SendDebug(
-                    'Parent',
-                    'Connection ' . $unavailableConnections[0] . ' während Initialisierung noch nicht verfügbar',
-                    0
-                );
-            }
-            return self::PARENT_RETRY_PENDING;
-        }
-        if (count($matches) === 0) {
-            return self::PARENT_RETRY_DONE;
-        }
-        if (count($matches) > 1) {
-            $this->SendDebug('Parent', 'Mehrere passende MusicAssistantConnections gefunden; keine Verbindung geändert', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        if (IPS_ConnectInstance($this->InstanceID, $matches[0])) {
-            $this->SendDebug('Parent', 'Passende MusicAssistantConnection verbunden: ' . $matches[0], 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $this->SendDebug('Parent', 'Verbindung mit MusicAssistantConnection fehlgeschlagen: ' . $matches[0], 0);
-        return self::PARENT_RETRY_PENDING;
-    }
-
-    private function connectionMatchesServer(int $connectionId): ?bool
-    {
-        if (!IPS_InstanceExists($connectionId)) {
-            return null;
-        }
-        $connection = IPS_GetInstance($connectionId);
-        if (!is_array($connection)) {
-            return null;
-        }
-        if (($connection['ModuleInfo']['ModuleID'] ?? null) !== self::CONNECTION_MODULE_ID) {
-            return false;
-        }
-        $configurationJson = @IPS_GetConfiguration($connectionId);
-        if (!is_string($configurationJson) || $configurationJson === '') {
-            return null;
-        }
-        $configuration = json_decode($configurationJson, true);
-        if (!is_array($configuration)) {
-            return null;
-        }
-        return $this->normalizeServerHost((string)($configuration['Host'] ?? ''))
-                === $this->normalizeServerHost($this->ReadPropertyString('Host'))
-            && (int)($configuration['Port'] ?? 0) === $this->ReadPropertyInteger('Port');
-    }
-
     private function sendApiRequest(string $apiCommand, array $params = [])
     {
         try {
@@ -810,17 +698,6 @@ class MusicAssistantConfigurator extends IPSModule
             }
         }
         return 0;
-    }
-
-    private function normalizeServerHost(string $host): string
-    {
-        $host = trim($host);
-        if (strlen($host) >= 2 && $host[0] === '[' && substr($host, -1) === ']') {
-            $host = substr($host, 1, -1);
-        }
-        $host = strtolower(rtrim($host, '.'));
-        $packedAddress = @inet_pton($host);
-        return $packedAddress === false ? $host : bin2hex($packedAddress);
     }
 
     private function isList(array $arr): bool
