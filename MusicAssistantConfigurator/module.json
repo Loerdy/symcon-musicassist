@@ -3,9 +3,7 @@
   "name": "MusicAssistant Configurator",
   "type": 4,
   "vendor": "Music Assistant",
-  "aliases": [
-    "Music Assistant Server"
-  ],
+  "aliases": [],
   "url": "https://www.music-assistant.io/api/",
   "parentRequirements": ["{246666E8-C78A-0E3D-5857-9AB5F5873E2E}"],
   "childRequirements": [],
