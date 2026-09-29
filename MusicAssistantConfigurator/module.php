@@ -12,8 +12,6 @@ class MusicAssistantConfigurator extends IPSModule
     {
         parent::Create();
 
-        $this->RegisterPropertyString('Host', '127.0.0.1');
-        $this->RegisterPropertyInteger('Port', 8095);
         $this->RegisterPropertyInteger('TargetCategoryID', 0);
 
         $this->RegisterAttributeString('ProfileNames', '');
@@ -400,27 +398,12 @@ class MusicAssistantConfigurator extends IPSModule
             return $profileNames;
         }
 
-        $connectionId = 0;
-        try {
-            $connectionId = $this->getConfiguratorConnectionId();
-        } catch (Throwable $e) {
-            // Ein parentloser Legacy-Configurator kann trotzdem vorhandene Profile übernehmen.
-        }
-
-        $playerProfiles = ['profileNames' => null, 'conflict' => false, 'unavailable' => false];
-        if ($connectionId > 0) {
-            $playerProfiles = $this->profileNamesFromConnectedPlayers($connectionId);
-            if ($playerProfiles['profileNames'] !== null
-                && !$playerProfiles['conflict']
-                && !$playerProfiles['unavailable']) {
-                return $this->storeProfileNames($playerProfiles['profileNames'], 'verbundenen Playern');
-            }
-        }
-
-        $legacyProfileNames = $this->legacyProfileNames();
-        if (IPS_VariableProfileExists($legacyProfileNames['playlist'])
-            || IPS_VariableProfileExists($legacyProfileNames['radio'])) {
-            return $this->storeProfileNames($legacyProfileNames, 'bestehenden Legacy-Profilen');
+        $connectionId = $this->getConfiguratorConnectionId();
+        $playerProfiles = $this->profileNamesFromConnectedPlayers($connectionId);
+        if ($playerProfiles['profileNames'] !== null
+            && !$playerProfiles['conflict']
+            && !$playerProfiles['unavailable']) {
+            return $this->storeProfileNames($playerProfiles['profileNames'], 'verbundenen Playern');
         }
 
         if ($playerProfiles['conflict']) {
@@ -429,10 +412,6 @@ class MusicAssistantConfigurator extends IPSModule
 
         if ($playerProfiles['unavailable']) {
             throw new Exception('Verbundene Player sind während der Profilnamen-Initialisierung noch nicht vollständig verfügbar.');
-        }
-
-        if ($connectionId <= 0) {
-            return null;
         }
 
         $suffix = substr(md5('connection:' . $connectionId), 0, 8);
@@ -491,16 +470,6 @@ class MusicAssistantConfigurator extends IPSModule
             'profileNames' => count($pairs) === 1 ? array_values($pairs)[0] : null,
             'conflict'     => count($pairs) > 1,
             'unavailable'  => $unavailable
-        ];
-    }
-
-    private function legacyProfileNames(): array
-    {
-        $key = strtolower(trim($this->ReadPropertyString('Host'))) . ':' . (string)$this->ReadPropertyInteger('Port');
-        $suffix = substr(md5($key), 0, 8);
-        return [
-            'playlist' => 'MA.Playlists.' . $suffix,
-            'radio'    => 'MA.Radios.' . $suffix
         ];
     }
 
