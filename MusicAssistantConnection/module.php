@@ -173,6 +173,16 @@ class MusicAssistantConnection extends IPSModule
             $queueId = $message['object_id'] ?? null;
             $data = $message['data'] ?? null;
             if ($this->GetStatus() === 102 && is_string($queueId) && $queueId !== '' && is_array($data)) {
+                $currentItem = $data['current_item'] ?? null;
+                $mediaItem = is_array($currentItem) ? ($currentItem['media_item'] ?? null) : null;
+                $artists = is_array($mediaItem) ? ($mediaItem['artists'] ?? null) : null;
+                if (is_array($artists) && count($artists) > 0) {
+                    $firstArtist = $artists[0];
+                    $artist = is_array($firstArtist)
+                        ? (string)($firstArtist['name'] ?? '')
+                        : (string)$firstArtist;
+                    $this->SendDebug('UTF8 Connection', 'Artist="' . $artist . '" HEX=' . bin2hex($artist), 0);
+                }
                 $this->SendDebug('queue_updated', 'Empfangen für QueueID=' . $queueId, 0);
                 $queuePlayers = $this->readJsonBuffer('QueuePlayers');
                 $playerIds = $queuePlayers[$queueId] ?? [];
