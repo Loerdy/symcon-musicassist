@@ -186,6 +186,8 @@ Das Cover des aktuellen Titels wird von Music Assistant geladen und als IP-Symco
 
 ## Versionierung
 
+Der aktuelle veröffentlichte Stable-Stand ist **v2.0.1**.
+
 Der Tag [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) kennzeichnet den ersten veröffentlichten Stable-Stand.
 
 ---
