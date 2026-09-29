@@ -55,12 +55,12 @@ class MusicAssistantConfigurator extends IPSModule
                 [
                     'type'    => 'Button',
                     'caption' => 'Playlists laden (Profil erstellen/aktualisieren)',
-                    'onClick' => 'MA_SyncPlaylistsProfile($id);'
+                    'onClick' => 'MASS_SyncPlaylistsProfile($id);'
                 ],
                 [
                     'type'    => 'Button',
                     'caption' => 'Radios laden (Profil erstellen/aktualisieren)',
-                    'onClick' => 'MA_SyncRadiosProfile($id);'
+                    'onClick' => 'MASS_SyncRadiosProfile($id);'
                 ],
 
                 [

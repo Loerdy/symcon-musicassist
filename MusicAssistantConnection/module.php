@@ -54,7 +54,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('QueueHints', '{}');
         $this->SetBuffer('ResyncGeneration', '');
         $this->SetBuffer('ResyncPlayers', '{}');
-        $this->RegisterTimer('CheckConnection', 0, 'MAC_CheckConnection($_IPS["TARGET"]);');
+        $this->RegisterTimer('CheckConnection', 0, 'MASS_CheckConnection($_IPS["TARGET"]);');
         $this->RequireParent(self::WEBSOCKET_MODULE);
     }
 

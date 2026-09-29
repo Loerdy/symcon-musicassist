@@ -26,8 +26,8 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
 
-        $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
-        $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
+        $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
+        $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
     }
 
     public function Destroy(): void
