@@ -40,17 +40,6 @@ class MusicAssistantConfigurator extends IPSModule
         return '';
     }
 
-    public function RequestAction($Ident, $Value): void
-    {
-        switch ($Ident) {
-            case 'ReloadPlayers':
-                $this->ReloadForm();
-                break;
-            default:
-                throw new Exception('Unknown action: ' . $Ident);
-        }
-    }
-
     public function GetConfigurationForm(): string
     {
         $values = $this->buildPlayerListValues();
@@ -88,26 +77,6 @@ class MusicAssistantConfigurator extends IPSModule
                         ['caption' => 'Status',      'name' => 'status',      'width' => '130px']
                     ],
                     'values'   => $values
-                ],
-                [
-                    'type'    => 'Button',
-                    'caption' => 'Ausgewählten Player erstellen',
-                    'onClick' => 'if (trim((string)($Players["player_id"] ?? "")) === "") {'
-                        . ' echo "Bitte zuerst einen Player in der Liste auswählen.";'
-                        . ' } else {'
-                        . ' echo MA_CreatePlayer($id, (string)$Players["player_id"], (string)($Players["name"] ?? ""));'
-                        . ' }',
-                    'link'    => false
-                ],
-                [
-                    'type'    => 'Button',
-                    'caption' => 'Alle fehlenden Player erstellen',
-                    'onClick' => 'echo MA_CreateMissingPlayers($id);'
-                ],
-                [
-                    'type'    => 'Button',
-                    'caption' => 'Player neu laden',
-                    'onClick' => 'IPS_RequestAction($id, "ReloadPlayers", true);'
                 ]
             ]
         ];
@@ -198,44 +167,6 @@ class MusicAssistantConfigurator extends IPSModule
         } finally {
             IPS_SemaphoreLeave($semaphore);
         }
-    }
-
-    public function CreateMissingPlayers(): string
-    {
-        $created = 0;
-        $existing = 0;
-        $failures = [];
-        foreach ($this->buildPlayerListValues() as $player) {
-            if ((int)($player['instanceID'] ?? 0) > 0) {
-                $existing++;
-                continue;
-            }
-            $playerId = (string)($player['player_id'] ?? '');
-            $name = (string)($player['name'] ?? $playerId);
-            try {
-                $result = $this->createPlayerInternal($playerId, $name, false);
-                if (strpos($result, 'existiert bereits') !== false) {
-                    $existing++;
-                } else {
-                    $created++;
-                }
-            } catch (Throwable $e) {
-                $failures[] = $name . ': ' . $e->getMessage();
-            }
-        }
-
-        try {
-            $this->ReloadForm();
-        } catch (Throwable $e) {
-            $this->SendDebug('CreatePlayer', 'Formular konnte nach der Erstellung nicht aktualisiert werden', 0);
-        }
-
-        $summary = 'Erstellt: ' . $created . '; bereits vorhanden: ' . $existing
-            . '; fehlgeschlagen: ' . count($failures) . '.';
-        if (count($failures) > 0) {
-            $summary .= "\n" . implode("\n", $failures);
-        }
-        return $summary;
     }
 
     public function SyncPlaylistsProfile(): void
