@@ -1,4 +1,4 @@
-# Music Assistant for IP-Symcon
+# Music Assistant für IP-Symcon
 
 [Deutsch](#music-assistant-für-ip-symcon) | [English](#music-assistant-for-ip-symcon)
 
