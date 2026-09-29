@@ -125,7 +125,8 @@ class MusicAssistantConnection extends IPSModule
             return '';
         }
         $this->debugRawQueueArtist($packet['Buffer']);
-        $message = json_decode($packet['Buffer'], true);
+        $payload = utf8_decode($packet['Buffer']);
+        $message = json_decode($payload, true);
         if (!is_array($message)) {
             $this->SendDebug('WebSocket', 'Ungültige JSON-Nachricht', 0);
             return '';
