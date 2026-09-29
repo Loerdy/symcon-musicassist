@@ -124,6 +124,7 @@ class MusicAssistantConnection extends IPSModule
             || !is_string($packet['Buffer'] ?? null)) {
             return '';
         }
+        $this->debugRawQueueArtist($packet['Buffer']);
         $message = json_decode($packet['Buffer'], true);
         if (!is_array($message)) {
             $this->SendDebug('WebSocket', 'Ungültige JSON-Nachricht', 0);
@@ -227,6 +228,38 @@ class MusicAssistantConnection extends IPSModule
             $this->SendDebug('Authentication', 'Authentifizierung abgelehnt', 0);
         }
         return '';
+    }
+
+    private function debugRawQueueArtist(string $payload): void
+    {
+        if (preg_match('/"event"\s*:\s*"queue_updated"/', $payload) !== 1) {
+            return;
+        }
+
+        $currentItemPosition = strpos($payload, '"current_item"');
+        if ($currentItemPosition === false) {
+            return;
+        }
+
+        $currentItemJson = substr($payload, $currentItemPosition);
+        $artistsPosition = strpos($currentItemJson, '"artists"');
+        if ($artistsPosition === false) {
+            return;
+        }
+
+        $artistsJson = substr($currentItemJson, $artistsPosition);
+        if (preg_match('/"artists"\s*:\s*\[\s*(?:\{.*?"name"\s*:\s*)?"((?:\\\\.|[^"\\\\])*)"/s', $artistsJson, $matches) !== 1) {
+            return;
+        }
+
+        $rawArtist = $matches[1];
+        $unicodeEscaped = preg_match('/\\\\u[0-9a-fA-F]{4}/', $rawArtist) === 1;
+        $this->SendDebug(
+            'UTF8 RAW WebSocket',
+            'ArtistRaw="' . $rawArtist . '" HEX=' . bin2hex($rawArtist)
+                . ' UNICODE_ESCAPED=' . ($unicodeEscaped ? 'yes' : 'no'),
+            0
+        );
     }
 
     public function ForwardData($JSONString): string
