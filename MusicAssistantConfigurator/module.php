@@ -95,7 +95,12 @@ class MusicAssistantConfigurator extends IPSModule
                 [
                     'type'    => 'Button',
                     'caption' => 'Ausgewählten Player erstellen',
-                    'onClick' => 'echo MA_CreatePlayer($id, (string)($Players["player_id"] ?? ""), (string)($Players["name"] ?? ""));'
+                    'onClick' => 'if (trim((string)($Players["player_id"] ?? "")) === "") {'
+                        . ' echo "Bitte zuerst einen Player in der Liste auswählen.";'
+                        . ' } else {'
+                        . ' echo MA_CreatePlayer($id, (string)$Players["player_id"], (string)($Players["name"] ?? ""));'
+                        . ' }',
+                    'link'    => false
                 ],
                 [
                     'type'    => 'Button',
