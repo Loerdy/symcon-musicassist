@@ -125,8 +125,7 @@ class MusicAssistantPlayer extends IPSModule
 
     public function GetConfigurationForm(): string
     {
-        // Hinweis: IPS 9 (dein Build) akzeptiert kein TextBox/MultiLineTextBox/PopupAlert in elements.
-        // Daher Anzeige über Label und UpdateFormField.
+        // Die Konfigurationsanzeige wird kompatibel über Label und UpdateFormField umgesetzt.
         $form = [
             'elements' => [
                 ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
