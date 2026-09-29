@@ -7,38 +7,23 @@ class MusicAssistantConfigurator extends IPSModule
     private const CONNECTION_MODULE_ID = '{880534D6-998A-704B-DFD1-ABCD3D23B811}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
-    private const PARENT_RETRY_PENDING = 0;
-    private const PARENT_RETRY_DONE = 1;
-    private const PARENT_RETRY_MAX_ATTEMPTS = 30;
 
     public function Create(): void
     {
         parent::Create();
 
-        $this->RegisterPropertyString('Host', '127.0.0.1');
-        $this->RegisterPropertyInteger('Port', 8095);
         $this->RegisterPropertyInteger('TargetCategoryID', 0);
 
         $this->RegisterAttributeString('ProfileNames', '');
 
-        $this->SetBuffer('ParentRetryAttempts', '0');
-        $this->SetBuffer('ParentUnavailableLogged', '0');
-
         // item_id => uri
         $this->SetBuffer('PlaylistMap', '{}');
         $this->SetBuffer('RadioMap', '{}');
-        $this->RegisterTimer('ParentConnectionRetry', 0, 'MA_RetryConfiguratorParent($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
-        $this->SetTimerInterval('ParentConnectionRetry', 0);
-        $this->SetBuffer('ParentRetryAttempts', '0');
-        $this->SetBuffer('ParentUnavailableLogged', '0');
-        if ($this->ensureConnectionParent() === self::PARENT_RETRY_PENDING) {
-            $this->SetTimerInterval('ParentConnectionRetry', 2000);
-        }
         try {
             $this->initializeProfileNames();
         } catch (Throwable $e) {
@@ -53,31 +38,6 @@ class MusicAssistantConfigurator extends IPSModule
             return '';
         }
         return '';
-    }
-
-    public function RetryConfiguratorParent(): void
-    {
-        $attempts = (int)$this->GetBuffer('ParentRetryAttempts') + 1;
-        $this->SetBuffer('ParentRetryAttempts', (string)$attempts);
-        if ($this->ensureConnectionParent() !== self::PARENT_RETRY_PENDING) {
-            $this->SetTimerInterval('ParentConnectionRetry', 0);
-            return;
-        }
-        if ($attempts >= self::PARENT_RETRY_MAX_ATTEMPTS) {
-            $this->SetTimerInterval('ParentConnectionRetry', 0);
-            $this->SendDebug('Parent', 'Automatische Parent-Zuordnung nach 30 Versuchen beendet', 0);
-        }
-    }
-
-    public function RequestAction($Ident, $Value): void
-    {
-        switch ($Ident) {
-            case 'ReloadPlayers':
-                $this->ReloadForm();
-                break;
-            default:
-                throw new Exception('Unknown action: ' . $Ident);
-        }
     }
 
     public function GetConfigurationForm(): string
@@ -104,37 +64,19 @@ class MusicAssistantConfigurator extends IPSModule
                 ],
 
                 [
-                    'type'                        => 'List',
-                    'name'                        => 'Players',
-                    'caption'                     => 'Player',
-                    'add'                         => false,
-                    'delete'                      => false,
-                    'changeOrder'                 => false,
-                    'loadValuesFromConfiguration' => false,
-                    'columns'                     => [
-                        ['caption' => 'Name',        'name' => 'name',        'width' => '220px'],
-                        ['caption' => 'Player ID',   'name' => 'player_id',   'width' => '300px'],
-                        ['caption' => 'Provider',    'name' => 'provider',    'width' => '150px'],
-                        ['caption' => 'Verfügbar',   'name' => 'available',   'width' => '90px'],
-                        ['caption' => 'Status',      'name' => 'status',      'width' => '130px'],
-                        ['caption' => 'Instanz-ID',  'name' => 'instance_id', 'width' => '90px']
+                    'type'     => 'Configurator',
+                    'name'     => 'Players',
+                    'caption'  => 'Player',
+                    'delete'   => true,
+                    'rowCount' => 0,
+                    'columns'  => [
+                        ['caption' => 'Name',        'name' => 'name',        'width' => 'auto'],
+                        ['caption' => 'Player ID',   'name' => 'player_id',   'width' => '360px'],
+                        ['caption' => 'Provider',    'name' => 'provider',    'width' => '170px'],
+                        ['caption' => 'Verfügbar',   'name' => 'available',   'width' => '85px'],
+                        ['caption' => 'Status',      'name' => 'status',      'width' => '130px']
                     ],
-                    'values'                      => $values
-                ],
-                [
-                    'type'    => 'Button',
-                    'caption' => 'Ausgewählten Player erstellen',
-                    'onClick' => 'echo MA_CreatePlayer($id, (string)($Players["player_id"] ?? ""), (string)($Players["name"] ?? ""));'
-                ],
-                [
-                    'type'    => 'Button',
-                    'caption' => 'Alle fehlenden Player erstellen',
-                    'onClick' => 'echo MA_CreateMissingPlayers($id);'
-                ],
-                [
-                    'type'    => 'Button',
-                    'caption' => 'Player neu laden',
-                    'onClick' => 'IPS_RequestAction($id, "ReloadPlayers", true);'
+                    'values'   => $values
                 ]
             ]
         ];
@@ -225,44 +167,6 @@ class MusicAssistantConfigurator extends IPSModule
         } finally {
             IPS_SemaphoreLeave($semaphore);
         }
-    }
-
-    public function CreateMissingPlayers(): string
-    {
-        $created = 0;
-        $existing = 0;
-        $failures = [];
-        foreach ($this->buildPlayerListValues() as $player) {
-            if ((int)($player['instanceID'] ?? 0) > 0) {
-                $existing++;
-                continue;
-            }
-            $playerId = (string)($player['player_id'] ?? '');
-            $name = (string)($player['name'] ?? $playerId);
-            try {
-                $result = $this->createPlayerInternal($playerId, $name, false);
-                if (strpos($result, 'existiert bereits') !== false) {
-                    $existing++;
-                } else {
-                    $created++;
-                }
-            } catch (Throwable $e) {
-                $failures[] = $name . ': ' . $e->getMessage();
-            }
-        }
-
-        try {
-            $this->ReloadForm();
-        } catch (Throwable $e) {
-            $this->SendDebug('CreatePlayer', 'Formular konnte nach der Erstellung nicht aktualisiert werden', 0);
-        }
-
-        $summary = 'Erstellt: ' . $created . '; bereits vorhanden: ' . $existing
-            . '; fehlgeschlagen: ' . count($failures) . '.';
-        if (count($failures) > 0) {
-            $summary .= "\n" . implode("\n", $failures);
-        }
-        return $summary;
     }
 
     public function SyncPlaylistsProfile(): void
@@ -427,27 +331,12 @@ class MusicAssistantConfigurator extends IPSModule
             return $profileNames;
         }
 
-        $connectionId = 0;
-        try {
-            $connectionId = $this->getConfiguratorConnectionId();
-        } catch (Throwable $e) {
-            // Ein parentloser Legacy-Configurator kann trotzdem vorhandene Profile übernehmen.
-        }
-
-        $playerProfiles = ['profileNames' => null, 'conflict' => false, 'unavailable' => false];
-        if ($connectionId > 0) {
-            $playerProfiles = $this->profileNamesFromConnectedPlayers($connectionId);
-            if ($playerProfiles['profileNames'] !== null
-                && !$playerProfiles['conflict']
-                && !$playerProfiles['unavailable']) {
-                return $this->storeProfileNames($playerProfiles['profileNames'], 'verbundenen Playern');
-            }
-        }
-
-        $legacyProfileNames = $this->legacyProfileNames();
-        if (IPS_VariableProfileExists($legacyProfileNames['playlist'])
-            || IPS_VariableProfileExists($legacyProfileNames['radio'])) {
-            return $this->storeProfileNames($legacyProfileNames, 'bestehenden Legacy-Profilen');
+        $connectionId = $this->getConfiguratorConnectionId();
+        $playerProfiles = $this->profileNamesFromConnectedPlayers($connectionId);
+        if ($playerProfiles['profileNames'] !== null
+            && !$playerProfiles['conflict']
+            && !$playerProfiles['unavailable']) {
+            return $this->storeProfileNames($playerProfiles['profileNames'], 'verbundenen Playern');
         }
 
         if ($playerProfiles['conflict']) {
@@ -456,10 +345,6 @@ class MusicAssistantConfigurator extends IPSModule
 
         if ($playerProfiles['unavailable']) {
             throw new Exception('Verbundene Player sind während der Profilnamen-Initialisierung noch nicht vollständig verfügbar.');
-        }
-
-        if ($connectionId <= 0) {
-            return null;
         }
 
         $suffix = substr(md5('connection:' . $connectionId), 0, 8);
@@ -518,16 +403,6 @@ class MusicAssistantConfigurator extends IPSModule
             'profileNames' => count($pairs) === 1 ? array_values($pairs)[0] : null,
             'conflict'     => count($pairs) > 1,
             'unavailable'  => $unavailable
-        ];
-    }
-
-    private function legacyProfileNames(): array
-    {
-        $key = strtolower(trim($this->ReadPropertyString('Host'))) . ':' . (string)$this->ReadPropertyInteger('Port');
-        $suffix = substr(md5($key), 0, 8);
-        return [
-            'playlist' => 'MA.Playlists.' . $suffix,
-            'radio'    => 'MA.Radios.' . $suffix
         ];
     }
 
@@ -591,14 +466,13 @@ class MusicAssistantConfigurator extends IPSModule
                 'provider'    => $provider,
                 'available'   => $avail ? 'Ja' : 'Nein',
                 'status'      => $instanceId > 0 ? 'Vorhanden' : 'Nicht angelegt',
-                'instance_id' => $instanceId > 0 ? (string)$instanceId : '-',
                 'instanceID'  => $instanceId,
-                'editable'    => false,
-                'deletable'   => false
+                'create'      => [
+                    'moduleID'      => self::PLAYER_MODULE_ID,
+                    'configuration' => $this->playerConfiguration($playerId),
+                    'name'          => 'MA Player - ' . $name
+                ]
             ];
-            if ($instanceId > 0) {
-                $row['rowColor'] = '#C8F7C5';
-            }
             $rows[] = $row;
         }
 
@@ -651,91 +525,6 @@ class MusicAssistantConfigurator extends IPSModule
         if ($this->getConfiguratorConnectionId() !== $connectionId) {
             throw new Exception('Die MusicAssistantConnection des Configurators wurde zwischenzeitlich geändert.');
         }
-    }
-
-    private function ensureConnectionParent(): int
-    {
-        $instance = IPS_GetInstance($this->InstanceID);
-        $parentId = (int)($instance['ConnectionID'] ?? 0);
-        if ($parentId > 0) {
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $host = $this->normalizeServerHost($this->ReadPropertyString('Host'));
-        $port = $this->ReadPropertyInteger('Port');
-        if ($host === '' || $port <= 0 || $port > 65535) {
-            $this->SendDebug('Parent', 'Host/Port nicht für automatische Parent-Zuordnung geeignet', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $connectionIds = IPS_GetInstanceListByModuleID(self::CONNECTION_MODULE_ID);
-        if (count($connectionIds) === 0) {
-            $this->SendDebug('Parent', 'Keine MusicAssistantConnection vorhanden', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $matches = [];
-        $unavailableConnections = [];
-        foreach ($connectionIds as $connectionId) {
-            $matchesServer = $this->connectionMatchesServer((int)$connectionId);
-            if ($matchesServer === null) {
-                $unavailableConnections[] = (int)$connectionId;
-            } elseif ($matchesServer) {
-                $matches[] = (int)$connectionId;
-            }
-        }
-
-        if (count($unavailableConnections) > 0) {
-            if ($this->GetBuffer('ParentUnavailableLogged') !== '1') {
-                $this->SetBuffer('ParentUnavailableLogged', '1');
-                $this->SendDebug(
-                    'Parent',
-                    'Connection ' . $unavailableConnections[0] . ' während Initialisierung noch nicht verfügbar',
-                    0
-                );
-            }
-            return self::PARENT_RETRY_PENDING;
-        }
-        if (count($matches) === 0) {
-            return self::PARENT_RETRY_DONE;
-        }
-        if (count($matches) > 1) {
-            $this->SendDebug('Parent', 'Mehrere passende MusicAssistantConnections gefunden; keine Verbindung geändert', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        if (IPS_ConnectInstance($this->InstanceID, $matches[0])) {
-            $this->SendDebug('Parent', 'Passende MusicAssistantConnection verbunden: ' . $matches[0], 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $this->SendDebug('Parent', 'Verbindung mit MusicAssistantConnection fehlgeschlagen: ' . $matches[0], 0);
-        return self::PARENT_RETRY_PENDING;
-    }
-
-    private function connectionMatchesServer(int $connectionId): ?bool
-    {
-        if (!IPS_InstanceExists($connectionId)) {
-            return null;
-        }
-        $connection = IPS_GetInstance($connectionId);
-        if (!is_array($connection)) {
-            return null;
-        }
-        if (($connection['ModuleInfo']['ModuleID'] ?? null) !== self::CONNECTION_MODULE_ID) {
-            return false;
-        }
-        $configurationJson = @IPS_GetConfiguration($connectionId);
-        if (!is_string($configurationJson) || $configurationJson === '') {
-            return null;
-        }
-        $configuration = json_decode($configurationJson, true);
-        if (!is_array($configuration)) {
-            return null;
-        }
-        return $this->normalizeServerHost((string)($configuration['Host'] ?? ''))
-                === $this->normalizeServerHost($this->ReadPropertyString('Host'))
-            && (int)($configuration['Port'] ?? 0) === $this->ReadPropertyInteger('Port');
     }
 
     private function sendApiRequest(string $apiCommand, array $params = [])
@@ -810,17 +599,6 @@ class MusicAssistantConfigurator extends IPSModule
             }
         }
         return 0;
-    }
-
-    private function normalizeServerHost(string $host): string
-    {
-        $host = trim($host);
-        if (strlen($host) >= 2 && $host[0] === '[' && substr($host, -1) === ']') {
-            $host = substr($host, 1, -1);
-        }
-        $host = strtolower(rtrim($host, '.'));
-        $packedAddress = @inet_pton($host);
-        return $packedAddress === false ? $host : bin2hex($packedAddress);
     }
 
     private function isList(array $arr): bool

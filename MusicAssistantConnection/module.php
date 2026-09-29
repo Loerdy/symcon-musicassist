@@ -90,6 +90,19 @@ class MusicAssistantConnection extends IPSModule
 
         if (!$this->HasActiveParent()) {
             $this->handleConnectionLost();
+            return;
+        }
+
+        if (!$this->isConfigured()) {
+            return;
+        }
+
+        $hasCurrentSession = $this->GetBuffer('GreetingUrl') === $this->webSocketUrl()
+            && (int)$this->GetBuffer('ConnectionGeneration') > 0;
+        if (!$hasCurrentSession
+            && $this->GetBuffer('ParentReconnectAttempted') !== '1'
+            && $this->GetBuffer('ParentReconnectPending') !== '1') {
+            $this->SetBuffer('ParentReconnectPending', '1');
         }
     }
 
@@ -124,7 +137,8 @@ class MusicAssistantConnection extends IPSModule
             || !is_string($packet['Buffer'] ?? null)) {
             return '';
         }
-        $message = json_decode($packet['Buffer'], true);
+        $payload = utf8_decode($packet['Buffer']);
+        $message = json_decode($payload, true);
         if (!is_array($message)) {
             $this->SendDebug('WebSocket', 'Ungültige JSON-Nachricht', 0);
             return '';
