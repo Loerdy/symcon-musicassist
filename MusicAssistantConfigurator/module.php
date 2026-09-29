@@ -85,8 +85,7 @@ class MusicAssistantConfigurator extends IPSModule
                         ['caption' => 'Player ID',   'name' => 'player_id',   'width' => '360px'],
                         ['caption' => 'Provider',    'name' => 'provider',    'width' => '170px'],
                         ['caption' => 'Verfügbar',   'name' => 'available',   'width' => '85px'],
-                        ['caption' => 'Status',      'name' => 'status',      'width' => '130px'],
-                        ['caption' => 'Instanz-ID',  'name' => 'instance_id', 'width' => '85px']
+                        ['caption' => 'Status',      'name' => 'status',      'width' => '130px']
                     ],
                     'values'   => $values
                 ],
@@ -536,7 +535,6 @@ class MusicAssistantConfigurator extends IPSModule
                 'provider'    => $provider,
                 'available'   => $avail ? 'Ja' : 'Nein',
                 'status'      => $instanceId > 0 ? 'Vorhanden' : 'Nicht angelegt',
-                'instance_id' => $instanceId > 0 ? (string)$instanceId : '-',
                 'instanceID'  => $instanceId,
                 'create'      => [
                     'moduleID'      => self::PLAYER_MODULE_ID,
