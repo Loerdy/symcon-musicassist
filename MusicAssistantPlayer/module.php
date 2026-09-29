@@ -3,13 +3,8 @@ declare(strict_types=1);
 
 class MusicAssistantPlayer extends IPSModule
 {
-    private const CONNECTION_MODULE_ID = '{880534D6-998A-704B-DFD1-ABCD3D23B811}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
-    private const PARENT_RETRY_PENDING = 0;
-    private const PARENT_RETRY_DONE = 1;
-    private const PARENT_RETRY_REGISTER = 2;
-    private const PARENT_RETRY_MAX_ATTEMPTS = 30;
     private const REPEAT_PROFILE  = 'MA.RepeatMode';
     private const VOLUP_PROFILE   = 'MA.VolumeUp';
     private const VOLDOWN_PROFILE = 'MA.VolumeDown';
@@ -17,9 +12,6 @@ class MusicAssistantPlayer extends IPSModule
     public function Create(): void
     {
         parent::Create();
-
-        $this->RegisterPropertyString('Host', '127.0.0.1');
-        $this->RegisterPropertyInteger('Port', 8095);
 
         $this->RegisterPropertyString('PlayerID', '');
 
@@ -33,23 +25,14 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
-        $this->SetBuffer('ParentRetryAttempts', '0');
-        $this->SetBuffer('ParentUnavailableLogged', '0');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MA_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MA_ResetRadioSelection($_IPS["TARGET"]);');
-        $this->RegisterTimer('ParentConnectionRetry', 0, 'MA_RetryParentConnection($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
-        $this->SetTimerInterval('ParentConnectionRetry', 0);
-        $this->SetBuffer('ParentRetryAttempts', '0');
-        $this->SetBuffer('ParentUnavailableLogged', '0');
-        if ($this->ensureConnectionParent() === self::PARENT_RETRY_PENDING) {
-            $this->SetTimerInterval('ParentConnectionRetry', 2000);
-        }
         $this->registerParentStatusMessage();
         $this->registerWithParent();
 
@@ -67,7 +50,7 @@ class MusicAssistantPlayer extends IPSModule
             IPS_SetIcon($vidRadio, 'radio');
         }
 
-        // Transport (Legacy)
+        // Transport
         $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
 
@@ -121,25 +104,6 @@ class MusicAssistantPlayer extends IPSModule
             && $SenderID === (int)$this->GetBuffer('ParentInstanceId')
             && $this->HasActiveParent()) {
             $this->registerWithParent();
-        }
-    }
-
-    public function RetryParentConnection(): void
-    {
-        $attempts = (int)$this->GetBuffer('ParentRetryAttempts') + 1;
-        $this->SetBuffer('ParentRetryAttempts', (string)$attempts);
-        $result = $this->ensureConnectionParent();
-        if ($result !== self::PARENT_RETRY_PENDING) {
-            $this->SetTimerInterval('ParentConnectionRetry', 0);
-            if ($result === self::PARENT_RETRY_REGISTER) {
-                $this->registerParentStatusMessage();
-                $this->registerWithParent();
-            }
-            return;
-        }
-        if ($attempts >= self::PARENT_RETRY_MAX_ATTEMPTS) {
-            $this->SetTimerInterval('ParentConnectionRetry', 0);
-            $this->SendDebug('Parent', 'Automatische Parent-Zuordnung nach 30 Versuchen beendet', 0);
         }
     }
 
@@ -668,101 +632,6 @@ class MusicAssistantPlayer extends IPSModule
             $this->SetBuffer('RegisteredPlayerID', '');
         }
         $this->SetBuffer('ParentInstanceId', (string)$parentId);
-    }
-
-    private function ensureConnectionParent(): int
-    {
-        $instance = IPS_GetInstance($this->InstanceID);
-        $parentId = (int)($instance['ConnectionID'] ?? 0);
-        if ($parentId > 0) {
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $host = $this->normalizeServerHost($this->ReadPropertyString('Host'));
-        $port = $this->ReadPropertyInteger('Port');
-        if ($host === '' || $port <= 0 || $port > 65535) {
-            $this->SendDebug('Parent', 'Host/Port nicht für automatische Parent-Zuordnung geeignet', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        $matches = [];
-        $unavailableConnections = [];
-        $connectionIds = IPS_GetInstanceListByModuleID(self::CONNECTION_MODULE_ID);
-        if (count($connectionIds) === 0) {
-            $this->SendDebug('Parent', 'Keine MusicAssistantConnection vorhanden', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-        foreach ($connectionIds as $connectionId) {
-            $matchesServer = $this->connectionMatchesServer((int)$connectionId);
-            if ($matchesServer === null) {
-                $unavailableConnections[] = (int)$connectionId;
-            } elseif ($matchesServer) {
-                $matches[] = (int)$connectionId;
-            }
-        }
-
-        if (count($unavailableConnections) > 0) {
-            if ($this->GetBuffer('ParentUnavailableLogged') !== '1') {
-                $this->SetBuffer('ParentUnavailableLogged', '1');
-                $this->SendDebug(
-                    'Parent',
-                    'Connection ' . $unavailableConnections[0] . ' während Initialisierung noch nicht verfügbar',
-                    0
-                );
-            }
-            return self::PARENT_RETRY_PENDING;
-        }
-        if (count($matches) === 0) {
-            return self::PARENT_RETRY_DONE;
-        }
-        if (count($matches) > 1) {
-            $this->SendDebug('Parent', 'Mehrere passende MusicAssistantConnections gefunden; keine Verbindung geändert', 0);
-            return self::PARENT_RETRY_DONE;
-        }
-
-        if (IPS_ConnectInstance($this->InstanceID, $matches[0])) {
-            $this->SendDebug('Parent', 'Passende MusicAssistantConnection verbunden: ' . $matches[0], 0);
-            return self::PARENT_RETRY_REGISTER;
-        }
-
-        $this->SendDebug('Parent', 'Verbindung mit MusicAssistantConnection fehlgeschlagen: ' . $matches[0], 0);
-        return self::PARENT_RETRY_PENDING;
-    }
-
-    private function connectionMatchesServer(int $connectionId): ?bool
-    {
-        if (!IPS_InstanceExists($connectionId)) {
-            return null;
-        }
-        $connection = @IPS_GetInstance($connectionId);
-        if (!is_array($connection)) {
-            return null;
-        }
-        if (($connection['ModuleInfo']['ModuleID'] ?? null) !== self::CONNECTION_MODULE_ID) {
-            return false;
-        }
-        $configurationJson = @IPS_GetConfiguration($connectionId);
-        if (!is_string($configurationJson) || $configurationJson === '') {
-            return null;
-        }
-        $configuration = json_decode($configurationJson, true);
-        if (!is_array($configuration)) {
-            return null;
-        }
-        return $this->normalizeServerHost((string)($configuration['Host'] ?? ''))
-                === $this->normalizeServerHost($this->ReadPropertyString('Host'))
-            && (int)($configuration['Port'] ?? 0) === $this->ReadPropertyInteger('Port');
-    }
-
-    private function normalizeServerHost(string $host): string
-    {
-        $host = trim($host);
-        if (strlen($host) >= 2 && $host[0] === '[' && substr($host, -1) === ']') {
-            $host = substr($host, 1, -1);
-        }
-        $host = strtolower(rtrim($host, '.'));
-        $packedAddress = @inet_pton($host);
-        return $packedAddress === false ? $host : bin2hex($packedAddress);
     }
 
     private function registerWithParent(): void
