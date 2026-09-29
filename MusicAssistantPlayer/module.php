@@ -828,6 +828,7 @@ class MusicAssistantPlayer extends IPSModule
         if (!IPS_VariableProfileExists($profile)) {
             IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
         }
+        IPS_SetVariableProfileAssociation($profile, 0, '', '', -1);
         IPS_SetVariableProfileAssociation($profile, 1, $caption, $icon, -1);
     }
 
