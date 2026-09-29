@@ -380,4 +380,6 @@ The cover artwork for the current track is loaded from Music Assistant and provi
 
 ## Versioning
 
+The current published stable release is **v2.0.1**.
+
 The [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) tag marks the first published stable version.
