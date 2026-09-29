@@ -1,4 +1,4 @@
-# Music Assistant Integration für IP-Symcon mit HTTP API und WebSocket
+# Music Assistant for IP-Symcon
 
 [Deutsch](#music-assistant-für-ip-symcon) | [English](#music-assistant-for-ip-symcon)
 
