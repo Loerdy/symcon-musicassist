@@ -1,6 +1,8 @@
 # Music Assistant für IP-Symcon
 
-Diese IP-Symcon-Library bindet einen [Music-Assistant](https://www.music-assistant.io/)-Server in IP-Symcon ein. Eine zentrale Connection übernimmt die Kommunikation; ein Configurator erkennt die verfügbaren Music-Assistant-Player und legt passende Player-Instanzen an.
+[Deutsch](#music-assistant-für-ip-symcon) | [English](#music-assistant-for-ip-symcon)
+
+Diese IP-Symcon-Library bindet einen [Music-Assistant](https://www.music-assistant.io/)-Server in IP-Symcon ein. Eine zentrale Connection übernimmt die Kommunikation. Der Configurator erkennt die verfügbaren Music-Assistant-Player und legt passende Player-Instanzen an.
 
 ## Voraussetzungen
 
@@ -185,3 +187,195 @@ Das Cover des aktuellen Titels wird von Music Assistant geladen und als IP-Symco
 ## Versionierung
 
 Der Tag [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) kennzeichnet den ersten veröffentlichten Stable-Stand.
+
+---
+
+# Music Assistant for IP-Symcon
+
+[Deutsch](#music-assistant-für-ip-symcon) | [English](#music-assistant-for-ip-symcon)
+
+This IP-Symcon library integrates a [Music Assistant](https://www.music-assistant.io/) server with IP-Symcon. A central connection handles communication. The configurator discovers the available Music Assistant players and creates the corresponding player instances.
+
+## Requirements
+
+- IP-Symcon version 7.0 or later
+- an accessible Music Assistant server
+- the hostname or IP address, port, and access token of the Music Assistant server
+- network access from the IP-Symcon system to the Music Assistant HTTP API and WebSocket
+
+The repository does not specify a particular Music Assistant version.
+
+## Included Modules
+
+### MusicAssistant Connection
+
+The `MusicAssistant Connection` is the central connection to Music Assistant. It provides the following functions for the configurator and player instances:
+
+- authenticated HTTP/API requests
+- an authenticated WebSocket connection for real-time events
+- processing of `player_updated` and `queue_updated`
+- mapping players to their active queues
+- automatic reconnection
+- full player resynchronization after a successful connection
+- centralized retrieval of cover artwork through the Music Assistant image proxy
+
+Control commands are sent through the HTTP API. Status changes are received through the WebSocket and forwarded to the connected player instances.
+
+### MusicAssistant Configurator
+
+The `MusicAssistant Configurator` retrieves the player list from Music Assistant and displays the name, PlayerID, provider, availability, and status of the corresponding IP-Symcon instance.
+
+The native IP-Symcon configurator supports:
+
+- discovery of regular players and sync groups
+- detection of existing player instances
+- creation of individual player instances or all missing instances
+- opening the configuration of existing instances
+- hiding and showing existing players
+- deletion of an existing IP-Symcon player instance
+
+Deleting an instance removes only the IP-Symcon instance. The player remains in Music Assistant and can be created again afterward.
+
+The form buttons can also create or update playlist and radio profiles from the Music Assistant library. The profile names are stored persistently and passed to newly created players.
+
+### MusicAssistant Player
+
+A `MusicAssistant Player` instance represents a regular Music Assistant player or a sync group. It provides playback controls, volume, mute, shuffle, repeat, playlists, radio stations, current metadata, and cover artwork.
+
+The player is connected to its actual `MusicAssistant Connection`. When a player is created through the configurator, its PlayerID, connection, and playlist/radio profiles are assigned automatically.
+
+## Features
+
+- Previous, Stop, Play, Pause, and Next
+- volume from 0 to 100 using a slider
+- group volume up and down
+- mute
+- shuffle
+- repeat modes `off`, `one`, and `all`
+- playback of synchronized playlists
+- playback of synchronized radio stations
+- display of title, artist, and album
+- cover artwork as an IP-Symcon media object
+- regular players and Music Assistant sync groups
+- WebSocket-based real-time updates
+- automatic full resynchronization after a successful reconnection
+
+## Installation
+
+The module can be installed from this GitHub repository through the IP-Symcon module management:
+
+```text
+https://github.com/Loerdy/symcon-musicassist.git
+```
+
+1. In IP-Symcon, open **Core Instances → Modules** and add the repository.
+2. Select the desired branch:
+   - `main` for stable, tested releases
+   - `beta` for the current development and testing version
+3. Update or install the modules.
+
+## Setup
+
+1. Create a **Music Assistant Connection** instance.
+2. Enter **Server**, **Port**, and **Token** in its configuration and apply the changes. The default port is `8095`.
+3. Create a **MusicAssistant Configurator** instance and connect it to the same `MusicAssistant Connection`.
+4. Optionally select a category under **Target folder for new players** (`Zielordner für neue Player`).
+5. Review the players discovered by Music Assistant and use the native **Create** or **Create all** functions to create the desired instances.
+6. If required, run **Load playlists (create/update profile)** and **Load radio stations (create/update profile)**.
+
+New player instances are connected directly to the configurator's connection.
+
+## Player Variables
+
+| Ident | Name | Type | Controllable | Function |
+|---|---|---:|:---:|---|
+| `Playlist` | Playlist | Integer | yes | Select a synchronized playlist |
+| `Radio` | Radio | Integer | yes | Select a synchronized radio station |
+| `Transport` | Wiedergabe | Integer | yes | Previous, Stop, Play, Pause, and Next |
+| `Shuffle` | Shuffle | Boolean | yes | Enable or disable shuffle |
+| `Repeat` | Repeat | String | yes | Repeat mode `off`, `one`, or `all` |
+| `Mute` | Mute | Boolean | yes | Mute control |
+| `VolumeLevel` | Volume | Integer | yes | Volume from 0 to 100 |
+| `VolumeUp` | Volume + | Integer | yes | Increase group volume |
+| `VolumeDown` | Volume | Integer | yes | Decrease group volume |
+| `NowTitle` | Titel | String | no | Title of the current queue item |
+| `NowArtist` | Interpret | String | no | Artist of the current queue item |
+| `NowAlbum` | Album | String | no | Album of the current queue item |
+
+The player also creates an image media object with the ident `Cover`.
+
+## Sync Groups
+
+Regular players and sync groups are supported. The active queue is mapped independently of the PlayerID, keeping playback status and metadata synchronized for groups as well.
+
+For sync groups, the module uses the group volume provided by Music Assistant when the group does not report its own volume. Group volume can also be adjusted using the volume up and down buttons.
+
+## Script Commands
+
+`$InstanceID` is the ID of the corresponding player or configurator instance. All public commands use the common module prefix `MASS`.
+
+### Player
+
+```php
+MASS_SetShuffle($InstanceID, bool $enabled);
+MASS_SetRepeat($InstanceID, string $mode);
+MASS_SetMute($InstanceID, bool $muted);
+MASS_SetVolumeLevel($InstanceID, int $level);
+MASS_GroupVolumeUp($InstanceID);
+MASS_GroupVolumeDown($InstanceID);
+```
+
+`MASS_SetRepeat()` supports the values `off`, `one`, and `all`. The calling code must pass a value from `0` to `100` to `MASS_SetVolumeLevel()`; the public command does not clamp the value itself.
+
+Example:
+
+```php
+$playerId = 12345;
+
+MASS_SetVolumeLevel($playerId, 35);
+MASS_SetMute($playerId, false);
+MASS_SetShuffle($playerId, true);
+MASS_SetRepeat($playerId, 'all');
+MASS_GroupVolumeUp($playerId);
+```
+
+### Configurator
+
+```php
+MASS_SyncPlaylistsProfile($InstanceID);
+MASS_SyncRadiosProfile($InstanceID);
+```
+
+Example:
+
+```php
+$configuratorId = 23456;
+
+MASS_SyncPlaylistsProfile($configuratorId);
+MASS_SyncRadiosProfile($configuratorId);
+```
+
+## Status Updates
+
+Control commands are sent to Music Assistant through the HTTP API. The connection receives status changes through the WebSocket and forwards them to the player instances. These include `player_updated` for player states and `queue_updated` for playback, metadata, and cover artwork.
+
+After every successful connection, the current player state and active queue are read again in full. Periodic player-state polling is not used.
+
+## Cover Artwork
+
+The cover artwork for the current track is loaded from Music Assistant and provided as an IP-Symcon media object.
+
+- The cover remains visible during playback and while paused.
+- In the `idle` state, it is hidden and stale playback metadata is removed.
+- If no cover is available for the current track, no stale image is displayed.
+
+## Branches
+
+| Branch | Purpose |
+|---|---|
+| `main` | Stable, tested releases |
+| `beta` | Development and testing version |
+
+## Versioning
+
+The [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) tag marks the first published stable version.
