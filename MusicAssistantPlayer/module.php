@@ -93,6 +93,10 @@ class MusicAssistantPlayer extends IPSModule
         $this->EnableAction('VolumeUp');
 
         $this->MaintainVariable('VolumeDown', 'Volume', VARIABLETYPE_INTEGER, self::VOLDOWN_PROFILE, 90, true);
+        $volumeDownId = $this->GetIDForIdent('VolumeDown');
+        if (IPS_GetName($volumeDownId) === 'Volume -') {
+            IPS_SetName($volumeDownId, 'Volume');
+        }
         $this->EnableAction('VolumeDown');
 
         // Now Playing
