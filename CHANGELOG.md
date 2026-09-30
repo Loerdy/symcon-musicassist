@@ -8,7 +8,7 @@ The format is based on Keep a Changelog and this project uses semantic versionin
 
 ### Changed
 
-- Raise the minimum supported IP-Symcon version to 9.0 for the upcoming native Tile View.
+- Raise the minimum supported IP-Symcon version to 9.1 for the upcoming native Tile View.
 
 ### Fixed
 
