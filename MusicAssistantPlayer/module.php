@@ -30,26 +30,6 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
     }
 
-    public function Destroy(): void
-    {
-        try {
-            if (IPS_GetKernelRunlevel() !== KR_READY) {
-                return;
-            }
-
-            $registeredPlayerId = $this->GetBuffer('RegisteredPlayerID');
-            if ($registeredPlayerId !== '' && $this->HasActiveParent()) {
-                if ($this->sendRegistrationRequest('UnregisterPlayer', $registeredPlayerId)) {
-                    $this->SetBuffer('RegisteredPlayerID', '');
-                }
-            }
-        } catch (Throwable $e) {
-            $this->SendDebug('Registration', 'Abmeldung beim Löschen konnte nicht durchgeführt werden', 0);
-        } finally {
-            parent::Destroy();
-        }
-    }
-
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();

@@ -12,6 +12,7 @@ class MusicAssistantConnection extends IPSModule
     private const WEBSOCKET_RX = '{018EF6B5-AB94-40C6-AA53-46943E824ACF}';
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
+    private const PLAYER_MODULE_ID = '{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}';
     private const MAX_ARTWORK_SIZE = 5242880;
     private const API_COMMANDS = [
         'players/cmd/previous',
@@ -62,6 +63,7 @@ class MusicAssistantConnection extends IPSModule
     {
         parent::ApplyChanges();
         $this->registerParentStatusMessage();
+        $this->RegisterMessage($this->InstanceID, FM_CHILDREMOVED);
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
@@ -83,6 +85,11 @@ class MusicAssistantConnection extends IPSModule
 
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
     {
+        if ($Message === FM_CHILDREMOVED && $SenderID === $this->InstanceID) {
+            $this->cleanupRegisteredPlayers();
+            return;
+        }
+
         if ($Message !== IM_CHANGESTATUS
             || $SenderID !== (int)$this->GetBuffer('ParentInstanceId')) {
             return;
@@ -225,6 +232,7 @@ class MusicAssistantConnection extends IPSModule
             $this->prepareResyncGeneration();
             $this->SetStatus(102);
             $this->SendDebug('Authentication', 'Authentifizierung bestätigt', 0);
+            $this->cleanupRegisteredPlayers();
             $this->resolveRegisteredPlayers();
         } else {
             $this->SetStatus(202);
@@ -550,6 +558,31 @@ class MusicAssistantConnection extends IPSModule
         foreach (array_keys($this->readJsonBuffer('RegisteredPlayers')) as $playerId) {
             if (is_string($playerId) && $playerId !== '') {
                 $this->startPlayerResync($playerId);
+            }
+        }
+    }
+
+    private function cleanupRegisteredPlayers(): void
+    {
+        $validPlayerIds = [];
+        foreach (IPS_GetInstanceListByModuleID(self::PLAYER_MODULE_ID) as $playerInstanceId) {
+            if (!IPS_InstanceExists($playerInstanceId)) {
+                continue;
+            }
+            $playerInstance = IPS_GetInstance($playerInstanceId);
+            if ((int)($playerInstance['ConnectionID'] ?? 0) !== $this->InstanceID) {
+                continue;
+            }
+            $playerId = trim((string)IPS_GetProperty($playerInstanceId, 'PlayerID'));
+            if ($playerId !== '') {
+                $validPlayerIds[$playerId] = true;
+            }
+        }
+
+        foreach (array_keys($this->readJsonBuffer('RegisteredPlayers')) as $registeredPlayerId) {
+            $registeredPlayerId = (string)$registeredPlayerId;
+            if ($registeredPlayerId !== '' && !isset($validPlayerIds[$registeredPlayerId])) {
+                $this->unregisterPlayer($registeredPlayerId);
             }
         }
     }
