@@ -183,6 +183,14 @@ Entfernte oder nicht mehr vorhandene Player werden von der `MusicAssistant Conne
 
 Neu über den IP-Symcon-Configurator angelegte Player registrieren sich über `FM_CONNECT` zuverlässig bei ihrer Connection. Anschließend wird der normale Resync ausgeführt, sodass Player- und Queue-Daten korrekt befüllt werden. Das Entfernen bestehender Player erkennt die Connection über `FM_CHILDREMOVED`.
 
+## Bekannte Probleme
+
+Mit Music Assistant Server 2.10.4 wurde beobachtet, dass bei Titelwechseln, insbesondere bei Sonos-Syncgruppen, vorübergehend widersprüchliche Player- und Queue-Zustände geliefert werden können. Dabei traten sowohl ein kurzzeitiger Rücksprung vom neuen auf den vorherigen Queue-Eintrag (`NEW → OLD → NEW`) als auch ein kurzzeitiger Zustandswechsel von `playing` über `idle` zurück zu `playing` auf.
+
+Da das Modul die von Music Assistant gelieferten Echtzeitinformationen verarbeitet, können Titel, Interpret, Album, Cover und Transportstatus in IP-Symcon kurzzeitig den vorherigen beziehungsweise einen Zwischenzustand anzeigen. Eine zeitbasierte Unterdrückung, künstliche Verzögerung oder QueueItem-Blacklist wird derzeit bewusst nicht verwendet, weil dadurch legitime externe Player-Aktionen wie Next, Previous oder Stop unterdrückt werden könnten.
+
+Das Verhalten wurde mit Music Assistant Server 2.10.4 reproduziert und soll nach Erscheinen einer neueren stabilen Music-Assistant-Version erneut geprüft werden.
+
 ## Branches
 
 | Branch | Zweck |
@@ -382,6 +390,14 @@ The cover artwork for the current track is loaded from Music Assistant and provi
 The `MusicAssistant Connection` centrally detects and cleans up players that have been removed or no longer exist. Their associated registration, queue, and resynchronization state is removed as well. The player no longer needs to unregister itself while it is being deleted; this specifically avoids the `InstanceInterface is not available` warning observed during module updates.
 
 Players newly created through the IP-Symcon configurator reliably register with their connection through `FM_CONNECT`. The normal resynchronization then runs, ensuring that player and queue data are populated correctly. The connection detects the removal of existing players through `FM_CHILDREMOVED`.
+
+## Known Issues
+
+With Music Assistant Server 2.10.4, title changes—particularly for Sonos sync groups—have been observed to temporarily produce conflicting player and queue states. Observed sequences include a brief return from the new queue item to the previous one (`NEW → OLD → NEW`) and a temporary state change from `playing` through `idle` back to `playing`.
+
+Because the module processes the real-time information supplied by Music Assistant, the title, artist, album, cover artwork, and transport status in IP-Symcon may briefly show the previous or an intermediate state. The module deliberately does not currently use time-based suppression, artificial delays, or a QueueItem blacklist, as these could suppress legitimate external player actions such as Next, Previous, or Stop.
+
+This behavior was reproduced with Music Assistant Server 2.10.4 and will be reviewed again after a newer stable Music Assistant version becomes available.
 
 ## Branches
 
