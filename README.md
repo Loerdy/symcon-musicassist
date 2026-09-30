@@ -177,6 +177,12 @@ Das Cover des aktuellen Titels wird von Music Assistant geladen und als IP-Symco
 - Im Zustand `idle` wird es ausgeblendet; nicht mehr aktuelle Wiedergabemetadaten werden entfernt.
 - Ist für den aktuellen Titel kein Cover verfügbar, wird kein veraltetes Bild angezeigt.
 
+## Player-Lifecycle
+
+Entfernte oder nicht mehr vorhandene Player werden von der `MusicAssistant Connection` zentral erkannt und bereinigt. Dabei werden auch die zugehörigen Registrierungs-, Queue- und Resync-Zustände entfernt. Die bisherige Abmeldung durch den Player während des Löschens ist nicht mehr erforderlich; dadurch wird insbesondere die bei Modul-Updates beobachtete Warnung `InstanceInterface is not available` vermieden.
+
+Neu über den IP-Symcon-Configurator angelegte Player registrieren sich über `FM_CONNECT` zuverlässig bei ihrer Connection. Anschließend wird der normale Resync ausgeführt, sodass Player- und Queue-Daten korrekt befüllt werden. Das Entfernen bestehender Player erkennt die Connection über `FM_CHILDREMOVED`.
+
 ## Branches
 
 | Branch | Zweck |
@@ -370,6 +376,12 @@ The cover artwork for the current track is loaded from Music Assistant and provi
 - The cover remains visible during playback and while paused.
 - In the `idle` state, it is hidden and stale playback metadata is removed.
 - If no cover is available for the current track, no stale image is displayed.
+
+## Player Lifecycle
+
+The `MusicAssistant Connection` centrally detects and cleans up players that have been removed or no longer exist. Their associated registration, queue, and resynchronization state is removed as well. The player no longer needs to unregister itself while it is being deleted; this specifically avoids the `InstanceInterface is not available` warning observed during module updates.
+
+Players newly created through the IP-Symcon configurator reliably register with their connection through `FM_CONNECT`. The normal resynchronization then runs, ensuring that player and queue data are populated correctly. The connection detects the removal of existing players through `FM_CHILDREMOVED`.
 
 ## Branches
 
