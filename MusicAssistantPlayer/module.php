@@ -9,6 +9,8 @@ class MusicAssistantPlayer extends IPSModule
     private const VOLUP_PROFILE   = 'MA.VolumeUp';
     private const VOLDOWN_PROFILE = 'MA.VolumeDown';
 
+    private int $coverDiagEventId = 0;
+
     public function Create(): void
     {
         parent::Create();
@@ -150,10 +152,28 @@ class MusicAssistantPlayer extends IPSModule
                 && is_array($packet['Data'] ?? null)) {
                 $this->SendDebug('queue_updated', 'Passendes Queue-Event empfangen für QueueID=' . $packet['ObjectID'], 0);
                 $data = $packet['Data'];
+                $coverDiagEventId = ++$this->coverDiagEventId;
+                $hasCurrentItem = array_key_exists('current_item', $data);
+                $currentItem = $hasCurrentItem ? $data['current_item'] : null;
+                $queueItemId = $this->coverDiagQueueItemId($currentItem);
+                $this->SendDebug(
+                    'CoverDiag',
+                    'Event=' . $coverDiagEventId
+                        . ' PlayerID=' . $this->coverDiagValue($playerId)
+                        . ' QueueID=' . $this->coverDiagValue($packet['ObjectID'])
+                        . ' State=' . $this->coverDiagValue($data['state'] ?? '')
+                        . ' CurrentItem=' . (!$hasCurrentItem ? 'missing' : ($currentItem === null ? 'null' : 'present'))
+                        . ' QueueItemID=' . $this->coverDiagValue($queueItemId)
+                        . ' Title=' . $this->coverDiagTitle($currentItem)
+                        . ' MediaURI=' . $this->coverDiagMediaUri($currentItem)
+                        . ' ProxyID=' . $this->coverDiagProxyId($currentItem)
+                        . ' StoredProxyID=' . $this->coverDiagValue($this->ReadAttributeString('CoverProxyID'))
+                        . ' Hidden=' . $this->coverDiagHiddenState(),
+                    0
+                );
                 if (array_key_exists('state', $data)) {
                     $this->updateTransportFromQueueState($data['state']);
                 }
-                $hasCurrentItem = array_key_exists('current_item', $data);
                 $isIdle = is_string($data['state'] ?? null)
                     && strtolower(trim($data['state'])) === 'idle';
                 if ($hasCurrentItem && ($data['current_item'] === null || !$isIdle)) {
@@ -166,12 +186,30 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 try {
                     if ($isIdle) {
-                        $this->updateCoverVisibilityFromQueueState($data['state']);
+                        $this->updateCoverVisibilityFromQueueState(
+                            $data['state'],
+                            false,
+                            $coverDiagEventId,
+                            $queueItemId
+                        );
                     }
                     if ($hasCurrentItem) {
-                        $this->updateCoverFromQueueItem($data['current_item'], $data['state'] ?? null);
+                        $this->updateCoverFromQueueItem(
+                            $data['current_item'],
+                            $data['state'] ?? null,
+                            $coverDiagEventId,
+                            $queueItemId
+                        );
                     } elseif (array_key_exists('state', $data) && !$isIdle) {
-                        $this->updateCoverVisibilityFromQueueState($data['state']);
+                        $this->coverDiagDecision($coverDiagEventId, 'NO_CURRENT_ITEM', $queueItemId);
+                        $this->updateCoverVisibilityFromQueueState(
+                            $data['state'],
+                            false,
+                            $coverDiagEventId,
+                            $queueItemId
+                        );
+                    } elseif (!$hasCurrentItem) {
+                        $this->coverDiagDecision($coverDiagEventId, 'NO_CURRENT_ITEM', $queueItemId);
                     }
                 } catch (Throwable $e) {
                     $this->SendDebug('Artwork', 'Cover konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
@@ -457,10 +495,16 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    private function updateCoverFromQueueItem($currentItem, $state): void
+    private function updateCoverFromQueueItem(
+        $currentItem,
+        $state,
+        ?int $coverDiagEventId = null,
+        string $queueItemId = ''
+    ): void
     {
         if ($currentItem === null) {
-            $this->clearCover();
+            $this->coverDiagDecision($coverDiagEventId, 'NO_CURRENT_ITEM', $queueItemId);
+            $this->clearCover($coverDiagEventId, $queueItemId);
             return;
         }
 
@@ -473,7 +517,8 @@ class MusicAssistantPlayer extends IPSModule
             }
         }
         if ($proxyId === '') {
-            $this->clearCover();
+            $this->coverDiagDecision($coverDiagEventId, 'INVALID_PROXY', $queueItemId);
+            $this->clearCover($coverDiagEventId, $queueItemId);
             return;
         }
 
@@ -483,10 +528,12 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ($this->ReadAttributeString('CoverProxyID') === $proxyId
             && $this->coverMediaHasContent($mediaId)) {
-            $this->updateCoverVisibilityFromQueueState($state, true);
+            $this->coverDiagDecision($coverDiagEventId, 'SKIP_SAME_PROXY', $queueItemId, $proxyId);
+            $this->updateCoverVisibilityFromQueueState($state, true, $coverDiagEventId, $queueItemId);
             return;
         }
 
+        $this->coverDiagDecision($coverDiagEventId, 'DOWNLOAD', $queueItemId, $proxyId);
         $response = $this->requestArtwork($proxyId);
         $content = $response['content'] ?? null;
         if (($response['proxy_id'] ?? null) !== $proxyId
@@ -501,14 +548,20 @@ class MusicAssistantPlayer extends IPSModule
         if (!IPS_SetMediaContent($mediaId, $content)) {
             throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
         }
+        $this->coverDiagDecision($coverDiagEventId, 'WRITE', $queueItemId, $proxyId);
         if (!$this->WriteAttributeString('CoverProxyID', $proxyId)) {
             throw new Exception('Cover-Cache konnte nicht gespeichert werden.');
         }
-        $this->updateCoverVisibilityFromQueueState($state, true);
+        $this->updateCoverVisibilityFromQueueState($state, true, $coverDiagEventId, $queueItemId);
         $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
     }
 
-    private function updateCoverVisibilityFromQueueState($state, bool $hasCurrentItem = false): void
+    private function updateCoverVisibilityFromQueueState(
+        $state,
+        bool $hasCurrentItem = false,
+        ?int $coverDiagEventId = null,
+        string $queueItemId = ''
+    ): void
     {
         $normalizedState = is_string($state) ? strtolower(trim($state)) : '';
         if (!in_array($normalizedState, ['idle', 'playing', 'paused'], true)) {
@@ -520,6 +573,12 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
         if ($normalizedState === 'idle') {
+            $this->coverDiagDecision(
+                $coverDiagEventId,
+                'HIDE',
+                $queueItemId,
+                $this->ReadAttributeString('CoverProxyID')
+            );
             if (!IPS_SetHidden($mediaId, true)) {
                 throw new Exception('Cover-Medium konnte nicht ausgeblendet werden.');
             }
@@ -529,9 +588,16 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
         if ($this->ReadAttributeString('CoverProxyID') !== ''
-            && $this->coverMediaHasContent($mediaId)
-            && !IPS_SetHidden($mediaId, false)) {
-            throw new Exception('Cover-Medium konnte nicht eingeblendet werden.');
+            && $this->coverMediaHasContent($mediaId)) {
+            $this->coverDiagDecision(
+                $coverDiagEventId,
+                'SHOW',
+                $queueItemId,
+                $this->ReadAttributeString('CoverProxyID')
+            );
+            if (!IPS_SetHidden($mediaId, false)) {
+                throw new Exception('Cover-Medium konnte nicht eingeblendet werden.');
+            }
         }
     }
 
@@ -589,17 +655,20 @@ class MusicAssistantPlayer extends IPSModule
         return $mediaId;
     }
 
-    private function clearCover(): void
+    private function clearCover(?int $coverDiagEventId = null, string $queueItemId = ''): void
     {
         $mediaId = $this->ensureCoverMedia();
         if ($mediaId <= 0) {
             return;
         }
         $hadContent = $this->coverMediaHasContent($mediaId);
-        $hadProxyId = $this->ReadAttributeString('CoverProxyID') !== '';
+        $storedProxyId = $this->ReadAttributeString('CoverProxyID');
+        $hadProxyId = $storedProxyId !== '';
+        $this->coverDiagDecision($coverDiagEventId, 'CLEAR', $queueItemId, $storedProxyId);
         if ($hadContent && !IPS_SetMediaContent($mediaId, '')) {
             throw new Exception('Cover-Medium konnte nicht geleert werden.');
         }
+        $this->coverDiagDecision($coverDiagEventId, 'HIDE', $queueItemId, $storedProxyId);
         if (!IPS_SetHidden($mediaId, true)) {
             throw new Exception('Cover-Medium konnte nicht ausgeblendet werden.');
         }
@@ -617,6 +686,85 @@ class MusicAssistantPlayer extends IPSModule
         return is_array($media)
             && ($media['MediaIsAvailable'] ?? false) === true
             && (int)($media['MediaSize'] ?? 0) > 0;
+    }
+
+    private function coverDiagDecision(
+        ?int $eventId,
+        string $decision,
+        string $queueItemId = '',
+        string $proxyId = ''
+    ): void
+    {
+        if ($eventId === null) {
+            return;
+        }
+        $this->SendDebug(
+            'CoverDiag',
+            'Event=' . $eventId
+                . ' Decision=' . $decision
+                . ' QueueItemID=' . $this->coverDiagValue($queueItemId)
+                . ' ProxyID=' . $this->coverDiagValue($proxyId)
+                . ' StoredProxyID=' . $this->coverDiagValue($this->ReadAttributeString('CoverProxyID')),
+            0
+        );
+    }
+
+    private function coverDiagQueueItemId($currentItem): string
+    {
+        if (!is_array($currentItem)) {
+            return '';
+        }
+        return $this->coverDiagValue($currentItem['queue_item_id'] ?? $currentItem['item_id'] ?? '');
+    }
+
+    private function coverDiagTitle($currentItem): string
+    {
+        if (!is_array($currentItem)) {
+            return '';
+        }
+        $title = $currentItem['name'] ?? '';
+        if ((!is_scalar($title) || (string)$title === '') && is_array($currentItem['media_item'] ?? null)) {
+            $title = $currentItem['media_item']['name'] ?? '';
+        }
+        return $this->coverDiagValue($title);
+    }
+
+    private function coverDiagMediaUri($currentItem): string
+    {
+        if (!is_array($currentItem)) {
+            return '';
+        }
+        $mediaUri = $currentItem['uri'] ?? '';
+        if ((!is_scalar($mediaUri) || (string)$mediaUri === '') && is_array($currentItem['media_item'] ?? null)) {
+            $mediaUri = $currentItem['media_item']['uri'] ?? '';
+        }
+        return $this->coverDiagValue($mediaUri);
+    }
+
+    private function coverDiagProxyId($currentItem): string
+    {
+        if (!is_array($currentItem) || !is_array($currentItem['image'] ?? null)) {
+            return '';
+        }
+        return $this->coverDiagValue($currentItem['image']['proxy_id'] ?? '');
+    }
+
+    private function coverDiagHiddenState(): string
+    {
+        $mediaId = @$this->GetIDForIdent('Cover');
+        if ($mediaId <= 0 || !IPS_MediaExists($mediaId)) {
+            return 'unknown';
+        }
+        $object = IPS_GetObject($mediaId);
+        return ($object['ObjectIsHidden'] ?? false) ? 'yes' : 'no';
+    }
+
+    private function coverDiagValue($value): string
+    {
+        if (!is_scalar($value)) {
+            return '';
+        }
+        return substr(str_replace(["\r", "\n"], ' ', trim((string)$value)), 0, 200);
     }
 
     private function setIfChangedString(string $ident, string $value): bool
