@@ -170,6 +170,8 @@ class MusicAssistantPlayer extends IPSModule
                         . ' Source=' . $this->coverDiagPayloadValue($packet['Source'] ?? null)
                         . ' QueueID=' . $this->coverDiagPayloadValue($packet['ObjectID'] ?? null)
                         . ' State=' . $this->coverDiagPayloadValue($data['state'] ?? null)
+                        . ' Active=' . $this->coverDiagPayloadValue($data['active'] ?? null)
+                        . ' Ended=' . $this->coverDiagPayloadValue($data['ended'] ?? null)
                         . ' CurrentIndex=' . $this->coverDiagPayloadValue($data['current_index'] ?? null)
                         . ' IndexInBuffer=' . $this->coverDiagPayloadValue($data['index_in_buffer'] ?? null)
                         . ' ElapsedTime=' . $this->coverDiagPayloadValue($data['elapsed_time'] ?? null)
@@ -253,6 +255,33 @@ class MusicAssistantPlayer extends IPSModule
 
         $data = $packet['Data'];
         $this->SendDebug('player_updated', 'Passendes Event empfangen für PlayerID=' . $packet['ObjectID'], 0);
+        $hasCurrentMedia = array_key_exists('current_media', $data);
+        $currentMedia = $hasCurrentMedia && is_array($data['current_media']) ? $data['current_media'] : [];
+        $this->SendDebug(
+            'PlayerDiag',
+            'PlayerID=' . $this->coverDiagPayloadValue($packet['ObjectID'])
+                . ' Source=' . $this->coverDiagPayloadValue($packet['Source'] ?? null)
+                . ' PlaybackState=' . $this->coverDiagPayloadValue($data['playback_state'] ?? null)
+                . ' ElapsedTime=' . $this->coverDiagPayloadValue($data['elapsed_time'] ?? null)
+                . ' ElapsedTimeLastUpdated='
+                . $this->coverDiagPayloadValue($data['elapsed_time_last_updated'] ?? null)
+                . ' Powered=' . $this->coverDiagPayloadValue($data['powered'] ?? null)
+                . ' ActiveSource=' . $this->coverDiagPayloadValue($data['active_source'] ?? null)
+                . ' ActiveGroup=' . $this->coverDiagPayloadValue($data['active_group'] ?? null)
+                . ' SyncedTo=' . $this->coverDiagPayloadValue($data['synced_to'] ?? null)
+                . ' GroupMembers=' . $this->playerDiagList($data['group_members'] ?? null)
+                . ' CurrentMedia='
+                . (!$hasCurrentMedia ? 'missing' : ($data['current_media'] === null ? 'null' : 'present'))
+                . ' CurrentMediaQueueItemID='
+                . $this->coverDiagPayloadValue($currentMedia['queue_item_id'] ?? null)
+                . ' CurrentMediaURI=' . $this->coverDiagPayloadValue($currentMedia['uri'] ?? null)
+                . ' CurrentMediaTitle=' . $this->coverDiagPayloadValue($currentMedia['title'] ?? null)
+                . ' CurrentMediaElapsedTime='
+                . $this->coverDiagPayloadValue($currentMedia['elapsed_time'] ?? null)
+                . ' CurrentMediaElapsedTimeLastUpdated='
+                . $this->coverDiagPayloadValue($currentMedia['elapsed_time_last_updated'] ?? null),
+            0
+        );
 
         $volumeLevel = $data['volume_level'] ?? null;
         if (!is_int($volumeLevel) && !is_float($volumeLevel)
@@ -799,6 +828,15 @@ class MusicAssistantPlayer extends IPSModule
             return 'null';
         }
         return str_replace(["\r", "\n"], ['\\r', '\\n'], (string)$value);
+    }
+
+    private function playerDiagList($value): string
+    {
+        if (!is_array($value)) {
+            return 'null';
+        }
+        $encoded = json_encode(array_values($value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return is_string($encoded) ? $encoded : 'null';
     }
 
     private function setIfChangedString(string $ident, string $value): bool
