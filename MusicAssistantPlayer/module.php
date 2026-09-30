@@ -156,17 +156,37 @@ class MusicAssistantPlayer extends IPSModule
                 $hasCurrentItem = array_key_exists('current_item', $data);
                 $currentItem = $hasCurrentItem ? $data['current_item'] : null;
                 $queueItemId = $this->coverDiagQueueItemId($currentItem);
+                $currentItemData = is_array($currentItem) ? $currentItem : [];
+                $mediaItemData = is_array($currentItemData['media_item'] ?? null)
+                    ? $currentItemData['media_item']
+                    : [];
+                $imageData = is_array($currentItemData['image'] ?? null)
+                    ? $currentItemData['image']
+                    : [];
                 $this->SendDebug(
                     'CoverDiag',
                     'Event=' . $coverDiagEventId
                         . ' PlayerID=' . $this->coverDiagValue($playerId)
-                        . ' QueueID=' . $this->coverDiagValue($packet['ObjectID'])
-                        . ' State=' . $this->coverDiagValue($data['state'] ?? '')
+                        . ' Source=' . $this->coverDiagPayloadValue($packet['Source'] ?? null)
+                        . ' QueueID=' . $this->coverDiagPayloadValue($packet['ObjectID'] ?? null)
+                        . ' State=' . $this->coverDiagPayloadValue($data['state'] ?? null)
+                        . ' CurrentIndex=' . $this->coverDiagPayloadValue($data['current_index'] ?? null)
+                        . ' IndexInBuffer=' . $this->coverDiagPayloadValue($data['index_in_buffer'] ?? null)
+                        . ' ElapsedTime=' . $this->coverDiagPayloadValue($data['elapsed_time'] ?? null)
+                        . ' ElapsedTimeLastUpdated='
+                        . $this->coverDiagPayloadValue($data['elapsed_time_last_updated'] ?? null)
                         . ' CurrentItem=' . (!$hasCurrentItem ? 'missing' : ($currentItem === null ? 'null' : 'present'))
-                        . ' QueueItemID=' . $this->coverDiagValue($queueItemId)
-                        . ' Title=' . $this->coverDiagTitle($currentItem)
-                        . ' MediaURI=' . $this->coverDiagMediaUri($currentItem)
-                        . ' ProxyID=' . $this->coverDiagProxyId($currentItem)
+                        . ' QueueItemID=' . $this->coverDiagPayloadValue(
+                            $currentItemData['queue_item_id'] ?? $currentItemData['item_id'] ?? null
+                        )
+                        . ' CurrentItemIndex=' . $this->coverDiagPayloadValue($currentItemData['index'] ?? null)
+                        . ' MediaURI=' . $this->coverDiagPayloadValue(
+                            $mediaItemData['uri'] ?? $currentItemData['uri'] ?? null
+                        )
+                        . ' Title=' . $this->coverDiagPayloadValue(
+                            $currentItemData['name'] ?? $mediaItemData['name'] ?? null
+                        )
+                        . ' ProxyID=' . $this->coverDiagPayloadValue($imageData['proxy_id'] ?? null)
                         . ' StoredProxyID=' . $this->coverDiagValue($this->ReadAttributeString('CoverProxyID'))
                         . ' Hidden=' . $this->coverDiagHiddenState(),
                     0
@@ -765,6 +785,20 @@ class MusicAssistantPlayer extends IPSModule
             return '';
         }
         return substr(str_replace(["\r", "\n"], ' ', trim((string)$value)), 0, 200);
+    }
+
+    private function coverDiagPayloadValue($value): string
+    {
+        if ($value === null) {
+            return 'null';
+        }
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+        if (!is_scalar($value)) {
+            return 'null';
+        }
+        return str_replace(["\r", "\n"], ['\\r', '\\n'], (string)$value);
     }
 
     private function setIfChangedString(string $ident, string $value): bool
