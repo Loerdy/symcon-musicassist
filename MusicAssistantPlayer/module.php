@@ -13,6 +13,8 @@ class MusicAssistantPlayer extends IPSModule
     {
         parent::Create();
 
+        $this->RegisterMessage($this->InstanceID, FM_CONNECT);
+
         $this->RegisterPropertyString('PlayerID', '');
 
         $this->RegisterPropertyString('PlaylistProfile', '');
@@ -104,6 +106,10 @@ class MusicAssistantPlayer extends IPSModule
 
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
     {
+        if ($Message === FM_CONNECT && $SenderID === $this->InstanceID) {
+            $this->registerParentStatusMessage();
+            $this->registerWithParent();
+        }
         if ($Message === IM_CHANGESTATUS
             && $SenderID === (int)$this->GetBuffer('ParentInstanceId')
             && $this->HasActiveParent()) {
