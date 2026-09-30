@@ -196,16 +196,16 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 $isIdle = is_string($data['state'] ?? null)
                     && strtolower(trim($data['state'])) === 'idle';
-                if ($hasCurrentItem && ($data['current_item'] === null || !$isIdle)) {
+                if ($hasCurrentItem) {
                     if ($this->updateMetadataFromQueueItem($data['current_item'])) {
                         $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
                     }
                 }
                 if (array_key_exists('state', $data)) {
-                    $this->updateMetadataVisibilityFromQueueState($data['state']);
+                    $this->updateMetadataVisibilityFromQueueState($data['state'], is_array($currentItem));
                 }
                 try {
-                    if ($isIdle) {
+                    if ($isIdle && !$hasCurrentItem) {
                         $this->updateCoverVisibilityFromQueueState(
                             $data['state'],
                             false,
@@ -507,10 +507,10 @@ class MusicAssistantPlayer extends IPSModule
         return $this->setIfChangedString('NowAlbum', $album) || $changed;
     }
 
-    private function updateMetadataVisibilityFromQueueState($state): void
+    private function updateMetadataVisibilityFromQueueState($state, bool $hasCurrentItem = false): void
     {
         $normalizedState = is_string($state) ? strtolower(trim($state)) : '';
-        if ($normalizedState === 'idle') {
+        if ($normalizedState === 'idle' && !$hasCurrentItem) {
             $this->updateMetadataFromQueueItem(null);
         }
     }
@@ -592,7 +592,7 @@ class MusicAssistantPlayer extends IPSModule
         if ($mediaId <= 0) {
             return;
         }
-        if ($normalizedState === 'idle') {
+        if ($normalizedState === 'idle' && !$hasCurrentItem) {
             $this->coverDiagDecision(
                 $coverDiagEventId,
                 'HIDE',
