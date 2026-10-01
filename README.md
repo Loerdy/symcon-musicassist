@@ -6,7 +6,7 @@ Diese IP-Symcon-Library bindet einen [Music-Assistant](https://www.music-assista
 
 ## Voraussetzungen
 
-- IP-Symcon ab Version 9.1
+- IP-Symcon ab Version 7.0
 - ein erreichbarer Music-Assistant-Server
 - Hostname oder IP-Adresse, Port und Zugriffstoken des Music-Assistant-Servers
 - Netzwerkzugriff des IP-Symcon-Systems auf die HTTP-API und den WebSocket von Music Assistant
@@ -214,7 +214,7 @@ This IP-Symcon library integrates a [Music Assistant](https://www.music-assistan
 
 ## Requirements
 
-- IP-Symcon version 9.1 or later
+- IP-Symcon version 7.0 or later
 - an accessible Music Assistant server
 - the hostname or IP address, port, and access token of the Music Assistant server
 - network access from the IP-Symcon system to the Music Assistant HTTP API and WebSocket
