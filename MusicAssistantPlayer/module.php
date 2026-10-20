@@ -231,7 +231,7 @@ class MusicAssistantPlayer extends IPSModule
                     }
                 } catch (Throwable $e) {
                     $this->SendDebug('Playlist start failed', $e->getMessage(), 0);
-                    IPS_LogMessage('MusicAssistantPlayer', 'Playlist start failed: ' . $e->getMessage());
+                    $this->LogMessage('Playlist start failed: ' . $e->getMessage(), KL_ERROR);
                 }
                 break;
 
@@ -246,7 +246,7 @@ class MusicAssistantPlayer extends IPSModule
                     }
                 } catch (Throwable $e) {
                     $this->SendDebug('Radio start failed', $e->getMessage(), 0);
-                    IPS_LogMessage('MusicAssistantPlayer', 'Radio start failed: ' . $e->getMessage());
+                    $this->LogMessage('Radio start failed: ' . $e->getMessage(), KL_ERROR);
                 }
                 break;
 
@@ -277,7 +277,7 @@ class MusicAssistantPlayer extends IPSModule
                     $this->SetValue('Mute', $muted);
                 } catch (Throwable $e) {
                     $this->SendDebug('Mute failed', $e->getMessage(), 0);
-                    IPS_LogMessage('MusicAssistantPlayer', 'Mute failed: ' . $e->getMessage());
+                    $this->LogMessage('Mute failed: ' . $e->getMessage(), KL_ERROR);
                 }
                 break;
 
@@ -287,7 +287,7 @@ class MusicAssistantPlayer extends IPSModule
                     $this->SetVolumeLevel($level);
                 } catch (Throwable $e) {
                     $this->SendDebug('VolumeSet failed', $e->getMessage(), 0);
-                    IPS_LogMessage('MusicAssistantPlayer', 'VolumeSet failed: ' . $e->getMessage());
+                    $this->LogMessage('VolumeSet failed: ' . $e->getMessage(), KL_ERROR);
                 }
                 break;
 
