@@ -352,19 +352,54 @@ class MusicAssistantConnection extends IPSModule
             return $this->apiErrorResponse('NOT_CONFIGURED', 'Music Assistant ist nicht konfiguriert.');
         }
 
+        $authenticatedRetry = false;
         try {
             $proxyId = $request['ProxyID'];
             $response = $this->downloadArtwork($proxyId, false);
             if (in_array($response['http_code'], [401, 403], true)
                 && trim($this->ReadPropertyString('Token')) !== '') {
+                $authenticatedRetry = true;
                 $response = $this->downloadArtwork($proxyId, true);
             }
-            if ($response['http_code'] !== 200
-                || $response['content_type'] !== 'image/jpeg'
-                || $response['body'] === ''
-                || strlen($response['body']) > self::MAX_ARTWORK_SIZE
-                || substr($response['body'], 0, 3) !== "\xFF\xD8\xFF") {
-                $this->SendDebug('Artwork', 'Imageproxy lieferte kein gültiges JPEG', 0);
+            if ($response['http_code'] !== 200) {
+                $message = 'Imageproxy HTTP-Status=' . $response['http_code'];
+                if ($authenticatedRetry) {
+                    $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
+                }
+                $this->SendDebug('Artwork', $message, 0);
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+            }
+            if ($response['content_type'] !== 'image/jpeg') {
+                $message = 'Imageproxy lieferte unerwarteten Content-Type: '
+                    . ($response['content_type'] === '' ? '(leer)' : $response['content_type']);
+                if ($authenticatedRetry) {
+                    $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
+                }
+                $this->SendDebug('Artwork', $message, 0);
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+            }
+            if ($response['body'] === '') {
+                $message = 'Imageproxy lieferte leere Bilddaten';
+                if ($authenticatedRetry) {
+                    $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
+                }
+                $this->SendDebug('Artwork', $message, 0);
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+            }
+            if (strlen($response['body']) > self::MAX_ARTWORK_SIZE) {
+                $message = 'Imageproxy überschritt die maximale Bildgröße';
+                if ($authenticatedRetry) {
+                    $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
+                }
+                $this->SendDebug('Artwork', $message, 0);
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+            }
+            if (substr($response['body'], 0, 3) !== "\xFF\xD8\xFF") {
+                $message = 'Imageproxy lieferte ungültige JPEG-Daten';
+                if ($authenticatedRetry) {
+                    $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
+                }
+                $this->SendDebug('Artwork', $message, 0);
                 return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
             }
 
@@ -376,7 +411,18 @@ class MusicAssistantConnection extends IPSModule
                 'content'      => base64_encode($response['body'])
             ], JSON_UNESCAPED_SLASHES);
         } catch (Throwable $e) {
-            $this->SendDebug('Artwork', 'Imageproxy-Anfrage fehlgeschlagen', 0);
+            $message = $e->getMessage();
+            if (!in_array($message, [
+                'Timeout beim Erwerb des HTTP-Semaphors',
+                'Imageproxy konnte nicht initialisiert werden.',
+                'Imageproxy überschritt die maximale Bildgröße'
+            ], true) && preg_match('/^cURL-Verbindungs- oder Übertragungsfehler; Fehlernummer=\d+$/D', $message) !== 1) {
+                $message = 'Unerwarteter Fehler beim Imageproxy-Abruf; Typ=' . get_class($e);
+            }
+            if ($authenticatedRetry) {
+                $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
+            }
+            $this->SendDebug('Artwork', $message, 0);
             return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
         }
     }
@@ -399,7 +445,7 @@ class MusicAssistantConnection extends IPSModule
         }
 
         if (!IPS_SemaphoreEnter($this->maSemaphoreName(), 15000)) {
-            throw new Exception('MA API semaphore timeout');
+            throw new Exception('Timeout beim Erwerb des HTTP-Semaphors');
         }
         try {
             $body = '';
@@ -433,13 +479,17 @@ class MusicAssistantConnection extends IPSModule
             $transferSucceeded = curl_exec($ch);
             $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $contentType = strtolower(trim((string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE)));
+            $curlErrorNumber = curl_errno($ch);
             curl_close($ch);
         } finally {
             IPS_SemaphoreLeave($this->maSemaphoreName());
         }
 
-        if ($transferSucceeded === false || $sizeExceeded) {
-            throw new Exception('Imageproxy-Anfrage fehlgeschlagen.');
+        if ($sizeExceeded || $curlErrorNumber === CURLE_FILESIZE_EXCEEDED) {
+            throw new Exception('Imageproxy überschritt die maximale Bildgröße');
+        }
+        if ($transferSucceeded === false) {
+            throw new Exception('cURL-Verbindungs- oder Übertragungsfehler; Fehlernummer=' . $curlErrorNumber);
         }
         $contentType = trim(explode(';', $contentType, 2)[0]);
         return [
