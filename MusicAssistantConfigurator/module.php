@@ -284,7 +284,7 @@ class MusicAssistantConfigurator extends IPSModule
 
     private function playlistProfileName(): string
     {
-        $profileNames = $this->readProfileNames() ?? $this->initializeProfileNames();
+        $profileNames = $this->initializeProfileNames();
         if ($profileNames === null) {
             throw new Exception('Playlist-/Radio-Profilnamen konnten noch nicht initialisiert werden.');
         }
@@ -293,42 +293,61 @@ class MusicAssistantConfigurator extends IPSModule
 
     private function radioProfileName(): string
     {
-        $profileNames = $this->readProfileNames() ?? $this->initializeProfileNames();
+        $profileNames = $this->initializeProfileNames();
         if ($profileNames === null) {
             throw new Exception('Playlist-/Radio-Profilnamen konnten noch nicht initialisiert werden.');
         }
         return $profileNames['radio'];
     }
 
-    private function readProfileNames(): ?array
+    /**
+     * @return array{state:string, profileNames:?array, reason:string}
+     */
+    private function readProfileNames(): array
     {
         $value = trim($this->ReadAttributeString('ProfileNames'));
         if ($value === '') {
-            return null;
+            return ['state' => 'empty', 'profileNames' => null, 'reason' => ''];
         }
         try {
             $profileNames = json_decode($value, true, 512, JSON_THROW_ON_ERROR);
         } catch (Throwable $e) {
-            return null;
+            return [
+                'state' => 'invalid',
+                'profileNames' => null,
+                'reason' => 'ungültiges JSON'
+            ];
         }
         if (!is_array($profileNames)
             || !is_string($profileNames['playlist'] ?? null)
             || trim($profileNames['playlist']) === ''
             || !is_string($profileNames['radio'] ?? null)
             || trim($profileNames['radio']) === '') {
-            return null;
+            return [
+                'state' => 'invalid',
+                'profileNames' => null,
+                'reason' => 'unbekannte Datenstruktur'
+            ];
         }
         return [
-            'playlist' => trim($profileNames['playlist']),
-            'radio'    => trim($profileNames['radio'])
+            'state' => 'valid',
+            'profileNames' => [
+                'playlist' => trim($profileNames['playlist']),
+                'radio'    => trim($profileNames['radio'])
+            ],
+            'reason' => ''
         ];
     }
 
     private function initializeProfileNames(): ?array
     {
-        $profileNames = $this->readProfileNames();
-        if ($profileNames !== null) {
-            return $profileNames;
+        $storedProfileNames = $this->readProfileNames();
+        if ($storedProfileNames['state'] === 'valid') {
+            return $storedProfileNames['profileNames'];
+        }
+        if ($storedProfileNames['state'] === 'invalid') {
+            $this->reportInvalidProfileNames($storedProfileNames['reason']);
+            return null;
         }
 
         $connectionId = $this->getConfiguratorConnectionId();
@@ -406,11 +425,15 @@ class MusicAssistantConfigurator extends IPSModule
         ];
     }
 
-    private function storeProfileNames(array $profileNames, string $source): array
+    private function storeProfileNames(array $profileNames, string $source): ?array
     {
         $existing = $this->readProfileNames();
-        if ($existing !== null) {
-            return $existing;
+        if ($existing['state'] === 'valid') {
+            return $existing['profileNames'];
+        }
+        if ($existing['state'] === 'invalid') {
+            $this->reportInvalidProfileNames($existing['reason']);
+            return null;
         }
         $value = json_encode($profileNames, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         if (!$this->WriteAttributeString('ProfileNames', $value)) {
@@ -418,6 +441,14 @@ class MusicAssistantConfigurator extends IPSModule
         }
         $this->SendDebug('Profiles', 'Profilnamen übernommen aus ' . $source, 0);
         return $profileNames;
+    }
+
+    private function reportInvalidProfileNames(string $reason): void
+    {
+        $message = 'Persistentes Attribut ProfileNames enthält ' . $reason
+            . '; Initialisierung wurde abgebrochen und die Originaldaten wurden beibehalten.';
+        $this->SendDebug('Profiles', $message, 0);
+        $this->LogMessage($message, KL_ERROR);
     }
 
     private function getPlaylistMap(): array
