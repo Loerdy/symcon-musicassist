@@ -8,6 +8,8 @@ class MusicAssistantPlayer extends IPSModule
     private const REPEAT_PROFILE  = 'MA.RepeatMode';
     private const VOLUP_PROFILE   = 'MA.VolumeUp';
     private const VOLDOWN_PROFILE = 'MA.VolumeDown';
+    private const COVER_SEMAPHORE_TIMEOUT = 5000;
+    private const DEFAULT_COVER = '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCABAAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5qooooAKKK6Twd8OvEPj/AO1/2Dp/2/7Js879/HHs3btv32Gc7W6elAHN0V6rpH7MvjvUrlorixtdKQIWE13doyMcj5R5Rc55zyMcHnpnrdI/ZB1Ka2ZtU8R2tncbyFS0tmuEK4GCWZkIOc8Y7DnngA+faK+mfir8EPCvgn4R31/a2G/WrOK2Q3/nSjzHMsaO/llyo3ZbjtnjpXzNQAUUUUAFfSH7Hf8AzN3/AG5/+1q+b6+kP2O/+Zu/7c//AGtQBJ48/am1LQ9a1PSNL0K1juLC+ltmubudpUkVGZSQihCpJAP3jjkc9a4DV/2mvHepXKy299a6UgQKYbS0RkY5PzHzQ5zzjg44HHXPHfEv/ko/ir/sLXf/AKOarPhX4T+LfGtm15o+iT3NoOk8jJDG/JHyM5UPgqQducd8UAfSHxS1G41j9mY395J513dafp880m0LudpIWY4GAMkngV8hV9e/FLTrjR/2ZjYXkfk3drp+nwTR7g211khVhkZBwQeRXyFQAUUUUAdj8MPhhqXxR1qWyspUtLe3RZbm7mRikalgMDAwXI3EKSM7W5GK+p/g78Hf+FTf2v8A8Tf+1f7Q8n/l28ny9m//AG2znf7dK8g/ZO8U6bo2ta5pd7cJa3GopA1s0zqiSMjMvlgkglyZVwoBzhvTn6Q8U+KdN8G6LcapqlwkFvCjMqs6q8zBSwjQMQGchThc80AfDXxL/wCSj+Kv+wtd/wDo5q+z/hJ9j/4Vj4X+w+R5P9nw7vs+NvmbR5mcfxb9+7vuznnNfCup6jcaxqV3f3knnXd1K880m0LudiWY4GAMkngV0nhX4seLfBVm1no+tz21oekEipNGnJPyK4YJksSduM980AfSn7UXiKHSfhnJpzbHuNVuI4UQyBXVUYSM4XqwBRVPTHmDnoD8fVt+KvGuueNr1brXNTn1CVfuLIQI48gA7EGFXO0ZwBnGTzWJQAUUUUAFFFFABRRRQAUUUUAf/9k=';
 
     public function Create(): void
     {
@@ -24,6 +26,8 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('RadioMap', '{}');
 
         $this->RegisterAttributeString('CoverProxyID', '');
+        $this->RegisterAttributeString('CoverTargetProxyID', '');
+        $this->RegisterAttributeBoolean('CoverIsDefault', false);
 
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
@@ -472,18 +476,34 @@ class MusicAssistantPlayer extends IPSModule
                 $proxyId = $candidate;
             }
         }
-        if ($proxyId === '') {
-            $this->clearCover();
-            return;
-        }
-
         $mediaId = $this->ensureCoverMedia();
         if ($mediaId <= 0) {
             throw new Exception('Cover-Medium ist nicht verfügbar.');
         }
-        if ($this->ReadAttributeString('CoverProxyID') === $proxyId
-            && $this->coverMediaHasContent($mediaId)) {
-            $this->updateCoverVisibilityFromQueueState($state, true);
+        if ($proxyId === '') {
+            $this->showDefaultCover($mediaId, '', $state);
+            return;
+        }
+
+        $needsDownload = $this->withCoverLock(function () use ($mediaId, $proxyId, $state): bool {
+            if ($this->ReadAttributeString('CoverTargetProxyID') !== $proxyId) {
+                if (!$this->WriteAttributeString('CoverTargetProxyID', $proxyId)) {
+                    throw new Exception('Cover-Ziel konnte nicht gespeichert werden.');
+                }
+                $this->setDefaultCover($mediaId, $state);
+            }
+            if ($this->ReadAttributeString('CoverProxyID') === $proxyId
+                && !$this->ReadAttributeBoolean('CoverIsDefault')
+                && $this->coverMediaHasContent($mediaId)) {
+                $this->updateCoverVisibilityFromQueueState($state, true);
+                return false;
+            }
+            if (!$this->ReadAttributeBoolean('CoverIsDefault') || !$this->coverMediaHasContent($mediaId)) {
+                $this->setDefaultCover($mediaId, $state);
+            }
+            return true;
+        });
+        if (!$needsDownload) {
             return;
         }
 
@@ -498,14 +518,51 @@ class MusicAssistantPlayer extends IPSModule
         if (!is_string($binary) || $binary === '' || substr($binary, 0, 3) !== "\xFF\xD8\xFF") {
             throw new Exception('Artwork-Antwort enthält kein gültiges JPEG.');
         }
-        if (!IPS_SetMediaContent($mediaId, $content)) {
-            throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
+        $updated = $this->withCoverLock(function () use ($mediaId, $proxyId, $content, $state): bool {
+            if ($this->ReadAttributeString('CoverTargetProxyID') !== $proxyId) {
+                return false;
+            }
+            if (!IPS_SetMediaContent($mediaId, $content)) {
+                throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
+            }
+            if (!$this->WriteAttributeString('CoverProxyID', $proxyId)) {
+                throw new Exception('Cover-Cache konnte nicht gespeichert werden.');
+            }
+            if (!$this->WriteAttributeBoolean('CoverIsDefault', false)) {
+                throw new Exception('Cover-Status konnte nicht gespeichert werden.');
+            }
+            $this->updateCoverVisibilityFromQueueState($state, true);
+            return true;
+        });
+        if ($updated) {
+            $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
         }
-        if (!$this->WriteAttributeString('CoverProxyID', $proxyId)) {
-            throw new Exception('Cover-Cache konnte nicht gespeichert werden.');
+    }
+
+    private function showDefaultCover(int $mediaId, string $targetProxyId, $state): void
+    {
+        $this->withCoverLock(function () use ($mediaId, $targetProxyId, $state): void {
+            if ($this->ReadAttributeString('CoverTargetProxyID') !== $targetProxyId
+                && !$this->WriteAttributeString('CoverTargetProxyID', $targetProxyId)) {
+                throw new Exception('Cover-Ziel konnte nicht gespeichert werden.');
+            }
+            if (!$this->ReadAttributeBoolean('CoverIsDefault') || !$this->coverMediaHasContent($mediaId)) {
+                $this->setDefaultCover($mediaId, $state);
+                return;
+            }
+            $this->updateCoverVisibilityFromQueueState($state, true);
+        });
+    }
+
+    private function setDefaultCover(int $mediaId, $state): void
+    {
+        if (!IPS_SetMediaContent($mediaId, self::DEFAULT_COVER)) {
+            throw new Exception('Standard-Cover konnte nicht gesetzt werden.');
+        }
+        if (!$this->WriteAttributeBoolean('CoverIsDefault', true)) {
+            throw new Exception('Cover-Status konnte nicht gespeichert werden.');
         }
         $this->updateCoverVisibilityFromQueueState($state, true);
-        $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
     }
 
     private function updateCoverVisibilityFromQueueState($state, bool $hasCurrentItem = false): void
@@ -595,19 +652,38 @@ class MusicAssistantPlayer extends IPSModule
         if ($mediaId <= 0) {
             return;
         }
-        $hadContent = $this->coverMediaHasContent($mediaId);
-        $hadProxyId = $this->ReadAttributeString('CoverProxyID') !== '';
-        if ($hadContent && !IPS_SetMediaContent($mediaId, '')) {
-            throw new Exception('Cover-Medium konnte nicht geleert werden.');
+        $this->withCoverLock(function () use ($mediaId): void {
+            $hadContent = $this->coverMediaHasContent($mediaId);
+            $hadProxyId = $this->ReadAttributeString('CoverProxyID') !== '';
+            if ($hadContent && !IPS_SetMediaContent($mediaId, '')) {
+                throw new Exception('Cover-Medium konnte nicht geleert werden.');
+            }
+            if (!IPS_SetHidden($mediaId, true)) {
+                throw new Exception('Cover-Medium konnte nicht ausgeblendet werden.');
+            }
+            if ($hadProxyId && !$this->WriteAttributeString('CoverProxyID', '')) {
+                throw new Exception('Cover-Cache konnte nicht zurückgesetzt werden.');
+            }
+            if (!$this->WriteAttributeString('CoverTargetProxyID', '')
+                || !$this->WriteAttributeBoolean('CoverIsDefault', false)) {
+                throw new Exception('Cover-Status konnte nicht zurückgesetzt werden.');
+            }
+            if ($hadContent || $hadProxyId) {
+                $this->SendDebug('Artwork', 'Cover geleert', 0);
+            }
+        });
+    }
+
+    private function withCoverLock(callable $operation)
+    {
+        $semaphore = 'MA_COVER_' . (string)$this->InstanceID;
+        if (!IPS_SemaphoreEnter($semaphore, self::COVER_SEMAPHORE_TIMEOUT)) {
+            throw new Exception('Cover-Semaphore konnte nicht erworben werden.');
         }
-        if (!IPS_SetHidden($mediaId, true)) {
-            throw new Exception('Cover-Medium konnte nicht ausgeblendet werden.');
-        }
-        if ($hadProxyId && !$this->WriteAttributeString('CoverProxyID', '')) {
-            throw new Exception('Cover-Cache konnte nicht zurückgesetzt werden.');
-        }
-        if ($hadContent || $hadProxyId) {
-            $this->SendDebug('Artwork', 'Cover geleert', 0);
+        try {
+            return $operation();
+        } finally {
+            IPS_SemaphoreLeave($semaphore);
         }
     }
 
