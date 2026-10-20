@@ -14,6 +14,8 @@ class MusicAssistantConnection extends IPSModule
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const PLAYER_MODULE_ID = '{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}';
     private const MAX_ARTWORK_SIZE = 5242880;
+    private const STATE_SEMAPHORE_TIMEOUT = 5000;
+    private const STATE_SEMAPHORE_ERROR = 1701;
     private const API_COMMANDS = [
         'players/cmd/previous',
         'players/cmd/stop',
@@ -48,13 +50,11 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('ParentReconnectPending', '0');
         $this->SetBuffer('ParentReconnectAttempted', '0');
-        $this->SetBuffer('RegisteredPlayers', '{}');
-        $this->SetBuffer('PendingQueueRequests', '{}');
-        $this->SetBuffer('PlayerQueues', '{}');
-        $this->SetBuffer('QueuePlayers', '{}');
-        $this->SetBuffer('QueueHints', '{}');
+        $this->withStateLock(function (): void {
+            $this->invalidateQueueStateFromState();
+            $this->SetBuffer('ResyncPlayers', '{}');
+        });
         $this->SetBuffer('ResyncGeneration', '');
-        $this->SetBuffer('ResyncPlayers', '{}');
         $this->RegisterTimer('CheckConnection', 0, 'MASS_CheckConnection($_IPS["TARGET"]);');
         $this->RequireParent(self::WEBSOCKET_MODULE);
     }
@@ -67,9 +67,21 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
-        $this->invalidateQueueState();
         $this->SetStatus($this->isConfigured() ? 104 : 201);
         $this->SetTimerInterval('CheckConnection', $this->isConfigured() ? 5000 : 0);
+        try {
+            $this->invalidateQueueState();
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                $this->LogMessage('ApplyChanges: ' . $e->getMessage(), KL_ERROR);
+                throw $e;
+            }
+            if ($this->isConfigured() && $this->HasActiveParent()) {
+                $this->SetBuffer('ParentReconnectPending', '1');
+            }
+            $this->SendDebug('State', 'ApplyChanges konnte den Connection-State nicht invalidieren', 0);
+            return;
+        }
 
         // Eine bekannte, unveränderte Sitzung kann z. B. nach einem Tokenwechsel weiterverwendet werden.
         if ($this->isConfigured() && $this->HasActiveParent()
@@ -156,13 +168,15 @@ class MusicAssistantConnection extends IPSModule
             && is_string($message['server_version'] ?? null)
             && is_int($message['schema_version'] ?? null)
             && is_int($message['min_supported_schema_version'] ?? null)) {
-            $generation = (int)$this->GetBuffer('ConnectionGeneration') + 1;
-            $this->SetBuffer('ConnectionGeneration', (string)$generation);
-            $this->SetBuffer('GreetingUrl', $this->webSocketUrl());
-            $this->SetBuffer('AuthMessageId', '');
-            $this->SetBuffer('AuthGeneration', '');
-            $this->SetBuffer('AuthStarted', '0');
-            $this->invalidateQueueState();
+            $this->withStateLock(function (): void {
+                $generation = (int)$this->GetBuffer('ConnectionGeneration') + 1;
+                $this->SetBuffer('ConnectionGeneration', (string)$generation);
+                $this->SetBuffer('GreetingUrl', $this->webSocketUrl());
+                $this->SetBuffer('AuthMessageId', '');
+                $this->SetBuffer('AuthGeneration', '');
+                $this->SetBuffer('AuthStarted', '0');
+                $this->invalidateQueueStateFromState();
+            });
             $this->SetBuffer('ParentReconnectPending', '0');
             $this->SetBuffer('ParentReconnectAttempted', '0');
             $this->SetStatus(104);
@@ -182,8 +196,7 @@ class MusicAssistantConnection extends IPSModule
                     'Data' => $data
                 ], JSON_THROW_ON_ERROR));
                 $this->SendDebug('player_updated', 'Weitergeleitet für ObjectID=' . $objectId, 0);
-                if ($this->isPlayerRegistered($objectId)
-                    && $this->queueRelevantPlayerDataChanged($objectId, $data)) {
+                if ($this->queueRelevantPlayerDataChanged($objectId, $data)) {
                     $this->requestActiveQueue($objectId);
                 }
             }
@@ -195,7 +208,9 @@ class MusicAssistantConnection extends IPSModule
             $data = $message['data'] ?? null;
             if ($this->GetStatus() === 102 && is_string($queueId) && $queueId !== '' && is_array($data)) {
                 $this->SendDebug('queue_updated', 'Empfangen für QueueID=' . $queueId, 0);
-                $queuePlayers = $this->readJsonBuffer('QueuePlayers');
+                $queuePlayers = $this->withStateLock(function (): array {
+                    return $this->readJsonBuffer('QueuePlayers');
+                });
                 $playerIds = $queuePlayers[$queueId] ?? [];
                 if (is_array($playerIds) && count($playerIds) > 0) {
                     $playerIds = array_values(array_filter($playerIds, 'is_string'));
@@ -267,10 +282,13 @@ class MusicAssistantConnection extends IPSModule
             return json_encode(['success' => true]);
         }
 
-        $players = $this->readJsonBuffer('RegisteredPlayers');
-        $isNew = !isset($players[$playerId]);
-        $players[$playerId] = true;
-        $this->writeJsonBuffer('RegisteredPlayers', $players);
+        $isNew = $this->withStateLock(function () use ($playerId): bool {
+            $players = $this->readJsonBuffer('RegisteredPlayers');
+            $isNew = !isset($players[$playerId]);
+            $players[$playerId] = true;
+            $this->writeJsonBuffer('RegisteredPlayers', $players);
+            return $isNew;
+        });
         if ($isNew) {
             $this->SendDebug('Registration', 'Player registriert: ' . $playerId, 0);
         }
@@ -555,7 +573,10 @@ class MusicAssistantConnection extends IPSModule
 
     private function resolveRegisteredPlayers(): void
     {
-        foreach (array_keys($this->readJsonBuffer('RegisteredPlayers')) as $playerId) {
+        $registeredPlayers = $this->withStateLock(function (): array {
+            return $this->readJsonBuffer('RegisteredPlayers');
+        });
+        foreach (array_keys($registeredPlayers) as $playerId) {
             if (is_string($playerId) && $playerId !== '') {
                 $this->startPlayerResync($playerId);
             }
@@ -579,7 +600,10 @@ class MusicAssistantConnection extends IPSModule
             }
         }
 
-        foreach (array_keys($this->readJsonBuffer('RegisteredPlayers')) as $registeredPlayerId) {
+        $registeredPlayers = $this->withStateLock(function (): array {
+            return $this->readJsonBuffer('RegisteredPlayers');
+        });
+        foreach (array_keys($registeredPlayers) as $registeredPlayerId) {
             $registeredPlayerId = (string)$registeredPlayerId;
             if ($registeredPlayerId !== '' && !isset($validPlayerIds[$registeredPlayerId])) {
                 $this->unregisterPlayer($registeredPlayerId);
@@ -587,120 +611,216 @@ class MusicAssistantConnection extends IPSModule
         }
     }
 
-    private function isPlayerRegistered(string $playerId): bool
-    {
-        return isset($this->readJsonBuffer('RegisteredPlayers')[$playerId]);
-    }
-
     private function startPlayerResync(string $playerId): void
     {
-        $generation = $this->GetBuffer('ConnectionGeneration');
-        if ($this->GetStatus() !== 102 || $generation === ''
-            || $this->GetBuffer('ResyncGeneration') !== $generation
-            || !$this->isPlayerRegistered($playerId)) {
-            return;
-        }
+        try {
+            $reservation = $this->withStateLock(function () use ($playerId): ?array {
+                $generation = $this->GetBuffer('ConnectionGeneration');
+                $registeredPlayers = $this->readJsonBuffer('RegisteredPlayers');
+                if ($this->GetStatus() !== 102 || $generation === ''
+                    || $this->GetBuffer('ResyncGeneration') !== $generation
+                    || !isset($registeredPlayers[$playerId])) {
+                    return null;
+                }
 
-        $resyncPlayers = $this->readJsonBuffer('ResyncPlayers');
-        if (isset($resyncPlayers[$playerId])) {
+                $resyncPlayers = $this->readJsonBuffer('ResyncPlayers');
+                if (is_array($resyncPlayers[$playerId] ?? null)) {
+                    $state = $resyncPlayers[$playerId];
+                    if (($state['Player'] ?? null) !== null && ($state['Queue'] ?? null) !== null) {
+                        return null;
+                    }
+                    $resyncPlayers[$playerId]['Starting'] = (int)($state['Starting'] ?? 0) + 1;
+                    $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
+                    return [
+                        'Generation' => $generation,
+                        'StartPlayer' => ($state['Player'] ?? null) === null,
+                        'StartQueue' => ($state['Queue'] ?? null) === null
+                    ];
+                }
+                $resyncPlayers[$playerId] = ['Player' => null, 'Queue' => null, 'Starting' => 1];
+                $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
+                return ['Generation' => $generation, 'StartPlayer' => true, 'StartQueue' => true];
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Resync', 'Resync konnte nicht reserviert werden: ' . $playerId, 0);
             return;
         }
-        $resyncPlayers[$playerId] = ['Player' => null, 'Queue' => null];
-        $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
+        if ($reservation === null) {
+            return;
+        }
+        $generation = $reservation['Generation'];
         $this->SendDebug('Resync', 'Start für Player: ' . $playerId, 0);
-        $this->requestPlayerSnapshot($playerId);
-        $this->requestActiveQueue($playerId, true);
+        try {
+            if ($reservation['StartPlayer']) {
+                $this->requestPlayerSnapshot($playerId);
+            }
+            if ($reservation['StartQueue']) {
+                $this->requestActiveQueue($playerId, true);
+            }
+        } finally {
+            $this->releaseResyncReservation($playerId, $generation);
+        }
     }
 
-    private function requestPlayerSnapshot(string $playerId): void
+    private function requestPlayerSnapshot(string $playerId): bool
     {
-        $generation = $this->GetBuffer('ConnectionGeneration');
         $messageId = '';
+        $generation = null;
         try {
             $messageId = 'player-' . bin2hex(random_bytes(16));
-            $pending = $this->readJsonBuffer('PendingQueueRequests');
-            $pending[$messageId] = [
-                'Generation' => $generation,
-                'Type' => 'GetPlayerSnapshot',
-                'PlayerID' => $playerId,
-                'Started' => time()
-            ];
-            $this->writeJsonBuffer('PendingQueueRequests', $pending);
-            $this->sendWebSocketCommand($messageId, 'players/get', ['player_id' => $playerId]);
-        } catch (Throwable $e) {
-            $pending = $this->readJsonBuffer('PendingQueueRequests');
-            if ($messageId !== '') {
-                unset($pending[$messageId]);
+            $reservation = $this->withStateLock(function () use ($messageId, $playerId): ?array {
+                $generation = $this->GetBuffer('ConnectionGeneration');
+                $registeredPlayers = $this->readJsonBuffer('RegisteredPlayers');
+                if ($this->GetStatus() !== 102 || $generation === ''
+                    || $this->GetBuffer('ResyncGeneration') !== $generation
+                    || !isset($registeredPlayers[$playerId])) {
+                    return null;
+                }
+                $pending = $this->readJsonBuffer('PendingQueueRequests');
+                foreach ($pending as $request) {
+                    if (is_array($request) && ($request['Generation'] ?? null) === $generation
+                        && ($request['PlayerID'] ?? null) === $playerId
+                        && ($request['Type'] ?? null) === 'GetPlayerSnapshot') {
+                        return ['Generation' => $generation, 'Send' => false];
+                    }
+                }
+                $pending[$messageId] = [
+                    'Generation' => $generation,
+                    'Type' => 'GetPlayerSnapshot',
+                    'PlayerID' => $playerId,
+                    'Started' => time()
+                ];
                 $this->writeJsonBuffer('PendingQueueRequests', $pending);
+                return ['Generation' => $generation, 'Send' => true];
+            });
+            if ($reservation === null) {
+                return false;
             }
-            $this->completeResyncStep($playerId, 'Player', false);
+            $generation = $reservation['Generation'];
+
+            if (!$reservation['Send']) {
+                return true;
+            }
+            $this->sendWebSocketCommand($messageId, 'players/get', ['player_id' => $playerId]);
+            return true;
+        } catch (Throwable $e) {
+            if ($messageId !== '') {
+                $this->tryRemovePendingRequest($messageId);
+            }
+            $this->SendDebug('Resync', 'Player-Snapshot konnte nicht gestartet werden: ' . $playerId, 0);
+            return false;
         }
     }
 
-    private function requestActiveQueue(string $playerId, bool $resync = false): void
+    private function requestActiveQueue(string $playerId, bool $resync = false): bool
     {
-        $players = $this->readJsonBuffer('RegisteredPlayers');
-        $generation = $this->GetBuffer('ConnectionGeneration');
-        if ($this->GetStatus() !== 102 || !isset($players[$playerId]) || $generation === '') {
-            return;
-        }
-
-        $pending = $this->readJsonBuffer('PendingQueueRequests');
-        foreach ($pending as $pendingMessageId => $request) {
-            if (is_array($request) && ($request['Generation'] ?? null) === $generation
-                && ($request['PlayerID'] ?? null) === $playerId
-                && in_array($request['Type'] ?? null, ['GetActiveQueue', 'GetActiveQueueResync'], true)) {
-                if ($resync && ($request['Type'] ?? null) === 'GetActiveQueue') {
-                    $pending[$pendingMessageId]['Type'] = 'GetActiveQueueResync';
-                    $this->writeJsonBuffer('PendingQueueRequests', $pending);
-                }
-                return;
-            }
-        }
-
         $messageId = '';
+        $generation = null;
         try {
             $messageId = 'queue-' . bin2hex(random_bytes(16));
-            $pending[$messageId] = [
-                'Generation' => $generation,
-                'Type' => $resync ? 'GetActiveQueueResync' : 'GetActiveQueue',
-                'PlayerID' => $playerId,
-                'Started' => time()
-            ];
-            $this->writeJsonBuffer('PendingQueueRequests', $pending);
+            $reservation = $this->withStateLock(function () use ($messageId, $playerId, $resync): ?array {
+                $players = $this->readJsonBuffer('RegisteredPlayers');
+                $generation = $this->GetBuffer('ConnectionGeneration');
+                if ($this->GetStatus() !== 102 || !isset($players[$playerId]) || $generation === '') {
+                    return null;
+                }
+
+                $pending = $this->readJsonBuffer('PendingQueueRequests');
+                foreach ($pending as $pendingMessageId => $request) {
+                    if (is_array($request) && ($request['Generation'] ?? null) === $generation
+                        && ($request['PlayerID'] ?? null) === $playerId
+                        && in_array($request['Type'] ?? null, ['GetActiveQueue', 'GetActiveQueueResync'], true)) {
+                        if ($resync && ($request['Type'] ?? null) === 'GetActiveQueue') {
+                            $pending[$pendingMessageId]['Type'] = 'GetActiveQueueResync';
+                            $this->writeJsonBuffer('PendingQueueRequests', $pending);
+                        }
+                        return ['Generation' => $generation, 'Send' => false];
+                    }
+                }
+
+                $pending[$messageId] = [
+                    'Generation' => $generation,
+                    'Type' => $resync ? 'GetActiveQueueResync' : 'GetActiveQueue',
+                    'PlayerID' => $playerId,
+                    'Started' => time()
+                ];
+                $this->writeJsonBuffer('PendingQueueRequests', $pending);
+                return ['Generation' => $generation, 'Send' => true];
+            });
+            if ($reservation === null) {
+                return false;
+            }
+            $generation = $reservation['Generation'];
+
+            if (!$reservation['Send']) {
+                return true;
+            }
             $this->sendWebSocketCommand(
                 $messageId,
                 'player_queues/get_active_queue',
                 ['player_id' => $playerId]
             );
             $this->SendDebug('Active Queue', 'Angefordert: ' . $playerId, 0);
+            return true;
         } catch (Throwable $e) {
             if ($messageId !== '') {
-                unset($pending[$messageId]);
+                $this->tryRemovePendingRequest($messageId);
             }
-            $this->writeJsonBuffer('PendingQueueRequests', $pending);
-            $this->removeQueueMapping($playerId);
+            if ($generation !== null) {
+                $this->tryRemoveQueueMapping($playerId, $generation);
+            }
             $this->SendDebug('Active Queue', 'Anfrage fehlgeschlagen: ' . $playerId, 0);
-            if ($resync) {
-                $this->completeResyncStep($playerId, 'Queue', false);
-            }
+            return false;
         }
     }
 
     private function handleQueueResponse(string $messageId, array $message): bool
     {
-        $pending = $this->readJsonBuffer('PendingQueueRequests');
-        $request = $pending[$messageId] ?? null;
+        $request = $this->withStateLock(function () use ($messageId, $message): ?array {
+            $pending = $this->readJsonBuffer('PendingQueueRequests');
+            $request = $pending[$messageId] ?? null;
+            if (!is_array($request)) {
+                return null;
+            }
+            unset($pending[$messageId]);
+            $this->writeJsonBuffer('PendingQueueRequests', $pending);
+            $request['CurrentGeneration'] = $this->GetBuffer('ConnectionGeneration');
+            $playerId = $request['PlayerID'] ?? null;
+            $type = $request['Type'] ?? null;
+            if (is_string($playerId)
+                && ($request['Generation'] ?? null) === $request['CurrentGeneration']
+                && $this->GetBuffer('ResyncGeneration') === $request['CurrentGeneration']) {
+                $result = $message['result'] ?? null;
+                $hasError = array_key_exists('error_code', $message) || array_key_exists('error', $message);
+                $step = null;
+                $success = false;
+                if ($type === 'GetPlayerSnapshot') {
+                    $step = 'Player';
+                    $success = !$hasError && is_array($result) && ($result['player_id'] ?? null) === $playerId;
+                } elseif ($type === 'GetActiveQueueResync') {
+                    $step = 'Queue';
+                    $success = !$hasError && $this->isValidPlayerQueue($result);
+                }
+                if ($step !== null) {
+                    $resyncPlayers = $this->readJsonBuffer('ResyncPlayers');
+                    if (is_array($resyncPlayers[$playerId] ?? null)
+                        && array_key_exists($step, $resyncPlayers[$playerId])) {
+                        $resyncPlayers[$playerId][$step] = $success;
+                        $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
+                        $request['ResyncState'] = $resyncPlayers[$playerId];
+                    }
+                }
+            }
+            return $request;
+        });
         if (!is_array($request)) {
             return false;
         }
-        unset($pending[$messageId]);
-        $this->writeJsonBuffer('PendingQueueRequests', $pending);
 
         $playerId = $request['PlayerID'] ?? null;
         $type = $request['Type'] ?? null;
         if (!is_string($playerId)
-            || ($request['Generation'] ?? null) !== $this->GetBuffer('ConnectionGeneration')) {
+            || ($request['Generation'] ?? null) !== ($request['CurrentGeneration'] ?? null)) {
             return true;
         }
 
@@ -709,7 +829,10 @@ class MusicAssistantConnection extends IPSModule
         if ($type === 'GetPlayerSnapshot') {
             if ($hasError || !is_array($result) || ($result['player_id'] ?? null) !== $playerId) {
                 $this->SendDebug('Resync', 'Ungültiger Player-Snapshot: ' . $playerId, 0);
-                $this->completeResyncStep($playerId, 'Player', false);
+                $this->logResyncStepResult($playerId, 'Player', false, $request['ResyncState'] ?? null);
+                return true;
+            }
+            if (!$this->isCurrentGeneration((string)$request['Generation'])) {
                 return true;
             }
             $this->SendDataToChildren(json_encode([
@@ -720,7 +843,7 @@ class MusicAssistantConnection extends IPSModule
                 'Source' => 'resync'
             ], JSON_THROW_ON_ERROR));
             $this->SendDebug('Resync', 'Player-Snapshot verarbeitet: ' . $playerId, 0);
-            $this->completeResyncStep($playerId, 'Player', true);
+            $this->logResyncStepResult($playerId, 'Player', true, $request['ResyncState'] ?? null);
             return true;
         }
 
@@ -729,17 +852,22 @@ class MusicAssistantConnection extends IPSModule
         }
         $isResync = $type === 'GetActiveQueueResync';
         if ($hasError || !$this->isValidPlayerQueue($result)) {
-            $this->removeQueueMapping($playerId);
+            $this->tryRemoveQueueMapping($playerId, (string)$request['Generation']);
             $this->SendDebug('Active Queue', 'Keine gültige Queue für: ' . $playerId, 0);
             if ($isResync) {
-                $this->completeResyncStep($playerId, 'Queue', false);
+                $this->logResyncStepResult($playerId, 'Queue', false, $request['ResyncState'] ?? null);
             }
             return true;
         }
 
         $queueId = trim($result['queue_id']);
-        $this->setQueueMapping($playerId, $queueId);
+        if (!$this->setQueueMapping($playerId, $queueId, (string)$request['Generation'])) {
+            return true;
+        }
         if ($isResync) {
+            if (!$this->isCurrentGeneration((string)$request['Generation'])) {
+                return true;
+            }
             $this->SendDebug('Resync', 'Active Queue: ' . $playerId . ' -> ' . $queueId, 0);
             $this->SendDataToChildren(json_encode([
                 'DataID' => self::CONNECTION_EVENT,
@@ -750,7 +878,7 @@ class MusicAssistantConnection extends IPSModule
                 'Source' => 'resync'
             ], JSON_THROW_ON_ERROR));
             $this->SendDebug('Resync', 'Queue-Snapshot verarbeitet: ' . $queueId, 0);
-            $this->completeResyncStep($playerId, 'Queue', true);
+            $this->logResyncStepResult($playerId, 'Queue', true, $request['ResyncState'] ?? null);
         }
         return true;
     }
@@ -773,31 +901,54 @@ class MusicAssistantConnection extends IPSModule
 
     private function prepareResyncGeneration(): void
     {
-        $generation = $this->GetBuffer('ConnectionGeneration');
-        if ($this->GetBuffer('ResyncGeneration') !== $generation) {
-            $this->SetBuffer('ResyncGeneration', $generation);
-            $this->SetBuffer('ResyncPlayers', '{}');
-        }
+        $this->withStateLock(function (): void {
+            $generation = $this->GetBuffer('ConnectionGeneration');
+            if ($this->GetBuffer('ResyncGeneration') !== $generation) {
+                $this->SetBuffer('ResyncGeneration', $generation);
+                $this->SetBuffer('ResyncPlayers', '{}');
+            }
+        });
     }
 
-    private function completeResyncStep(string $playerId, string $step, bool $success): void
+    private function completeResyncStep(
+        string $playerId,
+        string $step,
+        bool $success,
+        string $generation
+    ): void
     {
-        $resyncPlayers = $this->readJsonBuffer('ResyncPlayers');
-        if (!is_array($resyncPlayers[$playerId] ?? null)
-            || !array_key_exists($step, $resyncPlayers[$playerId])) {
+        $state = $this->withStateLock(function () use ($playerId, $step, $success, $generation): ?array {
+            if ($this->GetBuffer('ResyncGeneration') !== $generation
+                || $this->GetBuffer('ConnectionGeneration') !== $generation) {
+                return null;
+            }
+            $resyncPlayers = $this->readJsonBuffer('ResyncPlayers');
+            if (!is_array($resyncPlayers[$playerId] ?? null)
+                || !array_key_exists($step, $resyncPlayers[$playerId])) {
+                return null;
+            }
+            $resyncPlayers[$playerId][$step] = $success;
+            $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
+            return $resyncPlayers[$playerId];
+        });
+        if ($state === null) {
             return;
         }
-        $resyncPlayers[$playerId][$step] = $success;
-        $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
+        $this->logResyncStepResult($playerId, $step, $success, $state);
+    }
+
+    private function logResyncStepResult(string $playerId, string $step, bool $success, $state): void
+    {
+        if (!is_array($state)) {
+            return;
+        }
         if (!$success) {
             $this->SendDebug('Resync', $step . '-Schritt fehlgeschlagen: ' . $playerId, 0);
         }
-        if ($resyncPlayers[$playerId]['Player'] === null
-            || $resyncPlayers[$playerId]['Queue'] === null) {
+        if ($state['Player'] === null || $state['Queue'] === null) {
             return;
         }
-        if ($resyncPlayers[$playerId]['Player'] === true
-            && $resyncPlayers[$playerId]['Queue'] === true) {
+        if ($state['Player'] === true && $state['Queue'] === true) {
             $this->SendDebug('Resync', 'Abgeschlossen für Player: ' . $playerId, 0);
         } else {
             $this->SendDebug('Resync', 'Beendet mit Fehler für Player: ' . $playerId, 0);
@@ -814,30 +965,319 @@ class MusicAssistantConnection extends IPSModule
             && is_int($result['items'] ?? null);
     }
 
-    private function setQueueMapping(string $playerId, string $queueId): void
+    private function setQueueMapping(string $playerId, string $queueId, string $generation): bool
     {
-        $this->removeQueueMapping($playerId);
-        $playerQueues = $this->readJsonBuffer('PlayerQueues');
-        $queuePlayers = $this->readJsonBuffer('QueuePlayers');
-        $playerQueues[$playerId] = $queueId;
-        $queuePlayers[$queueId] = array_values(array_unique(array_merge(
-            is_array($queuePlayers[$queueId] ?? null) ? $queuePlayers[$queueId] : [],
-            [$playerId]
-        )));
-        $this->writeJsonBuffer('PlayerQueues', $playerQueues);
-        $this->writeJsonBuffer('QueuePlayers', $queuePlayers);
+        $result = $this->withStateLock(function () use ($playerId, $queueId, $generation): array {
+            $registeredPlayers = $this->readJsonBuffer('RegisteredPlayers');
+            if ($this->GetBuffer('ConnectionGeneration') !== $generation
+                || !isset($registeredPlayers[$playerId])) {
+                return ['updated' => false, 'removed' => false];
+            }
+            $playerQueues = $this->readJsonBuffer('PlayerQueues');
+            $queuePlayers = $this->readJsonBuffer('QueuePlayers');
+            $removed = $this->removeQueueMappingFromState($playerId, $playerQueues, $queuePlayers);
+            $playerQueues[$playerId] = $queueId;
+            $queuePlayers[$queueId] = array_values(array_unique(array_merge(
+                is_array($queuePlayers[$queueId] ?? null) ? $queuePlayers[$queueId] : [],
+                [$playerId]
+            )));
+            $this->writeJsonBuffer('PlayerQueues', $playerQueues);
+            $this->writeJsonBuffer('QueuePlayers', $queuePlayers);
+            return ['updated' => true, 'removed' => $removed];
+        });
+        if ($result['removed']) {
+            $this->SendDebug('Active Queue', 'Queue-Zuordnung entfernt: ' . $playerId, 0);
+        }
+        if (!$result['updated']) {
+            return false;
+        }
         $this->SendDebug('Active Queue', $playerId . ' -> ' . $queueId, 0);
+        return true;
     }
 
-    private function removeQueueMapping(string $playerId): void
+    private function removeQueueMapping(string $playerId, ?string $generation = null): void
     {
-        $playerQueues = $this->readJsonBuffer('PlayerQueues');
+        $removed = $this->withStateLock(function () use ($playerId, $generation): bool {
+            if ($generation !== null && $this->GetBuffer('ConnectionGeneration') !== $generation) {
+                return false;
+            }
+            $playerQueues = $this->readJsonBuffer('PlayerQueues');
+            $queuePlayers = $this->readJsonBuffer('QueuePlayers');
+            $removed = $this->removeQueueMappingFromState($playerId, $playerQueues, $queuePlayers);
+            if ($removed) {
+                $this->writeJsonBuffer('PlayerQueues', $playerQueues);
+                $this->writeJsonBuffer('QueuePlayers', $queuePlayers);
+            }
+            return $removed;
+        });
+        if ($removed) {
+            $this->SendDebug('Active Queue', 'Queue-Zuordnung entfernt: ' . $playerId, 0);
+        }
+    }
+
+    private function unregisterPlayer(string $playerId): void
+    {
+        $removedMapping = $this->withStateLock(function () use ($playerId): bool {
+            $players = $this->readJsonBuffer('RegisteredPlayers');
+            unset($players[$playerId]);
+            $this->writeJsonBuffer('RegisteredPlayers', $players);
+
+            $pending = $this->readJsonBuffer('PendingQueueRequests');
+            foreach ($pending as $messageId => $request) {
+                if (is_array($request) && ($request['PlayerID'] ?? null) === $playerId) {
+                    unset($pending[$messageId]);
+                }
+            }
+            $this->writeJsonBuffer('PendingQueueRequests', $pending);
+
+            $hints = $this->readJsonBuffer('QueueHints');
+            unset($hints[$playerId]);
+            $this->writeJsonBuffer('QueueHints', $hints);
+            $resyncPlayers = $this->readJsonBuffer('ResyncPlayers');
+            unset($resyncPlayers[$playerId]);
+            $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
+
+            $playerQueues = $this->readJsonBuffer('PlayerQueues');
+            $queuePlayers = $this->readJsonBuffer('QueuePlayers');
+            $removedMapping = $this->removeQueueMappingFromState($playerId, $playerQueues, $queuePlayers);
+            if ($removedMapping) {
+                $this->writeJsonBuffer('PlayerQueues', $playerQueues);
+                $this->writeJsonBuffer('QueuePlayers', $queuePlayers);
+            }
+            return $removedMapping;
+        });
+        if ($removedMapping) {
+            $this->SendDebug('Active Queue', 'Queue-Zuordnung entfernt: ' . $playerId, 0);
+        }
+        $this->SendDebug('Registration', 'Player abgemeldet: ' . $playerId, 0);
+    }
+
+    private function expireQueueRequests(): void
+    {
+        $expired = $this->withStateLock(function (): array {
+            $pending = $this->readJsonBuffer('PendingQueueRequests');
+            $playerQueues = $this->readJsonBuffer('PlayerQueues');
+            $queuePlayers = $this->readJsonBuffer('QueuePlayers');
+            $expired = [];
+            $mappingChanged = false;
+            foreach ($pending as $messageId => $request) {
+                if (!is_array($request) || (int)($request['Started'] ?? 0) <= time() - 15) {
+                    $expired[] = $request;
+                    unset($pending[$messageId]);
+                    if (is_array($request)
+                        && is_string($request['PlayerID'] ?? null)
+                        && ($request['Type'] ?? null) !== 'GetPlayerSnapshot'
+                        && ($request['Generation'] ?? null) === $this->GetBuffer('ConnectionGeneration')) {
+                        $mappingChanged = $this->removeQueueMappingFromState(
+                            $request['PlayerID'],
+                            $playerQueues,
+                            $queuePlayers
+                        ) || $mappingChanged;
+                    }
+                }
+            }
+            if (count($expired) > 0) {
+                $this->writeJsonBuffer('PendingQueueRequests', $pending);
+            }
+            if ($mappingChanged) {
+                $this->writeJsonBuffer('PlayerQueues', $playerQueues);
+                $this->writeJsonBuffer('QueuePlayers', $queuePlayers);
+            }
+            return $expired;
+        });
+
+        foreach ($expired as $request) {
+            if (!is_array($request) || !is_string($request['PlayerID'] ?? null)) {
+                continue;
+            }
+            $playerId = $request['PlayerID'];
+            $type = $request['Type'] ?? null;
+            if ($type === 'GetPlayerSnapshot') {
+                $this->SendDebug('Resync', 'Player-Snapshot Zeitüberschreitung: ' . $playerId, 0);
+                $this->tryCompleteResyncStep(
+                    $playerId,
+                    'Player',
+                    false,
+                    (string)($request['Generation'] ?? '')
+                );
+            } else {
+                $this->SendDebug('Active Queue', 'Zeitüberschreitung: ' . $playerId, 0);
+                if ($type === 'GetActiveQueueResync') {
+                    $this->tryCompleteResyncStep(
+                        $playerId,
+                        'Queue',
+                        false,
+                        (string)($request['Generation'] ?? '')
+                    );
+                }
+            }
+        }
+    }
+
+    private function queueRelevantPlayerDataChanged(string $playerId, array $data): bool
+    {
+        return $this->withStateLock(function () use ($playerId, $data): bool {
+            $registeredPlayers = $this->readJsonBuffer('RegisteredPlayers');
+            if (!isset($registeredPlayers[$playerId])) {
+                return false;
+            }
+            $allHints = $this->readJsonBuffer('QueueHints');
+            $playerHints = is_array($allHints[$playerId] ?? null) ? $allHints[$playerId] : [];
+            $changed = false;
+            foreach (['synced_to', 'active_group', 'active_source', 'group_members'] as $field) {
+                if (array_key_exists($field, $data)) {
+                    if (!array_key_exists($field, $playerHints) || $playerHints[$field] !== $data[$field]) {
+                        $changed = true;
+                    }
+                    $playerHints[$field] = $data[$field];
+                }
+            }
+            $allHints[$playerId] = $playerHints;
+            $this->writeJsonBuffer('QueueHints', $allHints);
+            return $changed;
+        });
+    }
+
+    private function invalidateQueueState(): void
+    {
+        $this->withStateLock(function (): void {
+            $this->invalidateQueueStateFromState();
+        });
+    }
+
+    private function invalidateQueueStateFromState(): void
+    {
+        $this->SetBuffer('RegisteredPlayers', '{}');
+        $this->SetBuffer('PendingQueueRequests', '{}');
+        $this->SetBuffer('PlayerQueues', '{}');
+        $this->SetBuffer('QueuePlayers', '{}');
+        $this->SetBuffer('QueueHints', '{}');
+    }
+
+    private function releaseResyncReservation(string $playerId, string $generation): void
+    {
+        try {
+            $this->withStateLock(function () use ($playerId, $generation): void {
+                if ($this->GetBuffer('ConnectionGeneration') !== $generation
+                    || $this->GetBuffer('ResyncGeneration') !== $generation) {
+                    return;
+                }
+                $resyncPlayers = $this->readJsonBuffer('ResyncPlayers');
+                if (!is_array($resyncPlayers[$playerId] ?? null)) {
+                    return;
+                }
+                $resyncPlayers[$playerId]['Starting'] = max(
+                    0,
+                    (int)($resyncPlayers[$playerId]['Starting'] ?? 1) - 1
+                );
+                $pending = $this->readJsonBuffer('PendingQueueRequests');
+                $hasPendingRequest = false;
+                foreach ($pending as $request) {
+                    if (is_array($request)
+                        && ($request['Generation'] ?? null) === $generation
+                        && ($request['PlayerID'] ?? null) === $playerId) {
+                        $hasPendingRequest = true;
+                        break;
+                    }
+                }
+                if ($resyncPlayers[$playerId]['Starting'] === 0
+                    && !$hasPendingRequest
+                    && ($resyncPlayers[$playerId]['Player'] ?? null) === null
+                    && ($resyncPlayers[$playerId]['Queue'] ?? null) === null) {
+                    unset($resyncPlayers[$playerId]);
+                }
+                $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
+            });
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                $this->LogMessage('Resync-Reservierung: ' . $e->getMessage(), KL_ERROR);
+                throw $e;
+            }
+            $this->SendDebug('Resync', 'Resync-Reservierung konnte nicht freigegeben werden: ' . $playerId, 0);
+        }
+    }
+
+    private function tryRemovePendingRequest(string $messageId): void
+    {
+        try {
+            $this->removePendingRequest($messageId);
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                $this->LogMessage('Pending-Request-Bereinigung: ' . $e->getMessage(), KL_ERROR);
+                throw $e;
+            }
+            $this->SendDebug('State', 'Pending Request konnte nicht bereinigt werden', 0);
+        }
+    }
+
+    private function tryRemoveQueueMapping(string $playerId, string $generation): void
+    {
+        try {
+            $this->removeQueueMapping($playerId, $generation);
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                $this->LogMessage('Queue-Mapping-Bereinigung: ' . $e->getMessage(), KL_ERROR);
+                throw $e;
+            }
+            $this->SendDebug('State', 'Queue-Zuordnung konnte nicht bereinigt werden: ' . $playerId, 0);
+        }
+    }
+
+    private function tryCompleteResyncStep(
+        string $playerId,
+        string $step,
+        bool $success,
+        string $generation
+    ): void
+    {
+        try {
+            $this->completeResyncStep($playerId, $step, $success, $generation);
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                $this->LogMessage('Resync-Status: ' . $e->getMessage(), KL_ERROR);
+                throw $e;
+            }
+            $this->SendDebug('Resync', $step . '-Schritt konnte nicht gespeichert werden: ' . $playerId, 0);
+        }
+    }
+
+    private function isCurrentGeneration(string $generation): bool
+    {
+        try {
+            return $this->withStateLock(function () use ($generation): bool {
+                return $this->GetBuffer('ConnectionGeneration') === $generation;
+            });
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                $this->LogMessage('Generationsprüfung: ' . $e->getMessage(), KL_ERROR);
+                throw $e;
+            }
+            $this->SendDebug('State', 'Generation konnte vor Weiterleitung nicht geprüft werden', 0);
+            return false;
+        }
+    }
+
+    private function removePendingRequest(string $messageId): void
+    {
+        $this->withStateLock(function () use ($messageId): void {
+            $pending = $this->readJsonBuffer('PendingQueueRequests');
+            if (isset($pending[$messageId])) {
+                unset($pending[$messageId]);
+                $this->writeJsonBuffer('PendingQueueRequests', $pending);
+            }
+        });
+    }
+
+    private function removeQueueMappingFromState(
+        string $playerId,
+        array &$playerQueues,
+        array &$queuePlayers
+    ): bool {
         $oldQueueId = $playerQueues[$playerId] ?? null;
         if (!is_string($oldQueueId)) {
-            return;
+            return false;
         }
         unset($playerQueues[$playerId]);
-        $queuePlayers = $this->readJsonBuffer('QueuePlayers');
         if (is_array($queuePlayers[$oldQueueId] ?? null)) {
             $queuePlayers[$oldQueueId] = array_values(array_filter(
                 $queuePlayers[$oldQueueId],
@@ -847,89 +1287,33 @@ class MusicAssistantConnection extends IPSModule
                 unset($queuePlayers[$oldQueueId]);
             }
         }
-        $this->writeJsonBuffer('PlayerQueues', $playerQueues);
-        $this->writeJsonBuffer('QueuePlayers', $queuePlayers);
-        $this->SendDebug('Active Queue', 'Queue-Zuordnung entfernt: ' . $playerId, 0);
+        return true;
     }
 
-    private function unregisterPlayer(string $playerId): void
+    private function stateSemaphoreName(): string
     {
-        $players = $this->readJsonBuffer('RegisteredPlayers');
-        unset($players[$playerId]);
-        $this->writeJsonBuffer('RegisteredPlayers', $players);
-
-        $pending = $this->readJsonBuffer('PendingQueueRequests');
-        foreach ($pending as $messageId => $request) {
-            if (is_array($request) && ($request['PlayerID'] ?? null) === $playerId) {
-                unset($pending[$messageId]);
-            }
-        }
-        $this->writeJsonBuffer('PendingQueueRequests', $pending);
-
-        $hints = $this->readJsonBuffer('QueueHints');
-        unset($hints[$playerId]);
-        $this->writeJsonBuffer('QueueHints', $hints);
-        $resyncPlayers = $this->readJsonBuffer('ResyncPlayers');
-        unset($resyncPlayers[$playerId]);
-        $this->writeJsonBuffer('ResyncPlayers', $resyncPlayers);
-        $this->removeQueueMapping($playerId);
-        $this->SendDebug('Registration', 'Player abgemeldet: ' . $playerId, 0);
+        return 'MA_STATE_' . (string)$this->InstanceID;
     }
 
-    private function expireQueueRequests(): void
+    private function isStateSemaphoreTimeout(Throwable $error): bool
     {
-        $pending = $this->readJsonBuffer('PendingQueueRequests');
-        $changed = false;
-        foreach ($pending as $messageId => $request) {
-            if (!is_array($request) || (int)($request['Started'] ?? 0) <= time() - 15) {
-                if (is_array($request) && is_string($request['PlayerID'] ?? null)) {
-                    $playerId = $request['PlayerID'];
-                    $type = $request['Type'] ?? null;
-                    if ($type === 'GetPlayerSnapshot') {
-                        $this->SendDebug('Resync', 'Player-Snapshot Zeitüberschreitung: ' . $playerId, 0);
-                        $this->completeResyncStep($playerId, 'Player', false);
-                    } else {
-                        $this->removeQueueMapping($playerId);
-                        $this->SendDebug('Active Queue', 'Zeitüberschreitung: ' . $playerId, 0);
-                        if ($type === 'GetActiveQueueResync') {
-                            $this->completeResyncStep($playerId, 'Queue', false);
-                        }
-                    }
-                }
-                unset($pending[$messageId]);
-                $changed = true;
-            }
-        }
-        if ($changed) {
-            $this->writeJsonBuffer('PendingQueueRequests', $pending);
-        }
+        return $error instanceof RuntimeException && $error->getCode() === self::STATE_SEMAPHORE_ERROR;
     }
 
-    private function queueRelevantPlayerDataChanged(string $playerId, array $data): bool
+    private function withStateLock(callable $operation)
     {
-        $allHints = $this->readJsonBuffer('QueueHints');
-        $playerHints = is_array($allHints[$playerId] ?? null) ? $allHints[$playerId] : [];
-        $changed = false;
-        foreach (['synced_to', 'active_group', 'active_source', 'group_members'] as $field) {
-            if (array_key_exists($field, $data)) {
-                if (!array_key_exists($field, $playerHints) || $playerHints[$field] !== $data[$field]) {
-                    $changed = true;
-                }
-                $playerHints[$field] = $data[$field];
-            }
+        if (!IPS_SemaphoreEnter($this->stateSemaphoreName(), self::STATE_SEMAPHORE_TIMEOUT)) {
+            $this->SendDebug('State', 'Semaphore konnte nicht innerhalb des Zeitlimits erworben werden', 0);
+            throw new RuntimeException(
+                'Connection-State ist vorübergehend gesperrt.',
+                self::STATE_SEMAPHORE_ERROR
+            );
         }
-        $allHints[$playerId] = $playerHints;
-        $this->writeJsonBuffer('QueueHints', $allHints);
-        return $changed;
-    }
-
-    private function invalidateQueueState(): void
-    {
-        $this->SetBuffer('RegisteredPlayers', '{}');
-        $this->SetBuffer('PendingQueueRequests', '{}');
-        $this->SetBuffer('PlayerQueues', '{}');
-        $this->SetBuffer('QueuePlayers', '{}');
-        $this->SetBuffer('QueueHints', '{}');
+        try {
+            return $operation();
+        } finally {
+            IPS_SemaphoreLeave($this->stateSemaphoreName());
+        }
     }
 
     private function readJsonBuffer(string $name): array
