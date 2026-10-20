@@ -170,11 +170,10 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 try {
                     if ($isIdle) {
-                        $this->updateCoverVisibilityFromQueueState($data['state']);
-                    }
-                    if ($hasCurrentItem) {
+                        $this->clearCover();
+                    } elseif ($hasCurrentItem) {
                         $this->updateCoverFromQueueItem($data['current_item'], $data['state'] ?? null);
-                    } elseif (array_key_exists('state', $data) && !$isIdle) {
+                    } elseif (array_key_exists('state', $data)) {
                         $this->updateCoverVisibilityFromQueueState($data['state']);
                     }
                 } catch (Throwable $e) {
