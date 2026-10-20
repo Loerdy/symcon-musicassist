@@ -43,16 +43,12 @@ class MusicAssistantPlayer extends IPSModule
         $this->registerWithParent();
 
         // Auswahl-Variablen
-        $this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10);
-        $this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20);
-
-        // Icons direkt an den Variablen
-        $vidPlaylist = @$this->GetIDForIdent('Playlist');
-        if ($vidPlaylist > 0) {
+        if ($this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10)) {
+            $vidPlaylist = @$this->GetIDForIdent('Playlist');
             IPS_SetIcon($vidPlaylist, 'list-music');
         }
-        $vidRadio = @$this->GetIDForIdent('Radio');
-        if ($vidRadio > 0) {
+        if ($this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20)) {
+            $vidRadio = @$this->GetIDForIdent('Radio');
             IPS_SetIcon($vidRadio, 'radio');
         }
 
@@ -92,9 +88,18 @@ class MusicAssistantPlayer extends IPSModule
         // Now Playing
         $this->MaintainVariable('NowTitle',  'Titel',     VARIABLETYPE_STRING, '~Song',   110, true);
         $this->MaintainVariable('NowArtist', 'Interpret', VARIABLETYPE_STRING, '~Artist', 120, true);
+        $albumId = @$this->GetIDForIdent('NowAlbum');
+        $hadAlbumVariable = $albumId > 0
+            && IPS_VariableExists($albumId)
+            && (IPS_GetVariable($albumId)['VariableType'] ?? -1) === VARIABLETYPE_STRING;
         $this->MaintainVariable('NowAlbum',  'Album',     VARIABLETYPE_STRING, '',        130, true);
         $vidAlbum = @$this->GetIDForIdent('NowAlbum');
-        if ($vidAlbum > 0) {
+        $albumCreated = !$hadAlbumVariable
+            && $vidAlbum > 0
+            && IPS_VariableExists($vidAlbum)
+            && (IPS_GetVariable($vidAlbum)['VariableType'] ?? -1) === VARIABLETYPE_STRING
+            && ($albumId <= 0 || $vidAlbum !== $albumId);
+        if ($albumCreated) {
             IPS_SetIcon($vidAlbum, 'album');
         }
         $this->ensureCoverMedia();
@@ -965,33 +970,36 @@ class MusicAssistantPlayer extends IPSModule
         return $result;
     }
 
-    private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): void
+    private function ensureIntegerSelectorVariable(string $ident, string $name, string $profile, int $pos): bool
     {
         $existingId = @$this->GetIDForIdent($ident);
+        $hadIntegerVariable = false;
         if ($existingId > 0) {
             $v = IPS_GetVariable($existingId);
-            if (($v['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            $hadIntegerVariable = ($v['VariableType'] ?? -1) === VARIABLETYPE_INTEGER;
+            if (!$hadIntegerVariable) {
                 IPS_DeleteVariable($existingId);
             }
         }
 
-        $this->MaintainVariable($ident, $name, VARIABLETYPE_INTEGER, '', $pos, true);
-        $this->EnableAction($ident);
-
-        $vid = @$this->GetIDForIdent($ident);
-        if ($vid <= 0) {
-            return;
-        }
-
         $profile = trim($profile);
+        $validProfile = '';
         if ($profile !== '' && IPS_VariableProfileExists($profile)) {
             $pp = IPS_GetVariableProfile($profile);
             if (($pp['ProfileType'] ?? -1) === VARIABLETYPE_INTEGER) {
-                IPS_SetVariableCustomProfile($vid, $profile);
-                return;
+                $validProfile = $profile;
             }
         }
-        IPS_SetVariableCustomProfile($vid, '');
+
+        $this->MaintainVariable($ident, $name, VARIABLETYPE_INTEGER, $validProfile, $pos, true);
+        $this->EnableAction($ident);
+
+        $variableId = @$this->GetIDForIdent($ident);
+        return !$hadIntegerVariable
+            && $variableId > 0
+            && IPS_VariableExists($variableId)
+            && (IPS_GetVariable($variableId)['VariableType'] ?? -1) === VARIABLETYPE_INTEGER
+            && ($existingId <= 0 || $variableId !== $existingId);
     }
 
     private function resolveUriFromMap(int $itemId, string $mapProperty, string $refreshCommand): string
