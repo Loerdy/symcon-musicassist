@@ -197,7 +197,7 @@ class MusicAssistantConnection extends IPSModule
                 ], JSON_THROW_ON_ERROR));
                 $this->SendDebug('player_updated', 'Weitergeleitet für ObjectID=' . $objectId, 0);
                 if ($this->queueRelevantPlayerDataChanged($objectId, $data)) {
-                    $this->requestActiveQueue($objectId, false, 'player_updated');
+                    $this->requestActiveQueue($objectId);
                 }
             }
             return '';
@@ -207,24 +207,11 @@ class MusicAssistantConnection extends IPSModule
             $queueId = $message['object_id'] ?? null;
             $data = $message['data'] ?? null;
             if ($this->GetStatus() === 102 && is_string($queueId) && $queueId !== '' && is_array($data)) {
-                $queueState = $this->withStateLock(function (): array {
-                    return [
-                        'Generation' => $this->GetBuffer('ConnectionGeneration'),
-                        'TraceSequence' => $this->nextQueueTraceSequenceFromState(),
-                        'QueuePlayers' => $this->readJsonBuffer('QueuePlayers')
-                    ];
+                $this->SendDebug('queue_updated', 'Empfangen für QueueID=' . $queueId, 0);
+                $queuePlayers = $this->withStateLock(function (): array {
+                    return $this->readJsonBuffer('QueuePlayers');
                 });
-                $queuePlayers = $queueState['QueuePlayers'];
                 $playerIds = $queuePlayers[$queueId] ?? [];
-                $tracePlayerIds = is_array($playerIds)
-                    ? array_values(array_filter($playerIds, 'is_string'))
-                    : [];
-                $trace = 'seq=' . $queueState['TraceSequence']
-                    . ' source=live phase=receive generation=' . $this->traceText($queueState['Generation'])
-                    . ' queue=' . $this->traceText($queueId)
-                    . ' players=' . $this->tracePlayerIds($tracePlayerIds)
-                    . $this->queueTraceDetails($data);
-                $this->SendDebug('QueueTrace', $trace, 0);
                 if (is_array($playerIds) && count($playerIds) > 0) {
                     $playerIds = array_values(array_filter($playerIds, 'is_string'));
                     $this->SendDataToChildren(json_encode([
@@ -232,11 +219,9 @@ class MusicAssistantConnection extends IPSModule
                         'Event' => 'queue_updated',
                         'ObjectID' => $queueId,
                         'PlayerIDs' => $playerIds,
-                        'TraceSequence' => $queueState['TraceSequence'],
-                        'ConnectionGeneration' => $queueState['Generation'],
                         'Data' => $data
                     ], JSON_THROW_ON_ERROR));
-                    $this->SendDebug('QueueTrace', str_replace('phase=receive', 'phase=forward', $trace), 0);
+                    $this->SendDebug('queue_updated', 'Weitergeleitet an ' . count($playerIds) . ' Player', 0);
                 }
             }
             return '';
@@ -308,7 +293,7 @@ class MusicAssistantConnection extends IPSModule
             $this->SendDebug('Registration', 'Player registriert: ' . $playerId, 0);
         }
         if ($this->GetStatus() === 102) {
-            $this->startPlayerResync($playerId, $isNew ? 'registration' : 'registration_refresh');
+            $this->startPlayerResync($playerId);
         }
         return json_encode(['success' => true]);
     }
@@ -646,7 +631,7 @@ class MusicAssistantConnection extends IPSModule
         });
         foreach (array_keys($registeredPlayers) as $playerId) {
             if (is_string($playerId) && $playerId !== '') {
-                $this->startPlayerResync($playerId, 'connection_authenticated');
+                $this->startPlayerResync($playerId);
             }
         }
     }
@@ -679,7 +664,7 @@ class MusicAssistantConnection extends IPSModule
         }
     }
 
-    private function startPlayerResync(string $playerId, string $reason): void
+    private function startPlayerResync(string $playerId): void
     {
         try {
             $reservation = $this->withStateLock(function () use ($playerId): ?array {
@@ -723,7 +708,7 @@ class MusicAssistantConnection extends IPSModule
                 $this->requestPlayerSnapshot($playerId);
             }
             if ($reservation['StartQueue']) {
-                $this->requestActiveQueue($playerId, true, $reason);
+                $this->requestActiveQueue($playerId, true);
             }
         } finally {
             $this->releaseResyncReservation($playerId, $generation);
@@ -780,13 +765,13 @@ class MusicAssistantConnection extends IPSModule
         }
     }
 
-    private function requestActiveQueue(string $playerId, bool $resync = false, string $traceReason = 'unspecified'): bool
+    private function requestActiveQueue(string $playerId, bool $resync = false): bool
     {
         $messageId = '';
         $generation = null;
         try {
             $messageId = 'queue-' . bin2hex(random_bytes(16));
-            $reservation = $this->withStateLock(function () use ($messageId, $playerId, $resync, $traceReason): ?array {
+            $reservation = $this->withStateLock(function () use ($messageId, $playerId, $resync): ?array {
                 $players = $this->readJsonBuffer('RegisteredPlayers');
                 $generation = $this->GetBuffer('ConnectionGeneration');
                 if ($this->GetStatus() !== 102 || !isset($players[$playerId]) || $generation === '') {
@@ -800,17 +785,9 @@ class MusicAssistantConnection extends IPSModule
                         && in_array($request['Type'] ?? null, ['GetActiveQueue', 'GetActiveQueueResync'], true)) {
                         if ($resync && ($request['Type'] ?? null) === 'GetActiveQueue') {
                             $pending[$pendingMessageId]['Type'] = 'GetActiveQueueResync';
-                            $pending[$pendingMessageId]['TraceReason'] = $traceReason;
                             $this->writeJsonBuffer('PendingQueueRequests', $pending);
-                            $request = $pending[$pendingMessageId];
                         }
-                        return [
-                            'Generation' => $generation,
-                            'Send' => false,
-                            'MessageID' => $pendingMessageId,
-                            'StartedAt' => $request['TraceStartedAt'] ?? $request['Started'] ?? null,
-                            'Reason' => $request['TraceReason'] ?? $traceReason
-                        ];
+                        return ['Generation' => $generation, 'Send' => false];
                     }
                 }
 
@@ -818,36 +795,15 @@ class MusicAssistantConnection extends IPSModule
                     'Generation' => $generation,
                     'Type' => $resync ? 'GetActiveQueueResync' : 'GetActiveQueue',
                     'PlayerID' => $playerId,
-                    'Started' => time(),
-                    'TraceStartedAt' => microtime(true),
-                    'TraceReason' => $traceReason
+                    'Started' => time()
                 ];
                 $this->writeJsonBuffer('PendingQueueRequests', $pending);
-                return [
-                    'Generation' => $generation,
-                    'Send' => true,
-                    'MessageID' => $messageId,
-                    'StartedAt' => $pending[$messageId]['TraceStartedAt'],
-                    'Reason' => $traceReason
-                ];
+                return ['Generation' => $generation, 'Send' => true];
             });
             if ($reservation === null) {
                 return false;
             }
             $generation = $reservation['Generation'];
-
-            if ($resync) {
-                $this->SendDebug(
-                    'ResyncTrace',
-                    'phase=' . ($reservation['Send'] ? 'request' : 'request_reused')
-                        . ' request=' . $this->shortRequestId($reservation['MessageID'] ?? null)
-                        . ' requestedAt=' . $this->traceTimestamp($reservation['StartedAt'] ?? null)
-                        . ' reason=' . $this->traceText($reservation['Reason'] ?? null)
-                        . ' player=' . $this->traceText($playerId)
-                        . ' generation=' . $this->traceText($generation),
-                    0
-                );
-            }
 
             if (!$reservation['Send']) {
                 return true;
@@ -882,7 +838,6 @@ class MusicAssistantConnection extends IPSModule
             unset($pending[$messageId]);
             $this->writeJsonBuffer('PendingQueueRequests', $pending);
             $request['CurrentGeneration'] = $this->GetBuffer('ConnectionGeneration');
-            $request['TraceResponseAt'] = microtime(true);
             $playerId = $request['PlayerID'] ?? null;
             $type = $request['Type'] ?? null;
             if (is_string($playerId)
@@ -908,9 +863,6 @@ class MusicAssistantConnection extends IPSModule
                         $request['ResyncState'] = $resyncPlayers[$playerId];
                     }
                 }
-                if ($type === 'GetActiveQueueResync' && $success) {
-                    $request['TraceSequence'] = $this->nextQueueTraceSequenceFromState();
-                }
             }
             return $request;
         });
@@ -922,39 +874,11 @@ class MusicAssistantConnection extends IPSModule
         $type = $request['Type'] ?? null;
         if (!is_string($playerId)
             || ($request['Generation'] ?? null) !== ($request['CurrentGeneration'] ?? null)) {
-            if ($type === 'GetActiveQueueResync') {
-                $this->SendDebug(
-                    'ResyncTrace',
-                    'phase=response_discarded status=discarded request=' . $this->shortRequestId($messageId)
-                        . ' requestedAt=' . $this->traceTimestamp($request['TraceStartedAt'] ?? $request['Started'] ?? null)
-                        . ' respondedAt=' . $this->traceTimestamp($request['TraceResponseAt'] ?? null)
-                        . ' player=' . $this->traceText($playerId)
-                        . ' requestGeneration=' . $this->traceText($request['Generation'] ?? null)
-                        . ' currentGeneration=' . $this->traceText($request['CurrentGeneration'] ?? null)
-                        . ' discardReason=' . (!is_string($playerId) ? 'invalid_player_id' : 'stale_generation'),
-                    0
-                );
-            }
             return true;
         }
 
         $result = $message['result'] ?? null;
         $hasError = array_key_exists('error_code', $message) || array_key_exists('error', $message);
-        if ($type === 'GetActiveQueueResync') {
-            $this->SendDebug(
-                'ResyncTrace',
-                'phase=response_validated status='
-                    . (!$hasError && $this->isValidPlayerQueue($result) ? 'valid_queue_response' : 'invalid_queue_response')
-                    . ' forwarded=false request=' . $this->shortRequestId($messageId)
-                    . ' requestedAt=' . $this->traceTimestamp($request['TraceStartedAt'] ?? $request['Started'] ?? null)
-                    . ' respondedAt=' . $this->traceTimestamp($request['TraceResponseAt'] ?? null)
-                    . ' reason=' . $this->traceText($request['TraceReason'] ?? null)
-                    . ' player=' . $this->traceText($playerId)
-                    . ' requestGeneration=' . $this->traceText($request['Generation'] ?? null)
-                    . ' currentGeneration=' . $this->traceText($request['CurrentGeneration'] ?? null),
-                0
-            );
-        }
         if ($type === 'GetPlayerSnapshot') {
             if ($hasError || !is_array($result) || ($result['player_id'] ?? null) !== $playerId) {
                 $this->SendDebug('Resync', 'Ungültiger Player-Snapshot: ' . $playerId, 0);
@@ -991,34 +915,10 @@ class MusicAssistantConnection extends IPSModule
 
         $queueId = trim($result['queue_id']);
         if (!$this->setQueueMapping($playerId, $queueId, (string)$request['Generation'])) {
-            if ($isResync) {
-                $this->SendDebug(
-                    'ResyncTrace',
-                    'phase=response_discarded status=discarded request=' . $this->shortRequestId($messageId)
-                        . ' requestedAt=' . $this->traceTimestamp($request['TraceStartedAt'] ?? $request['Started'] ?? null)
-                        . ' respondedAt=' . $this->traceTimestamp($request['TraceResponseAt'] ?? null)
-                        . ' player=' . $this->traceText($playerId)
-                        . ' requestGeneration=' . $this->traceText($request['Generation'] ?? null)
-                        . ' currentGeneration=' . $this->traceText($this->GetBuffer('ConnectionGeneration'))
-                        . ' discardReason=queue_mapping_rejected',
-                    0
-                );
-            }
             return true;
         }
         if ($isResync) {
             if (!$this->isCurrentGeneration((string)$request['Generation'])) {
-                $this->SendDebug(
-                    'ResyncTrace',
-                    'phase=response_discarded status=discarded request=' . $this->shortRequestId($messageId)
-                        . ' requestedAt=' . $this->traceTimestamp($request['TraceStartedAt'] ?? $request['Started'] ?? null)
-                        . ' respondedAt=' . $this->traceTimestamp($request['TraceResponseAt'] ?? null)
-                        . ' player=' . $this->traceText($playerId)
-                        . ' requestGeneration=' . $this->traceText($request['Generation'] ?? null)
-                        . ' currentGeneration=' . $this->traceText($this->GetBuffer('ConnectionGeneration'))
-                        . ' discardReason=generation_changed_before_forward',
-                    0
-                );
                 return true;
             }
             $this->SendDebug('Resync', 'Active Queue: ' . $playerId . ' -> ' . $queueId, 0);
@@ -1027,105 +927,13 @@ class MusicAssistantConnection extends IPSModule
                 'Event' => 'queue_updated',
                 'ObjectID' => $queueId,
                 'PlayerIDs' => [$playerId],
-                'TraceSequence' => $request['TraceSequence'] ?? null,
-                'ConnectionGeneration' => $request['Generation'],
                 'Data' => $result,
                 'Source' => 'resync'
             ], JSON_THROW_ON_ERROR));
-            $this->SendDebug(
-                'QueueTrace',
-                'seq=' . $this->traceValue($request['TraceSequence'] ?? null)
-                    . ' source=resync phase=forward generation=' . $this->traceText($request['Generation'])
-                    . ' queue=' . $this->traceText($queueId)
-                    . ' players=' . $this->tracePlayerIds([$playerId])
-                    . $this->queueTraceDetails($result),
-                0
-            );
-            $this->SendDebug(
-                'ResyncTrace',
-                'phase=event_forwarded status=forwarded request=' . $this->shortRequestId($messageId)
-                    . ' seq=' . $this->traceValue($request['TraceSequence'] ?? null)
-                    . ' player=' . $this->traceText($playerId)
-                    . ' queue=' . $this->traceText($queueId)
-                    . ' generation=' . $this->traceText($request['Generation'] ?? null),
-                0
-            );
             $this->SendDebug('Resync', 'Queue-Snapshot verarbeitet: ' . $queueId, 0);
             $this->logResyncStepResult($playerId, 'Queue', true, $request['ResyncState'] ?? null);
         }
         return true;
-    }
-
-    private function queueTraceDetails(array $data): string
-    {
-        $currentItem = is_array($data['current_item'] ?? null) ? $data['current_item'] : [];
-        $image = is_array($currentItem['image'] ?? null) ? $currentItem['image'] : [];
-        $mediaItem = is_array($currentItem['media_item'] ?? null) ? $currentItem['media_item'] : [];
-        $artists = is_array($mediaItem['artists'] ?? null) ? $mediaItem['artists'] : [];
-        $firstArtist = $artists[0] ?? null;
-        $artistName = is_array($firstArtist) ? ($firstArtist['name'] ?? null) : $firstArtist;
-        $proxyId = is_string($image['proxy_id'] ?? null) ? trim($image['proxy_id']) : '';
-        $shortProxyId = $proxyId === '' ? '(none)' : substr($proxyId, 0, 12) . '...';
-
-        return ' itemQueue=' . $this->traceText($currentItem['queue_id'] ?? null)
-            . ' item=' . $this->traceText($currentItem['queue_item_id'] ?? null)
-            . ' name=' . $this->traceText($currentItem['name'] ?? null)
-            . ' mediaName=' . $this->traceText($mediaItem['name'] ?? null)
-            . ' artist=' . $this->traceText($artistName)
-            . ' elapsedUpdated=' . $this->traceValue($data['elapsed_time_last_updated'] ?? null)
-            . ' index=' . $this->traceValue($data['current_index'] ?? null)
-            . ' state=' . $this->traceText($data['state'] ?? null)
-            . ' proxy=' . $shortProxyId;
-    }
-
-    private function nextQueueTraceSequenceFromState(): int
-    {
-        $sequence = (int)$this->GetBuffer('QueueTraceSequence') + 1;
-        $this->SetBuffer('QueueTraceSequence', (string)$sequence);
-        return $sequence;
-    }
-
-    private function shortRequestId($messageId): string
-    {
-        if (!is_string($messageId) || trim($messageId) === '') {
-            return '(none)';
-        }
-        return substr(trim($messageId), 0, 18) . '...';
-    }
-
-    private function traceTimestamp($value): string
-    {
-        return is_int($value) || is_float($value) ? sprintf('%.6f', (float)$value) : '(none)';
-    }
-
-    private function traceValue($value): string
-    {
-        if (is_int($value) || is_float($value)) {
-            return (string)$value;
-        }
-        return $this->traceText($value);
-    }
-
-    private function tracePlayerIds(array $playerIds): string
-    {
-        if (count($playerIds) === 0) {
-            return '(none)';
-        }
-        return implode(',', array_map(function ($playerId): string {
-            return $this->traceText($playerId);
-        }, $playerIds));
-    }
-
-    private function traceText($value): string
-    {
-        if (!is_string($value) || trim($value) === '') {
-            return '(none)';
-        }
-        $value = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', trim($value));
-        if (!is_string($value)) {
-            return '(invalid)';
-        }
-        return strlen($value) > 80 ? substr($value, 0, 80) . '...' : $value;
     }
 
     private function sendWebSocketCommand(string $messageId, string $command, array $args): void
@@ -1220,7 +1028,6 @@ class MusicAssistantConnection extends IPSModule
             }
             $playerQueues = $this->readJsonBuffer('PlayerQueues');
             $queuePlayers = $this->readJsonBuffer('QueuePlayers');
-            $oldQueueId = is_string($playerQueues[$playerId] ?? null) ? $playerQueues[$playerId] : '';
             $removed = $this->removeQueueMappingFromState($playerId, $playerQueues, $queuePlayers);
             $playerQueues[$playerId] = $queueId;
             $queuePlayers[$queueId] = array_values(array_unique(array_merge(
@@ -1229,28 +1036,13 @@ class MusicAssistantConnection extends IPSModule
             )));
             $this->writeJsonBuffer('PlayerQueues', $playerQueues);
             $this->writeJsonBuffer('QueuePlayers', $queuePlayers);
-            return [
-                'updated' => true,
-                'removed' => $removed,
-                'oldQueueId' => $oldQueueId,
-                'newQueueId' => $queueId
-            ];
+            return ['updated' => true, 'removed' => $removed];
         });
         if ($result['removed']) {
             $this->SendDebug('Active Queue', 'Queue-Zuordnung entfernt: ' . $playerId, 0);
         }
         if (!$result['updated']) {
             return false;
-        }
-        if (($result['oldQueueId'] ?? null) !== ($result['newQueueId'] ?? null)) {
-            $this->SendDebug(
-                'QueueTrace',
-                'mapping=changed player=' . $this->traceText($playerId)
-                    . ' oldQueue=' . $this->traceText($result['oldQueueId'] ?? null)
-                    . ' newQueue=' . $this->traceText($result['newQueueId'] ?? null)
-                    . ' generation=' . $this->traceText($generation),
-                0
-            );
         }
         $this->SendDebug('Active Queue', $playerId . ' -> ' . $queueId, 0);
         return true;
