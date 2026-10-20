@@ -509,19 +509,24 @@ class MusicAssistantPlayer extends IPSModule
 
         $response = $this->requestArtwork($proxyId);
         $content = $response['content'] ?? null;
+        $contentType = $response['content_type'] ?? null;
         if (($response['proxy_id'] ?? null) !== $proxyId
-            || ($response['content_type'] ?? null) !== 'image/jpeg'
+            || !in_array($contentType, ['image/jpeg', 'image/png'], true)
             || !is_string($content)) {
             throw new Exception('Artwork-Antwort ist ungültig.');
         }
         $binary = base64_decode($content, true);
-        if (!is_string($binary) || $binary === '' || substr($binary, 0, 3) !== "\xFF\xD8\xFF") {
-            throw new Exception('Artwork-Antwort enthält kein gültiges JPEG.');
+        $validSignature = is_string($binary) && $binary !== '' && ($contentType === 'image/jpeg'
+            ? substr($binary, 0, 3) === "\xFF\xD8\xFF"
+            : substr($binary, 0, 8) === "\x89PNG\r\n\x1A\n");
+        if (!$validSignature) {
+            throw new Exception('Artwork-Signatur passt nicht zum Content-Type.');
         }
-        $updated = $this->withCoverLock(function () use ($mediaId, $proxyId, $content, $state): bool {
+        $updated = $this->withCoverLock(function () use ($mediaId, $proxyId, $content, $contentType, $state): bool {
             if ($this->ReadAttributeString('CoverTargetProxyID') !== $proxyId) {
                 return false;
             }
+            $this->ensureCoverMediaFormat($mediaId, $contentType);
             if (!IPS_SetMediaContent($mediaId, $content)) {
                 throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
             }
@@ -556,6 +561,7 @@ class MusicAssistantPlayer extends IPSModule
 
     private function setDefaultCover(int $mediaId, $state): void
     {
+        $this->ensureCoverMediaFormat($mediaId, 'image/jpeg');
         if (!IPS_SetMediaContent($mediaId, self::DEFAULT_COVER)) {
             throw new Exception('Standard-Cover konnte nicht gesetzt werden.');
         }
@@ -563,6 +569,22 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Cover-Status konnte nicht gespeichert werden.');
         }
         $this->updateCoverVisibilityFromQueueState($state, true);
+    }
+
+    private function ensureCoverMediaFormat(int $mediaId, string $contentType): void
+    {
+        $extension = $contentType === 'image/png' ? 'png' : 'jpg';
+        $mediaFile = 'media/MusicAssistantCover_' . $this->InstanceID . '.' . $extension;
+        $media = IPS_GetMedia($mediaId);
+        $currentFile = str_replace('\\', '/', (string)($media['MediaFile'] ?? ''));
+        $normalizedFile = ltrim($currentFile, '/');
+        if ($normalizedFile === $mediaFile
+            || substr($normalizedFile, -strlen('/' . $mediaFile)) === '/' . $mediaFile) {
+            return;
+        }
+        if (!IPS_SetMediaFile($mediaId, $mediaFile, false)) {
+            throw new Exception('Cover-Dateiformat konnte nicht aktualisiert werden.');
+        }
     }
 
     private function updateCoverVisibilityFromQueueState($state, bool $hasCurrentItem = false): void

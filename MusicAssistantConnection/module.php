@@ -369,7 +369,7 @@ class MusicAssistantConnection extends IPSModule
                 $this->SendDebug('Artwork', $message, 0);
                 return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
             }
-            if ($response['content_type'] !== 'image/jpeg') {
+            if (!in_array($response['content_type'], ['image/jpeg', 'image/png'], true)) {
                 $message = 'Imageproxy lieferte unerwarteten Content-Type: '
                     . ($response['content_type'] === '' ? '(leer)' : $response['content_type']);
                 if ($authenticatedRetry) {
@@ -394,8 +394,11 @@ class MusicAssistantConnection extends IPSModule
                 $this->SendDebug('Artwork', $message, 0);
                 return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
             }
-            if (substr($response['body'], 0, 3) !== "\xFF\xD8\xFF") {
-                $message = 'Imageproxy lieferte ungültige JPEG-Daten';
+            $validSignature = $response['content_type'] === 'image/jpeg'
+                ? substr($response['body'], 0, 3) === "\xFF\xD8\xFF"
+                : substr($response['body'], 0, 8) === "\x89PNG\r\n\x1A\n";
+            if (!$validSignature) {
+                $message = 'Imageproxy-Signatur passt nicht zum Content-Type ' . $response['content_type'];
                 if ($authenticatedRetry) {
                     $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
                 }
@@ -407,7 +410,7 @@ class MusicAssistantConnection extends IPSModule
             return json_encode([
                 'success'      => true,
                 'proxy_id'     => $proxyId,
-                'content_type' => 'image/jpeg',
+                'content_type' => $response['content_type'],
                 'content'      => base64_encode($response['body'])
             ], JSON_UNESCAPED_SLASHES);
         } catch (Throwable $e) {
@@ -439,7 +442,7 @@ class MusicAssistantConnection extends IPSModule
             $this->ReadPropertyInteger('Port'),
             $proxyId
         );
-        $headers = ['Accept: image/jpeg'];
+        $headers = ['Accept: image/jpeg, image/png'];
         if ($authenticated) {
             $headers[] = 'Authorization: Bearer ' . trim($this->ReadPropertyString('Token'));
         }
