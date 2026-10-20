@@ -1371,13 +1371,34 @@ class MusicAssistantConnection extends IPSModule
 
     private function readJsonBuffer(string $name): array
     {
-        $value = json_decode($this->GetBuffer($name), true);
-        return is_array($value) ? $value : [];
+        $rawValue = trim($this->GetBuffer($name));
+        if ($rawValue === '') {
+            $this->SendDebug('State', 'JSON-Buffer ' . $name . ': Inhalt ist leer', 0);
+            throw new UnexpectedValueException('JSON-Buffer ' . $name . ' ist nicht initialisiert.');
+        }
+
+        try {
+            $rootValue = json_decode($rawValue, false, 512, JSON_THROW_ON_ERROR);
+            if (is_object($rootValue)) {
+                return json_decode($rawValue, true, 512, JSON_THROW_ON_ERROR);
+            }
+        } catch (JsonException $e) {
+            $this->SendDebug('State', 'JSON-Buffer ' . $name . ': ungültiges JSON', 0);
+            throw new UnexpectedValueException('JSON-Buffer ' . $name . ' enthält ungültiges JSON.', 0, $e);
+        }
+
+        if (is_array($rootValue) && count($rootValue) === 0) {
+            return [];
+        }
+
+        $errorType = is_array($rootValue) ? 'nichtleeres JSON-Array' : 'skalarer JSON-Wert';
+        $this->SendDebug('State', 'JSON-Buffer ' . $name . ': ' . $errorType, 0);
+        throw new UnexpectedValueException('JSON-Buffer ' . $name . ' enthält einen unerwarteten Wurzeltyp.');
     }
 
     private function writeJsonBuffer(string $name, array $value): void
     {
-        $this->SetBuffer($name, json_encode($value, JSON_THROW_ON_ERROR));
+        $this->SetBuffer($name, json_encode(count($value) === 0 ? new stdClass() : $value, JSON_THROW_ON_ERROR));
     }
 
     private function isConfigured(): bool
