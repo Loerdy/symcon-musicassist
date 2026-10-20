@@ -61,8 +61,15 @@ class MusicAssistantPlayer extends IPSModule
         $this->EnableAction('Shuffle');
 
         // Repeat
-        $this->ensureRepeatProfile();
-        $this->MaintainVariable('Repeat', 'Repeat', VARIABLETYPE_STRING, self::REPEAT_PROFILE, 50, true);
+        $repeatProfileAvailable = $this->ensureRepeatProfile();
+        $this->MaintainVariable(
+            'Repeat',
+            'Repeat',
+            VARIABLETYPE_STRING,
+            $repeatProfileAvailable ? self::REPEAT_PROFILE : '',
+            50,
+            true
+        );
         $this->EnableAction('Repeat');
 
         // Mute
@@ -74,11 +81,25 @@ class MusicAssistantPlayer extends IPSModule
         $this->EnableAction('VolumeLevel');
 
         // Volume Buttons (Group Up/Down)
-        $this->ensureVolumeButtonProfiles();
-        $this->MaintainVariable('VolumeUp', 'Volume +', VARIABLETYPE_INTEGER, self::VOLUP_PROFILE, 80, true);
+        $volumeButtonProfiles = $this->ensureVolumeButtonProfiles();
+        $this->MaintainVariable(
+            'VolumeUp',
+            'Volume +',
+            VARIABLETYPE_INTEGER,
+            $volumeButtonProfiles[self::VOLUP_PROFILE] ? self::VOLUP_PROFILE : '',
+            80,
+            true
+        );
         $this->EnableAction('VolumeUp');
 
-        $this->MaintainVariable('VolumeDown', 'Volume -', VARIABLETYPE_INTEGER, self::VOLDOWN_PROFILE, 90, true);
+        $this->MaintainVariable(
+            'VolumeDown',
+            'Volume -',
+            VARIABLETYPE_INTEGER,
+            $volumeButtonProfiles[self::VOLDOWN_PROFILE] ? self::VOLDOWN_PROFILE : '',
+            90,
+            true
+        );
         $volumeDownId = $this->GetIDForIdent('VolumeDown');
         if (IPS_GetName($volumeDownId) === 'Volume') {
             IPS_SetName($volumeDownId, 'Volume -');
@@ -886,42 +907,57 @@ class MusicAssistantPlayer extends IPSModule
 
     // --------- intern ---------
 
-    private function ensureRepeatProfile(): void
+    private function ensureRepeatProfile(): bool
     {
-        if (IPS_VariableProfileExists(self::REPEAT_PROFILE)) {
-            $p = IPS_GetVariableProfile(self::REPEAT_PROFILE);
-            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_STRING) {
-                IPS_DeleteVariableProfile(self::REPEAT_PROFILE);
-            }
-        }
         if (!IPS_VariableProfileExists(self::REPEAT_PROFILE)) {
             IPS_CreateVariableProfile(self::REPEAT_PROFILE, VARIABLETYPE_STRING);
+        }
+        if (!IPS_VariableProfileExists(self::REPEAT_PROFILE)) {
+            $this->LogMessage('Variablenprofil ' . self::REPEAT_PROFILE . ' konnte nicht erstellt werden.', KL_ERROR);
+            return false;
+        }
+
+        $profileData = IPS_GetVariableProfile(self::REPEAT_PROFILE);
+        if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_STRING) {
+            $this->LogMessage(
+                'Variablenprofil ' . self::REPEAT_PROFILE . ' hat nicht den erwarteten Typ String und wird nicht verändert.',
+                KL_ERROR
+            );
+            return false;
         }
 
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'off', 'Off', 'ban', -1);
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'one', 'One', 'arrows-repeat-1', -1);
         IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', 'arrows-repeat', -1);
+        return true;
     }
 
-    private function ensureVolumeButtonProfiles(): void
+    private function ensureVolumeButtonProfiles(): array
     {
-        $this->ensureIntButtonProfile(self::VOLUP_PROFILE, 'Up', 'volume-up');
-        $this->ensureIntButtonProfile(self::VOLDOWN_PROFILE, 'Down', 'volume-down');
+        return [
+            self::VOLUP_PROFILE   => $this->ensureIntButtonProfile(self::VOLUP_PROFILE, 'Up', 'volume-up'),
+            self::VOLDOWN_PROFILE => $this->ensureIntButtonProfile(self::VOLDOWN_PROFILE, 'Down', 'volume-down')
+        ];
     }
 
-    private function ensureIntButtonProfile(string $profile, string $caption, string $icon): void
+    private function ensureIntButtonProfile(string $profile, string $caption, string $icon): bool
     {
-        if (IPS_VariableProfileExists($profile)) {
-            $p = IPS_GetVariableProfile($profile);
-            if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-                IPS_DeleteVariableProfile($profile);
-            }
-        }
         if (!IPS_VariableProfileExists($profile)) {
             IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
         }
+        if (!IPS_VariableProfileExists($profile)) {
+            $this->LogMessage('Variablenprofil ' . $profile . ' konnte nicht erstellt werden.', KL_ERROR);
+            return false;
+        }
 
         $profileData = IPS_GetVariableProfile($profile);
+        if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            $this->LogMessage(
+                'Variablenprofil ' . $profile . ' hat nicht den erwarteten Typ Integer und wird nicht verändert.',
+                KL_ERROR
+            );
+            return false;
+        }
         foreach (($profileData['Associations'] ?? []) as $association) {
             if (isset($association['Value']) && (float)$association['Value'] === 0.0) {
                 IPS_SetVariableProfileAssociation($profile, 0, '', '', -1);
@@ -930,6 +966,7 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         IPS_SetVariableProfileAssociation($profile, 1, $caption, $icon, -1);
+        return true;
     }
 
     private function ExecuteTransport(int $value): void
