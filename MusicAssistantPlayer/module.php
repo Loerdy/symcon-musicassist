@@ -156,9 +156,14 @@ class MusicAssistantPlayer extends IPSModule
                 $source = is_string($packet['Source'] ?? null) && trim($packet['Source']) !== ''
                     ? trim($packet['Source'])
                     : 'live';
+                $traceSequence = is_int($packet['TraceSequence'] ?? null)
+                    ? $packet['TraceSequence']
+                    : 0;
                 $this->SendDebug(
                     'QueueTrace',
-                    'source=' . $this->traceText($source)
+                    'seq=' . $this->traceSequence($traceSequence)
+                        . ' source=' . $this->traceText($source)
+                        . ' generation=' . $this->traceText($packet['ConnectionGeneration'] ?? null)
                         . ' player=' . $this->traceText($playerId)
                         . ' queue=' . $this->traceText($packet['ObjectID'])
                         . $this->queueTraceDetails($data)
@@ -186,12 +191,21 @@ class MusicAssistantPlayer extends IPSModule
                         $this->updateCoverVisibilityFromQueueState($data['state']);
                     }
                     if ($hasCurrentItem) {
-                        $this->updateCoverFromQueueItem($data['current_item'], $data['state'] ?? null);
+                        $this->updateCoverFromQueueItem(
+                            $data['current_item'],
+                            $data['state'] ?? null,
+                            $traceSequence
+                        );
                     } elseif (array_key_exists('state', $data) && !$isIdle) {
                         $this->updateCoverVisibilityFromQueueState($data['state']);
                     }
                 } catch (Throwable $e) {
-                    $this->SendDebug('CoverTrace', 'operation=failed reason=' . $this->traceText($e->getMessage()), 0);
+                    $this->SendDebug(
+                        'CoverTrace',
+                        'seq=' . $this->traceSequence($traceSequence)
+                            . ' operation=failed reason=' . $this->traceText($e->getMessage()),
+                        0
+                    );
                 }
                 if (array_key_exists('shuffle_enabled', $data)) {
                     $this->updateShuffleState($data['shuffle_enabled']);
@@ -474,7 +488,7 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    private function updateCoverFromQueueItem($currentItem, $state): void
+    private function updateCoverFromQueueItem($currentItem, $state, int $traceSequence): void
     {
         if ($currentItem === null) {
             $this->clearCover();
@@ -494,11 +508,11 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception('Cover-Medium ist nicht verfügbar.');
         }
         if ($proxyId === '') {
-            $this->showDefaultCover($mediaId, '', $state);
+            $this->showDefaultCover($mediaId, '', $state, $traceSequence);
             return;
         }
 
-        $needsDownload = $this->withCoverLock(function () use ($mediaId, $proxyId, $state): bool {
+        $needsDownload = $this->withCoverLock(function () use ($mediaId, $proxyId, $state, $traceSequence): bool {
             $previousTarget = $this->ReadAttributeString('CoverTargetProxyID');
             if ($previousTarget !== $proxyId) {
                 if (!$this->WriteAttributeString('CoverTargetProxyID', $proxyId)) {
@@ -506,11 +520,12 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 $this->SendDebug(
                     'CoverTrace',
-                    'target=changed from=' . $this->shortProxyId($previousTarget)
+                    'seq=' . $this->traceSequence($traceSequence)
+                        . ' target=changed from=' . $this->shortProxyId($previousTarget)
                         . ' to=' . $this->shortProxyId($proxyId),
                     0
                 );
-                $this->setDefaultCover($mediaId, $state);
+                $this->setDefaultCover($mediaId, $state, $traceSequence);
             }
             if ($this->ReadAttributeString('CoverProxyID') === $proxyId
                 && !$this->ReadAttributeBoolean('CoverIsDefault')
@@ -519,7 +534,7 @@ class MusicAssistantPlayer extends IPSModule
                 return false;
             }
             if (!$this->ReadAttributeBoolean('CoverIsDefault') || !$this->coverMediaHasContent($mediaId)) {
-                $this->setDefaultCover($mediaId, $state);
+                $this->setDefaultCover($mediaId, $state, $traceSequence);
             }
             return true;
         });
@@ -527,7 +542,12 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
 
-        $this->SendDebug('CoverTrace', 'download=start proxy=' . $this->shortProxyId($proxyId), 0);
+        $this->SendDebug(
+            'CoverTrace',
+            'seq=' . $this->traceSequence($traceSequence)
+                . ' download=start proxy=' . $this->shortProxyId($proxyId),
+            0
+        );
         $response = $this->requestArtwork($proxyId);
         $content = $response['content'] ?? null;
         $contentType = $response['content_type'] ?? null;
@@ -543,11 +563,19 @@ class MusicAssistantPlayer extends IPSModule
         if (!$validSignature) {
             throw new Exception('Artwork-Signatur passt nicht zum Content-Type.');
         }
-        $updated = $this->withCoverLock(function () use ($mediaId, $proxyId, $content, $contentType, $state): bool {
+        $updated = $this->withCoverLock(function () use (
+            $mediaId,
+            $proxyId,
+            $content,
+            $contentType,
+            $state,
+            $traceSequence
+        ): bool {
             if ($this->ReadAttributeString('CoverTargetProxyID') !== $proxyId) {
                 $this->SendDebug(
                     'CoverTrace',
-                    'download=discarded proxy=' . $this->shortProxyId($proxyId)
+                    'seq=' . $this->traceSequence($traceSequence)
+                        . ' download=discarded proxy=' . $this->shortProxyId($proxyId)
                         . ' currentTarget=' . $this->shortProxyId($this->ReadAttributeString('CoverTargetProxyID')),
                     0
                 );
@@ -567,13 +595,18 @@ class MusicAssistantPlayer extends IPSModule
             return true;
         });
         if ($updated) {
-            $this->SendDebug('CoverTrace', 'download=applied proxy=' . $this->shortProxyId($proxyId), 0);
+            $this->SendDebug(
+                'CoverTrace',
+                'seq=' . $this->traceSequence($traceSequence)
+                    . ' download=applied proxy=' . $this->shortProxyId($proxyId),
+                0
+            );
         }
     }
 
-    private function showDefaultCover(int $mediaId, string $targetProxyId, $state): void
+    private function showDefaultCover(int $mediaId, string $targetProxyId, $state, int $traceSequence): void
     {
-        $this->withCoverLock(function () use ($mediaId, $targetProxyId, $state): void {
+        $this->withCoverLock(function () use ($mediaId, $targetProxyId, $state, $traceSequence): void {
             $previousTarget = $this->ReadAttributeString('CoverTargetProxyID');
             if ($previousTarget !== $targetProxyId) {
                 if (!$this->WriteAttributeString('CoverTargetProxyID', $targetProxyId)) {
@@ -581,20 +614,21 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 $this->SendDebug(
                     'CoverTrace',
-                    'target=changed from=' . $this->shortProxyId($previousTarget)
+                    'seq=' . $this->traceSequence($traceSequence)
+                        . ' target=changed from=' . $this->shortProxyId($previousTarget)
                         . ' to=' . $this->shortProxyId($targetProxyId),
                     0
                 );
             }
             if (!$this->ReadAttributeBoolean('CoverIsDefault') || !$this->coverMediaHasContent($mediaId)) {
-                $this->setDefaultCover($mediaId, $state);
+                $this->setDefaultCover($mediaId, $state, $traceSequence);
                 return;
             }
             $this->updateCoverVisibilityFromQueueState($state, true);
         });
     }
 
-    private function setDefaultCover(int $mediaId, $state): void
+    private function setDefaultCover(int $mediaId, $state, int $traceSequence): void
     {
         $this->ensureCoverMediaFormat($mediaId, 'image/jpeg');
         if (!IPS_SetMediaContent($mediaId, self::DEFAULT_COVER)) {
@@ -605,7 +639,8 @@ class MusicAssistantPlayer extends IPSModule
         }
         $this->SendDebug(
             'CoverTrace',
-            'default=set target=' . $this->shortProxyId($this->ReadAttributeString('CoverTargetProxyID')),
+            'seq=' . $this->traceSequence($traceSequence)
+                . ' default=set target=' . $this->shortProxyId($this->ReadAttributeString('CoverTargetProxyID')),
             0
         );
         $this->updateCoverVisibilityFromQueueState($state, true);
@@ -615,10 +650,32 @@ class MusicAssistantPlayer extends IPSModule
     {
         $currentItem = is_array($data['current_item'] ?? null) ? $data['current_item'] : [];
         $image = is_array($currentItem['image'] ?? null) ? $currentItem['image'] : [];
+        $mediaItem = is_array($currentItem['media_item'] ?? null) ? $currentItem['media_item'] : [];
+        $artists = is_array($mediaItem['artists'] ?? null) ? $mediaItem['artists'] : [];
+        $firstArtist = $artists[0] ?? null;
+        $artistName = is_array($firstArtist) ? ($firstArtist['name'] ?? null) : $firstArtist;
 
         return ' item=' . $this->traceText($currentItem['queue_item_id'] ?? null)
             . ' name=' . $this->traceText($currentItem['name'] ?? null)
+            . ' mediaName=' . $this->traceText($mediaItem['name'] ?? null)
+            . ' artist=' . $this->traceText($artistName)
+            . ' elapsedUpdated=' . $this->traceValue($data['elapsed_time_last_updated'] ?? null)
+            . ' index=' . $this->traceValue($data['current_index'] ?? null)
+            . ' state=' . $this->traceText($data['state'] ?? null)
             . ' proxy=' . $this->shortProxyId($image['proxy_id'] ?? null);
+    }
+
+    private function traceSequence(int $traceSequence): string
+    {
+        return $traceSequence > 0 ? (string)$traceSequence : '(none)';
+    }
+
+    private function traceValue($value): string
+    {
+        if (is_int($value) || is_float($value)) {
+            return (string)$value;
+        }
+        return $this->traceText($value);
     }
 
     private function shortProxyId($proxyId): string
