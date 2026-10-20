@@ -207,11 +207,22 @@ class MusicAssistantConnection extends IPSModule
             $queueId = $message['object_id'] ?? null;
             $data = $message['data'] ?? null;
             if ($this->GetStatus() === 102 && is_string($queueId) && $queueId !== '' && is_array($data)) {
-                $this->SendDebug('queue_updated', 'Empfangen für QueueID=' . $queueId, 0);
-                $queuePlayers = $this->withStateLock(function (): array {
-                    return $this->readJsonBuffer('QueuePlayers');
+                $queueState = $this->withStateLock(function (): array {
+                    return [
+                        'Generation' => $this->GetBuffer('ConnectionGeneration'),
+                        'QueuePlayers' => $this->readJsonBuffer('QueuePlayers')
+                    ];
                 });
+                $queuePlayers = $queueState['QueuePlayers'];
                 $playerIds = $queuePlayers[$queueId] ?? [];
+                $tracePlayerIds = is_array($playerIds)
+                    ? array_values(array_filter($playerIds, 'is_string'))
+                    : [];
+                $trace = 'source=live phase=receive generation=' . $this->traceText($queueState['Generation'])
+                    . ' queue=' . $this->traceText($queueId)
+                    . ' players=' . $this->tracePlayerIds($tracePlayerIds)
+                    . $this->queueTraceDetails($data);
+                $this->SendDebug('QueueTrace', $trace, 0);
                 if (is_array($playerIds) && count($playerIds) > 0) {
                     $playerIds = array_values(array_filter($playerIds, 'is_string'));
                     $this->SendDataToChildren(json_encode([
@@ -221,7 +232,7 @@ class MusicAssistantConnection extends IPSModule
                         'PlayerIDs' => $playerIds,
                         'Data' => $data
                     ], JSON_THROW_ON_ERROR));
-                    $this->SendDebug('queue_updated', 'Weitergeleitet an ' . count($playerIds) . ' Player', 0);
+                    $this->SendDebug('QueueTrace', str_replace('phase=receive', 'phase=forward', $trace), 0);
                 }
             }
             return '';
@@ -930,10 +941,53 @@ class MusicAssistantConnection extends IPSModule
                 'Data' => $result,
                 'Source' => 'resync'
             ], JSON_THROW_ON_ERROR));
+            $this->SendDebug(
+                'QueueTrace',
+                'source=resync phase=forward generation=' . $this->traceText($request['Generation'])
+                    . ' queue=' . $this->traceText($queueId)
+                    . ' players=' . $this->tracePlayerIds([$playerId])
+                    . $this->queueTraceDetails($result),
+                0
+            );
             $this->SendDebug('Resync', 'Queue-Snapshot verarbeitet: ' . $queueId, 0);
             $this->logResyncStepResult($playerId, 'Queue', true, $request['ResyncState'] ?? null);
         }
         return true;
+    }
+
+    private function queueTraceDetails(array $data): string
+    {
+        $currentItem = is_array($data['current_item'] ?? null) ? $data['current_item'] : [];
+        $image = is_array($currentItem['image'] ?? null) ? $currentItem['image'] : [];
+        $proxyId = is_string($image['proxy_id'] ?? null) ? trim($image['proxy_id']) : '';
+        $shortProxyId = $proxyId === '' ? '(none)' : substr($proxyId, 0, 12) . '...';
+
+        return ' itemQueue=' . $this->traceText($currentItem['queue_id'] ?? null)
+            . ' item=' . $this->traceText($currentItem['queue_item_id'] ?? null)
+            . ' name=' . $this->traceText($currentItem['name'] ?? null)
+            . ' proxy=' . $shortProxyId;
+    }
+
+    private function tracePlayerIds(array $playerIds): string
+    {
+        if (count($playerIds) === 0) {
+            return '(none)';
+        }
+        return implode(',', array_map(function ($playerId): string {
+            return $this->traceText($playerId);
+        }, $playerIds));
+    }
+
+    private function traceText($value): string
+    {
+        if (!is_string($value) || trim($value) === '') {
+            return '(none)';
+        }
+        $value = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', trim($value));
+        if (!is_string($value)) {
+            return '(invalid)';
+        }
+        return strlen($value) > 80 ? substr($value, 0, 80) . '...' : $value;
     }
 
     private function sendWebSocketCommand(string $messageId, string $command, array $args): void
