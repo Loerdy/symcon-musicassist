@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Playergruppen können optional ereignisgesteuerte Lautstärkeregler für ihre aktuellen Mitglieder bereitstellen.
+
 ## 2.0.2 — 2026-10-21
 
 - Persistente Konfiguration wird validiert und bei ungültigen Daten unverändert erhalten.

@@ -9,6 +9,7 @@ class MusicAssistantPlayer extends IPSModule
     private const VOLUP_PROFILE   = 'MA.VolumeUp';
     private const VOLDOWN_PROFILE = 'MA.VolumeDown';
     private const COVER_SEMAPHORE_TIMEOUT = 5000;
+    private const GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT = 40000;
     private const DEFAULT_COVER = '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCABAAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5qooooAKKK6Twd8OvEPj/AO1/2Dp/2/7Js879/HHs3btv32Gc7W6elAHN0V6rpH7MvjvUrlorixtdKQIWE13doyMcj5R5Rc55zyMcHnpnrdI/ZB1Ka2ZtU8R2tncbyFS0tmuEK4GCWZkIOc8Y7DnngA+faK+mfir8EPCvgn4R31/a2G/WrOK2Q3/nSjzHMsaO/llyo3ZbjtnjpXzNQAUUUUAFfSH7Hf8AzN3/AG5/+1q+b6+kP2O/+Zu/7c//AGtQBJ48/am1LQ9a1PSNL0K1juLC+ltmubudpUkVGZSQihCpJAP3jjkc9a4DV/2mvHepXKy299a6UgQKYbS0RkY5PzHzQ5zzjg44HHXPHfEv/ko/ir/sLXf/AKOarPhX4T+LfGtm15o+iT3NoOk8jJDG/JHyM5UPgqQducd8UAfSHxS1G41j9mY395J513dafp880m0LudpIWY4GAMkngV8hV9e/FLTrjR/2ZjYXkfk3drp+nwTR7g211khVhkZBwQeRXyFQAUUUUAdj8MPhhqXxR1qWyspUtLe3RZbm7mRikalgMDAwXI3EKSM7W5GK+p/g78Hf+FTf2v8A8Tf+1f7Q8n/l28ny9m//AG2znf7dK8g/ZO8U6bo2ta5pd7cJa3GopA1s0zqiSMjMvlgkglyZVwoBzhvTn6Q8U+KdN8G6LcapqlwkFvCjMqs6q8zBSwjQMQGchThc80AfDXxL/wCSj+Kv+wtd/wDo5q+z/hJ9j/4Vj4X+w+R5P9nw7vs+NvmbR5mcfxb9+7vuznnNfCup6jcaxqV3f3knnXd1K880m0LudiWY4GAMkngV0nhX4seLfBVm1no+tz21oekEipNGnJPyK4YJksSduM980AfSn7UXiKHSfhnJpzbHuNVuI4UQyBXVUYSM4XqwBRVPTHmDnoD8fVt+KvGuueNr1brXNTn1CVfuLIQI48gA7EGFXO0ZwBnGTzWJQAUUUUAFFFFABRRRQAUUUUAf/9k=';
 
     public function Create(): void
@@ -18,6 +19,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterMessage($this->InstanceID, FM_CONNECT);
 
         $this->RegisterPropertyString('PlayerID', '');
+        $this->RegisterPropertyBoolean('ShowGroupMemberVolumes', false);
 
         $this->RegisterPropertyString('PlaylistProfile', '');
         $this->RegisterPropertyString('PlaylistMap', '{}');
@@ -28,9 +30,11 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterAttributeString('CoverProxyID', '');
         $this->RegisterAttributeString('CoverTargetProxyID', '');
         $this->RegisterAttributeBoolean('CoverIsDefault', false);
+        $this->RegisterAttributeString('GroupMemberVolumeMap', '{}');
 
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
+        $this->SetBuffer('GroupMemberVolumeRefreshRequest', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
@@ -125,6 +129,16 @@ class MusicAssistantPlayer extends IPSModule
         }
         $this->ensureCoverMedia();
 
+        if ($this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
+            try {
+                $this->refreshGroupMemberVolumes();
+            } catch (Throwable $e) {
+                $this->SendDebug('Group member volumes', 'Initialisierung fehlgeschlagen: ' . $e->getMessage(), 0);
+            }
+        } else {
+            $this->removeGroupMemberVolumeVariables();
+        }
+
         // Repeat Initialwert
         if (@$this->GetIDForIdent('Repeat') > 0 && (string)@$this->GetValue('Repeat') === '') {
             $this->SetValue('Repeat', 'off');
@@ -153,6 +167,11 @@ class MusicAssistantPlayer extends IPSModule
         $form = [
             'elements' => [
                 ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
+                [
+                    'type' => 'CheckBox',
+                    'name' => 'ShowGroupMemberVolumes',
+                    'caption' => 'Individuelle Lautstärkeregler für aktuelle Gruppenmitglieder anzeigen'
+                ],
                 ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
                 // Inhalt wird per UpdateFormField("ConfigView","caption", ...) gesetzt
                 ['type' => 'Label', 'name' => 'ConfigView', 'caption' => '']
@@ -217,13 +236,28 @@ class MusicAssistantPlayer extends IPSModule
 
         if (($packet['Event'] ?? null) !== 'player_updated'
             || !is_string($packet['ObjectID'] ?? null)
-            || $packet['ObjectID'] !== $playerId
             || !is_array($packet['Data'] ?? null)) {
             return '';
         }
 
+        $objectId = $packet['ObjectID'];
         $data = $packet['Data'];
-        $this->SendDebug('player_updated', 'Passendes Event empfangen für PlayerID=' . $packet['ObjectID'], 0);
+        if ($this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
+            try {
+                $this->processGroupMemberPlayerUpdate(
+                    $objectId,
+                    $data,
+                    ($packet['Source'] ?? null) === 'resync'
+                );
+            } catch (Throwable $e) {
+                $this->SendDebug('Group member volumes', 'Event konnte nicht verarbeitet werden: ' . $e->getMessage(), 0);
+            }
+        }
+        if ($objectId !== $playerId) {
+            return '';
+        }
+
+        $this->SendDebug('player_updated', 'Passendes Event empfangen für PlayerID=' . $objectId, 0);
 
         $volumeLevel = $data['volume_level'] ?? null;
         if (!is_int($volumeLevel) && !is_float($volumeLevel)
@@ -241,6 +275,10 @@ class MusicAssistantPlayer extends IPSModule
 
     public function RequestAction($Ident, $Value): void
     {
+        if ($this->requestGroupMemberVolumeAction((string)$Ident, $Value)) {
+            return;
+        }
+
         switch ($Ident) {
             case 'UpdateConfigView':
                 $this->UpdateConfigView();
@@ -377,6 +415,394 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         $this->UpdateFormField('ConfigView', 'caption', $text);
+    }
+
+    private function requestGroupMemberVolumeAction(string $ident, $value): bool
+    {
+        if (!$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
+            return false;
+        }
+        $map = $this->readGroupMemberVolumeMap();
+        if ($map === null || !isset($map[$ident])) {
+            return false;
+        }
+        $variableId = @$this->GetIDForIdent($ident);
+        if ($variableId !== $map[$ident]['variable_id'] || !IPS_VariableExists($variableId)) {
+            return false;
+        }
+        if (!is_int($value) || $value < 0 || $value > 100) {
+            throw new InvalidArgumentException('Group member volume must be between 0 and 100.');
+        }
+
+        $this->sendApiRequest('players/cmd/volume_set', [
+            'player_id' => $map[$ident]['player_id'],
+            'volume_level' => $value
+        ]);
+        return true;
+    }
+
+    private function processGroupMemberPlayerUpdate(string $objectId, array $data, bool $isResync): void
+    {
+        $groupPlayerId = trim($this->ReadPropertyString('PlayerID'));
+        if ($objectId === $groupPlayerId) {
+            if (($data['type'] ?? null) !== 'group') {
+                if ($isResync && array_key_exists('type', $data)) {
+                    $this->removeGroupMemberVolumeVariables();
+                }
+                return;
+            }
+            if (!array_key_exists('group_members', $data)) {
+                return;
+            }
+            $memberIds = $this->validateGroupMemberIds($data['group_members'], $groupPlayerId);
+            if ($memberIds === null) {
+                return;
+            }
+            sort($memberIds);
+            $requestId = bin2hex(random_bytes(16));
+            $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
+            $map = $this->readGroupMemberVolumeMap();
+            if ($map === null) {
+                return;
+            }
+            $knownMemberIds = array_column($map, 'player_id');
+            sort($knownMemberIds);
+            $sortedMemberIds = $memberIds;
+            sort($sortedMemberIds);
+            if ($isResync || $knownMemberIds !== $sortedMemberIds) {
+                $this->refreshGroupMemberVolumes($memberIds, $isResync, $requestId);
+            }
+            return;
+        }
+
+        $map = $this->readGroupMemberVolumeMap();
+        if ($map === null) {
+            return;
+        }
+        foreach ($map as $ident => $entry) {
+            if ($entry['player_id'] !== $objectId) {
+                continue;
+            }
+            $variableId = @$this->GetIDForIdent($ident);
+            if ($variableId !== $entry['variable_id']) {
+                return;
+            }
+            $volume = $data['volume_level'] ?? null;
+            if (is_int($volume) && $volume >= 0 && $volume <= 100
+                && IPS_VariableExists($variableId)) {
+                $this->SetValue($ident, $volume);
+            }
+            return;
+        }
+    }
+
+    private function refreshGroupMemberVolumes(
+        ?array $confirmedMemberIds = null,
+        bool $forceRefresh = false,
+        ?string $requestId = null
+    ): void
+    {
+        $groupPlayerId = trim($this->ReadPropertyString('PlayerID'));
+        if ($groupPlayerId === '' || !$this->HasActiveParent()) {
+            return;
+        }
+        if ($requestId === null) {
+            $requestId = bin2hex(random_bytes(16));
+            $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
+        }
+        $this->withGroupMemberVolumeLock(function () use (
+            $groupPlayerId,
+            $confirmedMemberIds,
+            $forceRefresh,
+            $requestId
+        ): void {
+            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
+                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
+                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
+                || !$this->HasActiveParent()) {
+                return;
+            }
+            if ($confirmedMemberIds !== null && !$forceRefresh) {
+                $map = $this->readGroupMemberVolumeMap();
+                if ($map === null) {
+                    return;
+                }
+                $knownMemberIds = array_column($map, 'player_id');
+                sort($knownMemberIds);
+                $currentMemberIds = $confirmedMemberIds;
+                sort($currentMemberIds);
+                if ($knownMemberIds === $currentMemberIds) {
+                    return;
+                }
+            }
+
+            $players = $this->sendApiRequest('players/all', [
+                'return_unavailable' => true,
+                'return_disabled' => true
+            ]);
+            if (!is_array($players) || !$this->isList($players)) {
+                throw new UnexpectedValueException('players/all lieferte keine vollständige Playerliste.');
+            }
+
+            $playersById = [];
+            foreach ($players as $player) {
+                if (!is_array($player) || !is_string($player['player_id'] ?? null)
+                    || trim($player['player_id']) === '') {
+                    continue;
+                }
+                $playersById[trim($player['player_id'])] = $player;
+            }
+            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
+                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
+                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
+                || !$this->HasActiveParent()) {
+                return;
+            }
+
+            if ($confirmedMemberIds === null) {
+                if (!isset($playersById[$groupPlayerId])) {
+                    throw new UnexpectedValueException('Der konfigurierte Player fehlt in players/all.');
+                }
+                $group = $playersById[$groupPlayerId];
+                if (($group['type'] ?? null) !== 'group') {
+                    $this->removeGroupMemberVolumeVariablesUnlocked();
+                    return;
+                }
+                if (!array_key_exists('group_members', $group)) {
+                    throw new UnexpectedValueException('Der Gruppensnapshot enthält keine vollständige Mitgliederliste.');
+                }
+                $memberIds = $this->validateGroupMemberIds($group['group_members'], $groupPlayerId);
+                if ($memberIds === null) {
+                    throw new UnexpectedValueException('Der Gruppensnapshot enthält ungültige Mitglieder-IDs.');
+                }
+            } else {
+                $memberIds = $confirmedMemberIds;
+            }
+
+            $members = [];
+            foreach ($memberIds as $memberId) {
+                if (!isset($playersById[$memberId])) {
+                    throw new UnexpectedValueException('Ein Gruppenmitglied fehlt in players/all.');
+                }
+                $member = $playersById[$memberId];
+                $name = is_string($member['name'] ?? null) ? trim($member['name']) : '';
+                $volume = $member['volume_level'] ?? null;
+                if ($name === '' || ($volume !== null && (!is_int($volume) || $volume < 0 || $volume > 100))) {
+                    throw new UnexpectedValueException('Ein Gruppenmitglied enthält unvollständige Playerdaten.');
+                }
+                $members[] = [
+                    'player_id' => $memberId,
+                    'name' => $name,
+                    'volume_level' => $volume
+                ];
+            }
+            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
+                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
+                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
+                || !$this->HasActiveParent()) {
+                return;
+            }
+            $this->reconcileGroupMemberVolumeVariables($members);
+        });
+    }
+
+    private function validateGroupMemberIds($value, string $groupPlayerId): ?array
+    {
+        if (!is_array($value)) {
+            return null;
+        }
+        $memberIds = [];
+        foreach ($value as $memberId) {
+            if (!is_string($memberId) || trim($memberId) === '') {
+                return null;
+            }
+            $memberId = trim($memberId);
+            if ($memberId !== $groupPlayerId) {
+                $memberIds[$memberId] = true;
+            }
+        }
+        return array_keys($memberIds);
+    }
+
+    private function reconcileGroupMemberVolumeVariables(array $members): void
+    {
+        $existingMap = $this->readGroupMemberVolumeMap();
+        if ($existingMap === null) {
+            throw new UnexpectedValueException('Die Zuordnung der Gruppenlautstärken ist ungültig.');
+        }
+
+        $desired = [];
+        foreach ($members as $member) {
+            $ident = $this->groupMemberVolumeIdent($member['player_id']);
+            if (isset($desired[$ident])
+                || (isset($existingMap[$ident]) && $existingMap[$ident]['player_id'] !== $member['player_id'])) {
+                throw new UnexpectedValueException('Kollision bei der Variablenzuordnung für Gruppenmitglieder.');
+            }
+            $objectId = @$this->GetIDForIdent($ident);
+            if (isset($existingMap[$ident]) && $objectId > 0
+                && $objectId !== $existingMap[$ident]['variable_id']) {
+                throw new UnexpectedValueException('Der Ident eines Gruppenlautstärkereglers wurde anderweitig belegt.');
+            }
+            if (!isset($existingMap[$ident]) && $objectId > 0) {
+                throw new UnexpectedValueException('Der Ident eines Gruppenlautstärkereglers ist bereits belegt.');
+            }
+            $desired[$ident] = [
+                'player_id' => $member['player_id'],
+                'name' => $member['name'],
+                'volume_level' => $member['volume_level']
+            ];
+        }
+
+        $newMap = [];
+        $position = 200;
+        foreach ($desired as $ident => $member) {
+            $variableId = @$this->GetIDForIdent($ident);
+            if ($variableId <= 0) {
+                $this->MaintainVariable(
+                    $ident,
+                    $member['name'],
+                    VARIABLETYPE_INTEGER,
+                    '~Volume',
+                    $position,
+                    true
+                );
+                $variableId = @$this->GetIDForIdent($ident);
+            }
+            if ($variableId <= 0 || !IPS_VariableExists($variableId)
+                || (IPS_GetVariable($variableId)['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                throw new UnexpectedValueException('Gruppenlautstärkevariable konnte nicht sicher angelegt werden.');
+            }
+
+            if (isset($existingMap[$ident]) && IPS_GetName($variableId) === $existingMap[$ident]['name']
+                && $existingMap[$ident]['name'] !== $member['name']) {
+                IPS_SetName($variableId, $member['name']);
+            }
+            $this->EnableAction($ident);
+            if (is_int($member['volume_level'])) {
+                $this->SetValue($ident, $member['volume_level']);
+            }
+            $newMap[$ident] = [
+                'player_id' => $member['player_id'],
+                'name' => $member['name'],
+                'variable_id' => $variableId
+            ];
+            $position += 10;
+        }
+
+        foreach ($existingMap as $ident => $entry) {
+            if (isset($newMap[$ident])) {
+                continue;
+            }
+            $variableId = @$this->GetIDForIdent($ident);
+            if ($variableId === $entry['variable_id'] && IPS_VariableExists($variableId)
+                && (IPS_GetVariable($variableId)['VariableType'] ?? -1) === VARIABLETYPE_INTEGER) {
+                $this->UnregisterVariable($ident);
+            }
+            if (@$this->GetIDForIdent($ident) > 0) {
+                $newMap[$ident] = $entry;
+            }
+        }
+        $this->writeGroupMemberVolumeMap($newMap);
+    }
+
+    private function removeGroupMemberVolumeVariables(): void
+    {
+        $requestId = bin2hex(random_bytes(16));
+        $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
+        $this->withGroupMemberVolumeLock(function () use ($requestId): void {
+            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId) {
+                return;
+            }
+            $this->removeGroupMemberVolumeVariablesUnlocked();
+        });
+    }
+
+    private function removeGroupMemberVolumeVariablesUnlocked(): void
+    {
+        $map = $this->readGroupMemberVolumeMap();
+        if ($map === null) {
+            return;
+        }
+        $remaining = [];
+        foreach ($map as $ident => $entry) {
+            $variableId = @$this->GetIDForIdent($ident);
+            if ($variableId === $entry['variable_id'] && IPS_VariableExists($variableId)
+                && (IPS_GetVariable($variableId)['VariableType'] ?? -1) === VARIABLETYPE_INTEGER) {
+                $this->UnregisterVariable($ident);
+            }
+            if (@$this->GetIDForIdent($ident) > 0) {
+                $remaining[$ident] = $entry;
+            }
+        }
+        if ($remaining !== $map) {
+            $this->writeGroupMemberVolumeMap($remaining);
+        }
+    }
+
+    private function withGroupMemberVolumeLock(callable $operation)
+    {
+        $semaphore = 'MA_GROUP_MEMBER_VOLUMES_' . (string)$this->InstanceID;
+        if (!IPS_SemaphoreEnter($semaphore, self::GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT)) {
+            throw new RuntimeException('Gruppenlautstärke-Semaphore konnte nicht erworben werden.');
+        }
+        try {
+            return $operation();
+        } finally {
+            IPS_SemaphoreLeave($semaphore);
+        }
+    }
+
+    private function groupMemberVolumeIdent(string $playerId): string
+    {
+        return 'MemberVolume_' . hash('sha256', $playerId);
+    }
+
+    private function readGroupMemberVolumeMap(): ?array
+    {
+        $rawValue = trim($this->ReadAttributeString('GroupMemberVolumeMap'));
+        try {
+            $map = json_decode($rawValue, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Gespeicherte Zuordnung enthält ungültiges JSON', 0);
+            return null;
+        }
+        if (!is_array($map)) {
+            $this->SendDebug('Group member volumes', 'Gespeicherte Zuordnung hat einen ungültigen Wurzeltyp', 0);
+            return null;
+        }
+
+        $playerIds = [];
+        foreach ($map as $ident => $entry) {
+            if (!is_string($ident) || !is_array($entry)
+                || !is_string($entry['player_id'] ?? null) || trim($entry['player_id']) === ''
+                || !is_string($entry['name'] ?? null) || trim($entry['name']) === ''
+                || !is_int($entry['variable_id'] ?? null) || $entry['variable_id'] <= 0) {
+                $this->SendDebug('Group member volumes', 'Gespeicherte Zuordnung hat eine ungültige Struktur', 0);
+                return null;
+            }
+            $playerId = trim($entry['player_id']);
+            if ($ident !== $this->groupMemberVolumeIdent($playerId) || isset($playerIds[$playerId])) {
+                $this->SendDebug('Group member volumes', 'Gespeicherte Zuordnung ist nicht eindeutig', 0);
+                return null;
+            }
+            $map[$ident] = [
+                'player_id' => $playerId,
+                'name' => trim($entry['name']),
+                'variable_id' => $entry['variable_id']
+            ];
+            $playerIds[$playerId] = true;
+        }
+        return $map;
+    }
+
+    private function writeGroupMemberVolumeMap(array $map): void
+    {
+        if (!$this->WriteAttributeString(
+            'GroupMemberVolumeMap',
+            json_encode(count($map) === 0 ? new stdClass() : $map, JSON_THROW_ON_ERROR)
+        )) {
+            throw new RuntimeException('Die Zuordnung der Gruppenlautstärken konnte nicht gespeichert werden.');
+        }
     }
 
     private function updateVolumeLevel($value): bool

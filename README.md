@@ -118,6 +118,8 @@ Normale Player und Syncgroups werden unterstützt. Die aktive Queue wird unabhä
 
 Bei Syncgroups verwendet das Modul die von Music Assistant bereitgestellte Gruppenlautstärke, sofern für die Gruppe keine eigene Lautstärke gemeldet wird. Die Gruppenlautstärke kann außerdem über die Schaltflächen für lauter und leiser gesteuert werden.
 
+Optional können für die aktuellen Mitglieder einer Playergruppe individuelle Lautstärkeregler eingeblendet werden. Die Regler werden bei Änderungen der Gruppenzusammensetzung automatisch ergänzt oder entfernt und über Player-Ereignisse aktualisiert.
+
 ## Skriptbefehle
 
 `$InstanceID` ist jeweils die ID der passenden Player- beziehungsweise Configurator-Instanz. Alle öffentlichen Befehle verwenden das einheitliche Modulpräfix `MASS`.
@@ -317,6 +319,8 @@ The player also creates an image media object with the ident `Cover`.
 Regular players and sync groups are supported. The active queue is mapped independently of the PlayerID, keeping playback status and metadata synchronized for groups as well.
 
 For sync groups, the module uses the group volume provided by Music Assistant when the group does not report its own volume. Group volume can also be adjusted using the volume up and down buttons.
+
+Individual volume controls can optionally be shown for the current members of a player group. The controls are added or removed automatically when group membership changes and are updated through player events.
 
 ## Script Commands
 
