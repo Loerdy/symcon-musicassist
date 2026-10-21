@@ -210,7 +210,12 @@ class MusicAssistantConfigurator extends IPSModule
 
             // einzelne Playlist-Einträge ohne eigenes Icon -> Profil-Icon gilt als Default
             IPS_SetVariableProfileAssociation($profile, (float)$id, $name, '', -1);
-            $map[(string)$id] = $uri;
+            $map[(string)$id] = [
+                'uri'               => $uri,
+                'provider_mappings' => is_array($pl['provider_mappings'] ?? null)
+                    ? $pl['provider_mappings']
+                    : []
+            ];
             $count++;
         }
 

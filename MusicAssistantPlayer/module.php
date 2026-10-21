@@ -300,8 +300,8 @@ class MusicAssistantPlayer extends IPSModule
                 try {
                     $itemId = (int)$Value;
                     if ($itemId > 0) {
-                        $uri = $this->resolveUriFromMap($itemId, 'PlaylistMap', 'music/playlists/library_items');
-                        $this->PlayMediaUri($uri);
+                        $playlist = $this->resolvePlaylistFromMap($itemId);
+                        $this->PlayPlaylist($playlist);
                         $this->SetValue('Playlist', $itemId);
                         $this->SetTimerInterval('ResetPlaylist', 5000);
                     }
@@ -1552,6 +1552,107 @@ class MusicAssistantPlayer extends IPSModule
             'media'    => $uri,
             'option'   => 'replace'
         ]);
+    }
+
+    private function resolvePlaylistFromMap(int $itemId): array
+    {
+        if ($itemId <= 0) {
+            throw new Exception('Invalid item_id');
+        }
+
+        $map = json_decode(trim($this->ReadPropertyString('PlaylistMap')), true);
+        if (!is_array($map)) {
+            $map = [];
+        }
+
+        $key = (string)$itemId;
+        if (isset($map[$key])) {
+            $entry = $this->normalizePlaylistMapEntry($map[$key]);
+            if ($entry !== null) {
+                return $entry;
+            }
+        }
+
+        $result = $this->sendApiRequest('music/playlists/library_items');
+        if (is_array($result) && $this->isList($result)) {
+            foreach ($result as $playlist) {
+                if (!is_array($playlist) || (int)($playlist['item_id'] ?? 0) !== $itemId) {
+                    continue;
+                }
+                $entry = $this->normalizePlaylistMapEntry([
+                    'uri'               => $playlist['uri'] ?? null,
+                    'provider_mappings' => $playlist['provider_mappings'] ?? []
+                ]);
+                if ($entry !== null) {
+                    return $entry;
+                }
+            }
+        }
+
+        throw new Exception('URI not found for item_id=' . $itemId);
+    }
+
+    private function normalizePlaylistMapEntry($entry): ?array
+    {
+        if (is_string($entry) && trim($entry) !== '') {
+            return ['uri' => trim($entry), 'provider_mappings' => []];
+        }
+        if (!is_array($entry) || !is_string($entry['uri'] ?? null) || trim($entry['uri']) === '') {
+            return null;
+        }
+
+        return [
+            'uri'               => trim($entry['uri']),
+            'provider_mappings' => is_array($entry['provider_mappings'] ?? null)
+                ? $entry['provider_mappings']
+                : []
+        ];
+    }
+
+    private function PlayPlaylist(array $playlist): void
+    {
+        if (!$this->isBuiltinRandomTracksPlaylist($playlist)) {
+            $this->PlayMediaUri($playlist['uri']);
+            return;
+        }
+
+        $tracks = $this->sendApiRequest('music/playlists/playlist_tracks', [
+            'item_id'                       => 'random_tracks',
+            'provider_instance_id_or_domain' => 'builtin',
+            'force_refresh'                 => true
+        ]);
+        if (!is_array($tracks) || !$this->isList($tracks) || count($tracks) === 0) {
+            throw new Exception('Refresh of builtin random_tracks returned no complete track list.');
+        }
+
+        $trackUris = [];
+        foreach ($tracks as $track) {
+            if (!is_array($track) || !is_string($track['uri'] ?? null) || trim($track['uri']) === '') {
+                throw new Exception('Refresh of builtin random_tracks returned an invalid track.');
+            }
+            $trackUris[] = trim($track['uri']);
+        }
+
+        $queueId = $this->getQueueIdForPlayer();
+        $this->sendApiRequest('player_queues/play_media', [
+            'queue_id' => $queueId,
+            'media'    => $trackUris,
+            'option'   => 'replace'
+        ]);
+    }
+
+    private function isBuiltinRandomTracksPlaylist(array $playlist): bool
+    {
+        foreach ($playlist['provider_mappings'] as $mapping) {
+            if (!is_array($mapping) || ($mapping['item_id'] ?? null) !== 'random_tracks') {
+                continue;
+            }
+            if (($mapping['provider_instance'] ?? null) === 'builtin'
+                && ($mapping['provider_domain'] ?? null) === 'builtin') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function playerId(): string

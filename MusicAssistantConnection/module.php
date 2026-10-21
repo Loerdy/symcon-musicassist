@@ -32,6 +32,7 @@ class MusicAssistantConnection extends IPSModule
         'player_queues/repeat',
         'player_queues/play_media',
         'music/playlists/library_items',
+        'music/playlists/playlist_tracks',
         'music/radios/library_items'
     ];
 
