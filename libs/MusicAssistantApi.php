@@ -36,7 +36,7 @@ trait MusicAssistantApi
         string $command,
         array $args = [],
         int $timeoutMs = 20000,
-        bool $debugResponseBody = true
+        bool $debugResponseBody = false
     ): array
     {
         $payload = [
@@ -55,7 +55,11 @@ trait MusicAssistantApi
         }
 
         $reqJson = json_encode($payload, JSON_UNESCAPED_SLASHES);
-        $this->SendDebug('MA Request', $reqJson, 0);
+        $this->SendDebug(
+            'MA Request',
+            'MessageID=' . $payload['message_id'] . ' Command=' . $command . ' ArgCount=' . count($args),
+            0
+        );
 
         // Konkurrierende HTTP-/Artwork-Zugriffe auf dieselbe Connection serialisieren.
         if (!IPS_SemaphoreEnter($this->maSemaphoreName(), 15000)) {
