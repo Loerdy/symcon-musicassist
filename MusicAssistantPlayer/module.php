@@ -860,6 +860,11 @@ class MusicAssistantPlayer extends IPSModule
 
     public function SetRepeat(string $mode): void
     {
+        $mode = strtolower(trim($mode));
+        if (!in_array($mode, ['off', 'one', 'all'], true)) {
+            throw new InvalidArgumentException('Invalid repeat mode.');
+        }
+
         $queueId = $this->getQueueIdForPlayer();
         $this->sendApiRequest('player_queues/repeat', ['queue_id' => $queueId, 'repeat_mode' => $mode]);
     }
@@ -892,6 +897,10 @@ class MusicAssistantPlayer extends IPSModule
 
     public function SetVolumeLevel(int $level): void
     {
+        if ($level < 0 || $level > 100) {
+            throw new InvalidArgumentException('Volume level must be between 0 and 100.');
+        }
+
         $this->sendApiRequest('players/cmd/volume_set', ['player_id' => $this->playerId(), 'volume_level' => $level]);
     }
 
