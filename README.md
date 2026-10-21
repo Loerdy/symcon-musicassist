@@ -105,7 +105,7 @@ Neu angelegte Player werden direkt mit der Connection des Configurators verbunde
 | `Mute` | Mute | Boolean | ja | Stummschaltung |
 | `VolumeLevel` | Volume | Integer | ja | Lautstärke 0 bis 100 |
 | `VolumeUp` | Volume + | Integer | ja | Gruppenlautstärke erhöhen |
-| `VolumeDown` | Volume | Integer | ja | Gruppenlautstärke verringern |
+| `VolumeDown` | Volume - | Integer | ja | Gruppenlautstärke verringern |
 | `NowTitle` | Titel | String | nein | Titel des aktuellen Queue-Eintrags |
 | `NowArtist` | Interpret | String | nein | Interpret des aktuellen Queue-Eintrags |
 | `NowAlbum` | Album | String | nein | Album des aktuellen Queue-Eintrags |
@@ -133,7 +133,7 @@ MASS_GroupVolumeUp($InstanceID);
 MASS_GroupVolumeDown($InstanceID);
 ```
 
-Für `MASS_SetRepeat()` sind die Werte `off`, `one` und `all` vorgesehen. Für `MASS_SetVolumeLevel()` muss der aufrufende Code einen Wert von `0` bis `100` übergeben; der öffentliche Befehl begrenzt den Wert nicht selbst.
+`MASS_SetRepeat()` entfernt führende und nachfolgende Leerzeichen, normalisiert den Modus auf Kleinschreibung und akzeptiert ausschließlich `off`, `one` und `all`. `MASS_SetVolumeLevel()` akzeptiert ausschließlich Werte von `0` bis `100`. Ungültige Werte werden von beiden Befehlen mit einer `InvalidArgumentException` abgelehnt; die Lautstärke wird nicht automatisch begrenzt.
 
 Beispiel:
 
@@ -171,11 +171,11 @@ Nach jedem erfolgreichen Verbindungsaufbau werden der aktuelle Playerzustand und
 
 ## Cover
 
-Das Cover des aktuellen Titels wird von Music Assistant geladen und als IP-Symcon-Medienobjekt bereitgestellt.
+Das Cover des aktuellen Titels wird von Music Assistant im JPEG- oder PNG-Format geladen und als IP-Symcon-Medienobjekt bereitgestellt.
 
 - Bei Wiedergabe und Pause bleibt das Cover sichtbar.
-- Im Zustand `idle` wird es ausgeblendet; nicht mehr aktuelle Wiedergabemetadaten werden entfernt.
-- Ist für den aktuellen Titel kein Cover verfügbar, wird kein veraltetes Bild angezeigt.
+- Solange kein aktuelles Cover verfügbar ist, wird ein Standard-Cover angezeigt, sodass kein veraltetes Bild sichtbar bleibt.
+- Im Zustand `idle` wird das Cover geleert und ausgeblendet; nicht mehr aktuelle Wiedergabemetadaten werden entfernt.
 
 ## Player-Lifecycle
 
@@ -192,7 +192,7 @@ Neu über den IP-Symcon-Configurator angelegte Player registrieren sich über `F
 
 ## Versionierung
 
-Der aktuelle veröffentlichte Stable-Stand ist **v2.0.1**.
+Der für die Veröffentlichung vorbereitete Stable-Stand ist **v2.0.2**.
 
 Der Tag [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) kennzeichnet den ersten veröffentlichten Stable-Stand.
 
@@ -305,7 +305,7 @@ New player instances are connected directly to the configurator's connection.
 | `Mute` | Mute | Boolean | yes | Mute control |
 | `VolumeLevel` | Volume | Integer | yes | Volume from 0 to 100 |
 | `VolumeUp` | Volume + | Integer | yes | Increase group volume |
-| `VolumeDown` | Volume | Integer | yes | Decrease group volume |
+| `VolumeDown` | Volume - | Integer | yes | Decrease group volume |
 | `NowTitle` | Titel | String | no | Title of the current queue item |
 | `NowArtist` | Interpret | String | no | Artist of the current queue item |
 | `NowAlbum` | Album | String | no | Album of the current queue item |
@@ -333,7 +333,7 @@ MASS_GroupVolumeUp($InstanceID);
 MASS_GroupVolumeDown($InstanceID);
 ```
 
-`MASS_SetRepeat()` supports the values `off`, `one`, and `all`. The calling code must pass a value from `0` to `100` to `MASS_SetVolumeLevel()`; the public command does not clamp the value itself.
+`MASS_SetRepeat()` trims leading and trailing whitespace, normalizes the mode to lowercase, and accepts only `off`, `one`, and `all`. `MASS_SetVolumeLevel()` accepts only values from `0` to `100`. Both commands reject invalid values with an `InvalidArgumentException`; the volume is not clamped automatically.
 
 Example:
 
@@ -371,11 +371,11 @@ After every successful connection, the current player state and active queue are
 
 ## Cover Artwork
 
-The cover artwork for the current track is loaded from Music Assistant and provided as an IP-Symcon media object.
+The cover artwork for the current track is loaded from Music Assistant in JPEG or PNG format and provided as an IP-Symcon media object.
 
 - The cover remains visible during playback and while paused.
-- In the `idle` state, it is hidden and stale playback metadata is removed.
-- If no cover is available for the current track, no stale image is displayed.
+- A default cover is displayed until current artwork is available, preventing stale artwork from remaining visible.
+- In the `idle` state, the cover is cleared and hidden, and stale playback metadata is removed.
 
 ## Player Lifecycle
 
@@ -392,6 +392,6 @@ Players newly created through the IP-Symcon configurator reliably register with 
 
 ## Versioning
 
-The current published stable release is **v2.0.1**.
+The stable release prepared for publication is **v2.0.2**.
 
 The [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) tag marks the first published stable version.
