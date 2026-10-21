@@ -35,6 +35,8 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
         $this->SetBuffer('GroupMemberVolumeRefreshRequest', '');
+        $this->SetBuffer('KnownPlayerTypeID', '');
+        $this->SetBuffer('KnownPlayerType', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
@@ -164,20 +166,20 @@ class MusicAssistantPlayer extends IPSModule
     public function GetConfigurationForm(): string
     {
         // Die Konfigurationsanzeige wird kompatibel über Label und UpdateFormField umgesetzt.
+        $showGroupMemberVolumes = $this->isConfiguredPlayerKnownGroup();
         $form = [
             'elements' => [
                 ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
+                ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
+                // Inhalt wird per UpdateFormField("ConfigView","caption", ...) gesetzt
+                ['type' => 'Label', 'name' => 'ConfigView', 'caption' => ''],
+                ['type' => 'Button', 'caption' => 'Konfiguration aktualisieren', 'onClick' => 'IPS_RequestAction($id, "UpdateConfigView", true);'],
                 [
                     'type' => 'CheckBox',
                     'name' => 'ShowGroupMemberVolumes',
-                    'caption' => 'Individuelle Lautstärkeregler für aktuelle Gruppenmitglieder anzeigen'
-                ],
-                ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
-                // Inhalt wird per UpdateFormField("ConfigView","caption", ...) gesetzt
-                ['type' => 'Label', 'name' => 'ConfigView', 'caption' => '']
-            ],
-            'actions' => [
-                ['type' => 'Button', 'caption' => 'Konfiguration aktualisieren', 'onClick' => 'IPS_RequestAction($id, "UpdateConfigView", true);'],
+                    'caption' => 'Individuelle Lautstärkeregler für aktuelle Gruppenmitglieder anzeigen',
+                    'visible' => $showGroupMemberVolumes
+                ]
             ]
         ];
 
@@ -242,6 +244,16 @@ class MusicAssistantPlayer extends IPSModule
 
         $objectId = $packet['ObjectID'];
         $data = $packet['Data'];
+        if ($objectId === $playerId && is_string($data['type'] ?? null)
+            && trim($data['type']) !== '') {
+            $playerType = trim($data['type']);
+            if ($this->GetBuffer('KnownPlayerTypeID') !== $playerId
+                || $this->GetBuffer('KnownPlayerType') !== $playerType) {
+                $this->SetBuffer('KnownPlayerTypeID', $playerId);
+                $this->SetBuffer('KnownPlayerType', $playerType);
+                $this->updateGroupMemberVolumesFormVisibility();
+            }
+        }
         if ($this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
             try {
                 $this->processGroupMemberPlayerUpdate(
@@ -415,6 +427,24 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         $this->UpdateFormField('ConfigView', 'caption', $text);
+        $this->updateGroupMemberVolumesFormVisibility();
+    }
+
+    private function isConfiguredPlayerKnownGroup(): bool
+    {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        return $playerId !== ''
+            && $this->GetBuffer('KnownPlayerTypeID') === $playerId
+            && $this->GetBuffer('KnownPlayerType') === 'group';
+    }
+
+    private function updateGroupMemberVolumesFormVisibility(): void
+    {
+        $this->UpdateFormField(
+            'ShowGroupMemberVolumes',
+            'visible',
+            $this->isConfiguredPlayerKnownGroup()
+        );
     }
 
     private function requestGroupMemberVolumeAction(string $ident, $value): bool
