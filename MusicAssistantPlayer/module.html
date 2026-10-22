@@ -524,6 +524,7 @@
         const neutralBackgroundDark = "linear-gradient(145deg, #25282d 0%, #141619 58%, #0b0c0e 100%)";
         const neutralBackgroundLight = "linear-gradient(145deg, color-mix(in srgb, var(--card-color, #eef0f2) 88%, white) 0%, color-mix(in srgb, var(--card-color, #e3e6e9) 92%, black) 100%)";
         let analyzedCover = null;
+        let failedCover = null;
         let backgroundLayer = "a";
         let coverColor = null;
         let currentTheme = "dark";
@@ -611,6 +612,7 @@
                 if (analyzedCover !== cover) {
                     return;
                 }
+                failedCover = null;
                 try {
                     const canvas = document.createElement("canvas");
                     const size = 24;
@@ -665,6 +667,9 @@
                 coverElement.addEventListener("load", applyCoverBackground, {once: true});
                 coverElement.addEventListener("error", () => {
                     if (analyzedCover === cover) {
+                        failedCover = cover;
+                        coverElement.hidden = true;
+                        document.getElementById("cover-placeholder").hidden = false;
                         coverColor = null;
                         refreshBackground();
                     }
@@ -919,14 +924,17 @@
 
             const coverElement = document.getElementById("cover");
             const coverPlaceholder = document.getElementById("cover-placeholder");
-            coverElement.hidden = cover === "";
-            coverPlaceholder.hidden = cover !== "";
+            const coverUnavailable = cover === "" || cover === failedCover;
+            coverElement.hidden = coverUnavailable;
+            coverPlaceholder.hidden = !coverUnavailable;
             if (cover === "") {
                 coverElement.removeAttribute("src");
-            } else if (coverElement.src !== cover) {
+            } else if (cover !== failedCover && coverElement.src !== cover) {
                 coverElement.src = cover;
             }
-            analyzeCoverBackground(coverElement, cover);
+            if (cover !== failedCover) {
+                analyzeCoverBackground(coverElement, cover);
+            }
         }
 
         function handleMessage(data) {
