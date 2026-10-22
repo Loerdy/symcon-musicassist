@@ -523,10 +523,25 @@
         };
         const neutralBackgroundDark = "linear-gradient(145deg, #25282d 0%, #141619 58%, #0b0c0e 100%)";
         const neutralBackgroundLight = "linear-gradient(145deg, color-mix(in srgb, var(--card-color, #eef0f2) 88%, white) 0%, color-mix(in srgb, var(--card-color, #e3e6e9) 92%, black) 100%)";
+        const DEBUG_GROUP_VOLUME = true;
         let analyzedCover = null;
         let backgroundLayer = "a";
         let coverColor = null;
         let currentTheme = "dark";
+
+        function debugGroupVolume(event, memberId, slider, details = {}) {
+            if (!DEBUG_GROUP_VOLUME) {
+                return;
+            }
+            console.debug(`[${new Date().toISOString()}] [GroupVolume] ${memberId} ${event}`, {
+                sliderValue: slider ? slider.value : null,
+                interacting: slider ? slider.dataset.interacting ?? null : null,
+                requestedVolume: slider ? slider.dataset.requestedVolume ?? null : null,
+                deferredVolume: slider ? slider.dataset.deferredVolume ?? null : null,
+                renderedVolume: slider ? slider.dataset.renderedVolume ?? null : null,
+                ...details
+            });
+        }
 
         function setBackground(background) {
             const player = document.getElementById("player");
@@ -721,13 +736,16 @@
                         return;
                     }
                     const incomingVolume = String(member.volume);
+                    debugGroupVolume("server-value", member.ident, slider, {incomingVolume});
                     if (slider.dataset.interacting === "true") {
                         slider.dataset.deferredVolume = incomingVolume;
+                        debugGroupVolume("server-value-deferred-active", member.ident, slider, {incomingVolume});
                         return;
                     }
                     if (slider.dataset.requestedVolume !== undefined
                         && slider.dataset.requestedVolume !== incomingVolume) {
                         slider.dataset.deferredVolume = incomingVolume;
+                        debugGroupVolume("server-value-deferred-confirmation", member.ident, slider, {incomingVolume});
                         return;
                     }
                     if (slider.dataset.requestedVolume === incomingVolume) {
@@ -737,8 +755,14 @@
                         }
                         delete slider.dataset.requestedVolume;
                         delete slider.dataset.deferredVolume;
+                        debugGroupVolume("server-confirmed", member.ident, slider, {incomingVolume});
                     }
                     if (slider.dataset.renderedVolume !== incomingVolume) {
+                        debugGroupVolume("slider-value-assign", member.ident, slider, {
+                            oldValue: slider.value,
+                            newValue: incomingVolume,
+                            reason: "server-value"
+                        });
                         slider.value = incomingVolume;
                         slider.dataset.renderedVolume = incomingVolume;
                         value.textContent = `${member.volume} %`;
@@ -766,6 +790,12 @@
                 slider.min = "0";
                 slider.max = "100";
                 slider.step = "1";
+                debugGroupVolume("server-value", member.ident, slider, {incomingVolume: String(member.volume)});
+                debugGroupVolume("slider-value-assign", member.ident, slider, {
+                    oldValue: slider.value,
+                    newValue: String(member.volume),
+                    reason: "initial-render"
+                });
                 slider.value = String(member.volume);
                 slider.dataset.renderedVolume = String(member.volume);
                 slider.setAttribute("aria-label", `Lautstärke ${member.name}`);
@@ -782,6 +812,11 @@
                     const synchronizedVolume = slider.dataset.deferredVolume
                         ?? slider.dataset.renderedVolume;
                     delete slider.dataset.deferredVolume;
+                    debugGroupVolume("slider-value-assign", member.ident, slider, {
+                        oldValue: slider.value,
+                        newValue: synchronizedVolume,
+                        reason: "finish-interaction"
+                    });
                     slider.value = synchronizedVolume;
                     slider.dataset.renderedVolume = synchronizedVolume;
                     value.textContent = `${synchronizedVolume} %`;
@@ -789,8 +824,12 @@
                 slider.addEventListener("pointerdown", () => {
                     slider.dataset.interacting = "true";
                     slider.dataset.interactionStartVolume = slider.value;
+                    debugGroupVolume("pointerdown", member.ident, slider);
                 });
                 slider.addEventListener("pointerup", () => {
+                    debugGroupVolume("pointerup", member.ident, slider, {
+                        interactionStartVolume: slider.dataset.interactionStartVolume ?? null
+                    });
                     if (slider.value === slider.dataset.interactionStartVolume) {
                         finishInteraction();
                     }
@@ -803,9 +842,11 @@
                 slider.addEventListener("input", () => {
                     slider.dataset.interacting = "true";
                     value.textContent = `${slider.value} %`;
+                    debugGroupVolume("input", member.ident, slider);
                 });
                 slider.addEventListener("change", () => {
                     const volume = Number(slider.value);
+                    debugGroupVolume("change", member.ident, slider, {changeValue: volume});
                     if (Number.isInteger(volume) && volume >= 0 && volume <= 100) {
                         delete slider.dataset.interacting;
                         delete slider.dataset.deferredVolume;
@@ -813,19 +854,35 @@
                         if (slider.confirmationTimer !== undefined) {
                             window.clearTimeout(slider.confirmationTimer);
                         }
+                        debugGroupVolume("confirmation-timeout-scheduled", member.ident, slider, {
+                            requestedValue: volume,
+                            timeoutMilliseconds: 1500
+                        });
                         slider.confirmationTimer = window.setTimeout(() => {
                             delete slider.confirmationTimer;
+                            debugGroupVolume("confirmation-timeout-fired", member.ident, slider, {
+                                requestedValue: volume
+                            });
                             if (slider.dataset.requestedVolume !== String(volume)) {
+                                debugGroupVolume("confirmation-timeout-ignored", member.ident, slider, {
+                                    requestedValue: volume
+                                });
                                 return;
                             }
                             const synchronizedVolume = slider.dataset.deferredVolume
                                 ?? slider.dataset.renderedVolume;
                             delete slider.dataset.requestedVolume;
                             delete slider.dataset.deferredVolume;
+                            debugGroupVolume("slider-value-assign", member.ident, slider, {
+                                oldValue: slider.value,
+                                newValue: synchronizedVolume,
+                                reason: "confirmation-timeout"
+                            });
                             slider.value = synchronizedVolume;
                             slider.dataset.renderedVolume = synchronizedVolume;
                             value.textContent = `${synchronizedVolume} %`;
                         }, 1500);
+                        debugGroupVolume("requestAction", member.ident, slider, {requestValue: volume});
                         requestAction(member.ident, volume);
                     }
                 });
