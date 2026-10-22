@@ -8,6 +8,7 @@ class MusicAssistantPlayer extends IPSModule
     private const REPEAT_PROFILE  = 'MA.RepeatMode';
     private const VOLUP_PROFILE   = 'MA.VolumeUp';
     private const VOLDOWN_PROFILE = 'MA.VolumeDown';
+    private const FAVORITE_PROFILE = 'MA.Favorite';
     private const COVER_SEMAPHORE_TIMEOUT = 5000;
     private const GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT = 40000;
     private const FAVORITE_SEMAPHORE_TIMEOUT = 20000;
@@ -137,7 +138,20 @@ class MusicAssistantPlayer extends IPSModule
             && IPS_VariableExists($favoriteId)
             && (IPS_GetVariable($favoriteId)['VariableType'] ?? -1) === VARIABLETYPE_BOOLEAN;
         $showFavorite = $this->ReadPropertyBoolean('ShowFavorite');
-        $this->MaintainVariable('Favorite', 'Favorit', VARIABLETYPE_BOOLEAN, '~Switch', 140, $showFavorite);
+        $favoritePresentation = '~Switch';
+        if (defined('VARIABLE_PRESENTATION_SWITCH')) {
+            $favoritePresentation = [
+                'PRESENTATION'   => constant('VARIABLE_PRESENTATION_SWITCH'),
+                'USE_ICON_FALSE' => false,
+                'ICON_TRUE'      => 'heart',
+                'GLOW_COLOR'     => 0xE53935,
+                'GLOW_INTENSITY' => 30,
+                'USAGE_TYPE'     => 2
+            ];
+        } elseif ($showFavorite && $this->ensureFavoriteProfile()) {
+            $favoritePresentation = self::FAVORITE_PROFILE;
+        }
+        $this->MaintainVariable('Favorite', 'Favorit', VARIABLETYPE_BOOLEAN, $favoritePresentation, 140, $showFavorite);
         if ($showFavorite) {
             $favoriteId = @$this->GetIDForIdent('Favorite');
             $favoriteCreated = !$hadFavoriteVariable
@@ -1755,6 +1769,30 @@ class MusicAssistantPlayer extends IPSModule
             self::VOLUP_PROFILE   => $this->ensureIntButtonProfile(self::VOLUP_PROFILE, 'Up', 'volume-up'),
             self::VOLDOWN_PROFILE => $this->ensureIntButtonProfile(self::VOLDOWN_PROFILE, 'Down', 'volume-down')
         ];
+    }
+
+    private function ensureFavoriteProfile(): bool
+    {
+        if (!IPS_VariableProfileExists(self::FAVORITE_PROFILE)) {
+            IPS_CreateVariableProfile(self::FAVORITE_PROFILE, VARIABLETYPE_BOOLEAN);
+        }
+        if (!IPS_VariableProfileExists(self::FAVORITE_PROFILE)) {
+            $this->LogMessage('Variablenprofil ' . self::FAVORITE_PROFILE . ' konnte nicht erstellt werden.', KL_ERROR);
+            return false;
+        }
+
+        $profileData = IPS_GetVariableProfile(self::FAVORITE_PROFILE);
+        if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_BOOLEAN) {
+            $this->LogMessage(
+                'Variablenprofil ' . self::FAVORITE_PROFILE . ' hat nicht den erwarteten Typ Boolean und wird nicht verändert.',
+                KL_ERROR
+            );
+            return false;
+        }
+
+        IPS_SetVariableProfileAssociation(self::FAVORITE_PROFILE, false, 'Favorit', 'Heart', 0x555555);
+        IPS_SetVariableProfileAssociation(self::FAVORITE_PROFILE, true, 'Favorit', 'Heart', 0xE53935);
+        return true;
     }
 
     private function ensureIntButtonProfile(string $profile, string $caption, string $icon): bool
