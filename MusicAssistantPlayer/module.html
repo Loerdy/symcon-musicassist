@@ -717,9 +717,30 @@
                 normalized.forEach((member, index) => {
                     const slider = rows[index].querySelector("input");
                     const value = rows[index].querySelector("output");
-                    if (slider && value && slider.dataset.renderedVolume !== String(member.volume)) {
-                        slider.value = String(member.volume);
-                        slider.dataset.renderedVolume = String(member.volume);
+                    if (!slider || !value) {
+                        return;
+                    }
+                    const incomingVolume = String(member.volume);
+                    if (slider.dataset.interacting === "true") {
+                        slider.dataset.deferredVolume = incomingVolume;
+                        return;
+                    }
+                    if (slider.dataset.requestedVolume !== undefined
+                        && slider.dataset.requestedVolume !== incomingVolume) {
+                        slider.dataset.deferredVolume = incomingVolume;
+                        return;
+                    }
+                    if (slider.dataset.requestedVolume === incomingVolume) {
+                        if (slider.confirmationTimer !== undefined) {
+                            window.clearTimeout(slider.confirmationTimer);
+                            delete slider.confirmationTimer;
+                        }
+                        delete slider.dataset.requestedVolume;
+                        delete slider.dataset.deferredVolume;
+                    }
+                    if (slider.dataset.renderedVolume !== incomingVolume) {
+                        slider.value = incomingVolume;
+                        slider.dataset.renderedVolume = incomingVolume;
                         value.textContent = `${member.volume} %`;
                     }
                 });
@@ -753,15 +774,62 @@
                 value.className = "group-volume-value";
                 value.textContent = `${member.volume} %`;
 
+                const finishInteraction = () => {
+                    delete slider.dataset.interacting;
+                    if (slider.dataset.requestedVolume !== undefined) {
+                        return;
+                    }
+                    const synchronizedVolume = slider.dataset.deferredVolume
+                        ?? slider.dataset.renderedVolume;
+                    delete slider.dataset.deferredVolume;
+                    slider.value = synchronizedVolume;
+                    slider.dataset.renderedVolume = synchronizedVolume;
+                    value.textContent = `${synchronizedVolume} %`;
+                };
+                slider.addEventListener("pointerdown", () => {
+                    slider.dataset.interacting = "true";
+                    slider.dataset.interactionStartVolume = slider.value;
+                });
+                slider.addEventListener("pointerup", () => {
+                    if (slider.value === slider.dataset.interactionStartVolume) {
+                        finishInteraction();
+                    }
+                    delete slider.dataset.interactionStartVolume;
+                });
+                slider.addEventListener("pointercancel", finishInteraction);
+                slider.addEventListener("keydown", () => {
+                    slider.dataset.interacting = "true";
+                });
                 slider.addEventListener("input", () => {
+                    slider.dataset.interacting = "true";
                     value.textContent = `${slider.value} %`;
                 });
                 slider.addEventListener("change", () => {
                     const volume = Number(slider.value);
                     if (Number.isInteger(volume) && volume >= 0 && volume <= 100) {
+                        delete slider.dataset.interacting;
+                        delete slider.dataset.deferredVolume;
+                        slider.dataset.requestedVolume = String(volume);
+                        if (slider.confirmationTimer !== undefined) {
+                            window.clearTimeout(slider.confirmationTimer);
+                        }
+                        slider.confirmationTimer = window.setTimeout(() => {
+                            delete slider.confirmationTimer;
+                            if (slider.dataset.requestedVolume !== String(volume)) {
+                                return;
+                            }
+                            const synchronizedVolume = slider.dataset.deferredVolume
+                                ?? slider.dataset.renderedVolume;
+                            delete slider.dataset.requestedVolume;
+                            delete slider.dataset.deferredVolume;
+                            slider.value = synchronizedVolume;
+                            slider.dataset.renderedVolume = synchronizedVolume;
+                            value.textContent = `${synchronizedVolume} %`;
+                        }, 1500);
                         requestAction(member.ident, volume);
                     }
                 });
+                slider.addEventListener("blur", finishInteraction);
 
                 row.append(name, slider, value);
                 container.appendChild(row);
