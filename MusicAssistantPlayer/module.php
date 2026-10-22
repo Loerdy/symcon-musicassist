@@ -2243,27 +2243,31 @@ class MusicAssistantPlayer extends IPSModule
 
     private function PlayPlaylist(array $playlist): void
     {
-        if (!$this->isBuiltinRandomTracksPlaylist($playlist)) {
+        $builtinItemId = $this->getRefreshableBuiltinPlaylistItemId($playlist);
+        if ($builtinItemId === null) {
             $this->PlayMediaUri($playlist['uri']);
             return;
         }
 
         $queueId = $this->getQueueIdForPlayer();
-        $this->playRefreshedPlaylist($queueId, 'random_tracks', 'builtin');
+        $this->playRefreshedPlaylist($queueId, $builtinItemId, 'builtin');
     }
 
-    private function isBuiltinRandomTracksPlaylist(array $playlist): bool
+    private function getRefreshableBuiltinPlaylistItemId(array $playlist): ?string
     {
+        $refreshableItemIds = ['random_tracks', 'random_album', 'random_artist'];
         foreach ($playlist['provider_mappings'] as $mapping) {
-            if (!is_array($mapping) || ($mapping['item_id'] ?? null) !== 'random_tracks') {
+            if (!is_array($mapping)
+                || !is_string($mapping['item_id'] ?? null)
+                || !in_array($mapping['item_id'], $refreshableItemIds, true)) {
                 continue;
             }
             if (($mapping['provider_instance'] ?? null) === 'builtin'
                 && ($mapping['provider_domain'] ?? null) === 'builtin') {
-                return true;
+                return $mapping['item_id'];
             }
         }
-        return false;
+        return null;
     }
 
     private function playerId(): string

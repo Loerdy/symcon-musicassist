@@ -4,7 +4,7 @@
 
 - Playergruppen können optional ereignisgesteuerte Lautstärkeregler für ihre aktuellen Mitglieder bereitstellen.
 - Aktualisierte Playlist-Zuordnungen werden an bestehende Player derselben Music-Assistant-Verbindung übertragen.
-- Die Builtin-Zufallsplaylist wird innerhalb der Connection aktualisiert und gestartet, ohne vollständige Trackdaten an den Player zu übertragen.
+- Die Builtin-Zufallsplaylists für Tracks, Alben und Künstler werden innerhalb der Connection aktualisiert und gestartet, ohne vollständige Trackdaten an den Player zu übertragen.
 - Player können optional den Favoritenstatus des aktuellen Titels anzeigen und ändern.
 - Explizite API-Antworten mit `result: null` werden korrekt als Null-Ergebnis verarbeitet.
 - Die Favoritensteuerung wird als Herzschalter mit hervorgehobenem Aktivzustand dargestellt.

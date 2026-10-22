@@ -366,19 +366,21 @@ class MusicAssistantConnection extends IPSModule
     {
         $allowedFields = ['DataID', 'Command', 'QueueID', 'ItemID', 'Provider'];
         $queueId = is_string($request['QueueID'] ?? null) ? trim($request['QueueID']) : '';
+        $itemId = is_string($request['ItemID'] ?? null) ? trim($request['ItemID']) : '';
+        $provider = is_string($request['Provider'] ?? null) ? trim($request['Provider']) : '';
         if (count(array_diff(array_keys($request), $allowedFields)) > 0
             || $queueId === ''
             || strlen($queueId) > 1024
             || preg_match('/[\x00-\x1F\x7F]/', $queueId)
-            || ($request['ItemID'] ?? null) !== 'random_tracks'
-            || ($request['Provider'] ?? null) !== 'builtin') {
+            || !in_array($itemId, ['random_tracks', 'random_album', 'random_artist'], true)
+            || $provider !== 'builtin') {
             return $this->apiErrorResponse('INVALID_REQUEST', 'Ungültige Anfrage für die aktualisierte Playlist-Wiedergabe.');
         }
 
         try {
             $response = $this->maCall('music/playlists/playlist_tracks', [
-                'item_id'                        => 'random_tracks',
-                'provider_instance_id_or_domain' => 'builtin',
+                'item_id'                        => $itemId,
+                'provider_instance_id_or_domain' => $provider,
                 'force_refresh'                  => true
             ], 20000, false);
             $tracks = $response['result'] ?? null;
