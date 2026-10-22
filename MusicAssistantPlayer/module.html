@@ -123,6 +123,50 @@
             box-shadow: 0 0 0.65rem rgb(66 184 131 / 35%);
         }
 
+        .volume-control {
+            display: grid;
+            grid-template-columns: 2rem minmax(0, 1fr) 2.8rem;
+            gap: 0.5rem;
+            align-items: center;
+            margin-top: 0.65rem;
+        }
+
+        .mute-button {
+            width: 2rem;
+            height: 2rem;
+            padding: 0;
+            border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+            border-radius: 0.55rem;
+            color: inherit;
+            background: color-mix(in srgb, currentColor 8%, transparent);
+            font: inherit;
+            font-size: 1rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        .mute-button:hover,
+        .mute-button:focus-visible {
+            background: color-mix(in srgb, currentColor 16%, transparent);
+        }
+
+        .player[data-muted="true"] .mute-button {
+            color: #e8a838;
+            border-color: #e8a838;
+        }
+
+        .volume-slider {
+            width: 100%;
+            min-width: 0;
+            accent-color: #42b883;
+        }
+
+        .volume-value {
+            font-size: 0.75rem;
+            text-align: right;
+            opacity: 0.72;
+        }
+
         @media (max-width: 260px) {
             .player {
                 grid-template-columns: 64px minmax(0, 1fr);
@@ -147,6 +191,11 @@
                 <button type="button" id="transport-toggle" title="Wiedergabe" aria-label="Wiedergabe">&#x25B6;</button>
                 <button type="button" data-transport="1" title="Stop" aria-label="Stop">&#x25A0;</button>
                 <button type="button" data-transport="4" title="Weiter" aria-label="Weiter">&#x23ED;</button>
+            </div>
+            <div class="volume-control">
+                <button type="button" class="mute-button" id="mute" title="Stumm" aria-label="Stumm" aria-pressed="false">&#x1F50A;</button>
+                <input class="volume-slider" id="volume" type="range" min="0" max="100" step="1" value="0" aria-label="Lautstärke">
+                <output class="volume-value" id="volume-value" for="volume">0 %</output>
             </div>
         </section>
     </main>
@@ -174,6 +223,10 @@
                 && /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(data.cover)
                 ? data.cover
                 : "";
+            const volume = typeof data.volume === "number" && Number.isFinite(data.volume)
+                ? Math.max(0, Math.min(100, Math.round(data.volume)))
+                : 0;
+            const muted = data.muted === true;
 
             document.getElementById("title").textContent = title || "Kein Titel";
             document.getElementById("artist").textContent = artist;
@@ -185,6 +238,17 @@
             toggleButton.textContent = isPlaying ? "\u23F8" : "\u25B6";
             toggleButton.title = isPlaying ? "Pause" : "Wiedergabe";
             toggleButton.setAttribute("aria-label", toggleButton.title);
+
+            const volumeElement = document.getElementById("volume");
+            volumeElement.value = String(volume);
+            document.getElementById("volume-value").textContent = `${volume} %`;
+            document.getElementById("player").dataset.muted = String(muted);
+
+            const muteButton = document.getElementById("mute");
+            muteButton.textContent = muted ? "\u{1F507}" : "\u{1F50A}";
+            muteButton.title = muted ? "Ton einschalten" : "Stumm";
+            muteButton.setAttribute("aria-label", muteButton.title);
+            muteButton.setAttribute("aria-pressed", String(muted));
 
             const coverElement = document.getElementById("cover");
             coverElement.hidden = cover === "";
@@ -218,6 +282,16 @@
         document.getElementById("transport-toggle").addEventListener("click", () => {
             const value = document.getElementById("player").dataset.status === "playing" ? 3 : 2;
             requestAction("Transport", value);
+        });
+        document.getElementById("volume").addEventListener("input", (event) => {
+            document.getElementById("volume-value").textContent = `${event.target.value} %`;
+        });
+        document.getElementById("volume").addEventListener("change", (event) => {
+            requestAction("VolumeLevel", Number(event.target.value));
+        });
+        document.getElementById("mute").addEventListener("click", () => {
+            const muted = document.getElementById("player").dataset.muted === "true";
+            requestAction("Mute", !muted);
         });
 
         renderState(__MUSIC_ASSISTANT_INITIAL_STATE__);

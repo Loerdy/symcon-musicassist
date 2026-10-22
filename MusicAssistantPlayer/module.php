@@ -350,6 +350,7 @@ class MusicAssistantPlayer extends IPSModule
         if ($this->updateMuteState($data['volume_muted'] ?? null)) {
             $this->SendDebug('player_updated', 'Mute aktualisiert', 0);
         }
+        $this->updateVisualization();
         return '';
     }
 
@@ -1327,12 +1328,20 @@ class MusicAssistantPlayer extends IPSModule
             ? (int)$this->GetValue('Transport')
             : 0;
         $states = [1 => 'idle', 2 => 'playing', 3 => 'paused'];
+        $volume = @$this->GetIDForIdent('VolumeLevel') > 0
+            ? max(0, min(100, (int)$this->GetValue('VolumeLevel')))
+            : 0;
+        $muted = @$this->GetIDForIdent('Mute') > 0
+            ? (bool)$this->GetValue('Mute')
+            : false;
 
         return [
             'cover'  => $this->readVisualizationCover(),
             'title'  => $this->readVisualizationString('NowTitle'),
             'artist' => $this->readVisualizationString('NowArtist'),
-            'status' => $states[$transport] ?? 'unknown'
+            'status' => $states[$transport] ?? 'unknown',
+            'volume' => $volume,
+            'muted'  => $muted
         ];
     }
 
