@@ -189,7 +189,7 @@
         }
 
         .mode-controls {
-            display: grid;
+            display: none;
             grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 0.4rem;
             margin-top: clamp(0.25rem, 1.4cqh, 0.55rem);
@@ -252,7 +252,7 @@
         }
 
         .media-selectors {
-            display: grid;
+            display: none;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 0.4rem;
             margin-top: clamp(0.25rem, 1.4cqh, 0.55rem);
@@ -333,6 +333,13 @@
             .mode-controls,
             .media-selectors {
                 margin-top: 0.25rem;
+            }
+        }
+
+        @container tile (min-width: 300px) and (min-height: 260px) {
+            .mode-controls,
+            .media-selectors {
+                display: grid;
             }
         }
 
