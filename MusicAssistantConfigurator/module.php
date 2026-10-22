@@ -253,11 +253,44 @@ class MusicAssistantConfigurator extends IPSModule
 
         $result = $this->sendApiRequest('music/radios/library_items');
 
-        $items = [];
+        $items = null;
         if (is_array($result) && $this->isList($result)) {
             $items = $result;
-        } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
+        } elseif (is_array($result)
+            && isset($result['items'])
+            && is_array($result['items'])
+            && $this->isList($result['items'])) {
             $items = $result['items'];
+        }
+        if ($items === null || count($items) === 0) {
+            throw new Exception('Radio-Abfrage lieferte keine vollständige Liste. Vorhandene Daten wurden beibehalten.');
+        }
+
+        $map = [];
+        $associations = [];
+        $count = 0;
+        foreach ($items as $r) {
+            if ($count >= 127) break;
+
+            if (!is_array($r)) {
+                throw new Exception('Radio-Abfrage lieferte einen unvollständigen Eintrag. Vorhandene Daten wurden beibehalten.');
+            }
+
+            $idStr = (string)($r['item_id'] ?? '');
+            $id    = (int)$idStr;
+            $name  = (string)($r['name'] ?? ('Radio ' . $idStr));
+            $uri   = (string)($r['uri'] ?? '');
+
+            if ($id <= 0 || $uri === '') {
+                throw new Exception('Radio-Abfrage lieferte einen unvollständigen Eintrag. Vorhandene Daten wurden beibehalten.');
+            }
+
+            $map[(string)$id] = $uri;
+            $associations[(string)$id] = $name;
+            $count++;
+        }
+        if ($count === 0) {
+            throw new Exception('Radio-Abfrage lieferte keine verwendbaren Einträge. Vorhandene Daten wurden beibehalten.');
         }
 
         $this->ensureIntegerProfile($profile);
@@ -274,22 +307,9 @@ class MusicAssistantConfigurator extends IPSModule
         // 0 = "-" (Neutralwert)
         IPS_SetVariableProfileAssociation($profile, 0, '-', '', -1);
 
-        $map = [];
-        $count = 0;
-        foreach ($items as $r) {
-            if ($count >= 127) break;
-
-            $idStr = (string)($r['item_id'] ?? '');
-            $id    = (int)$idStr;
-            $name  = (string)($r['name'] ?? ('Radio ' . $idStr));
-            $uri   = (string)($r['uri'] ?? '');
-
-            if ($id <= 0 || $uri === '') continue;
-
+        foreach ($associations as $id => $name) {
             // einzelne Radios ohne eigenes Icon -> Profil-Icon gilt als Default
             IPS_SetVariableProfileAssociation($profile, (float)$id, $name, '', -1);
-            $map[(string)$id] = $uri;
-            $count++;
         }
 
         $mapJson = json_encode($map, JSON_UNESCAPED_SLASHES);
