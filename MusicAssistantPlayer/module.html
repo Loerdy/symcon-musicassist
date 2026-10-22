@@ -87,14 +87,14 @@
             box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
         }
 
+        .cover-placeholder {
+            background: linear-gradient(145deg, #34383e, #202328);
+        }
+
         .details {
             grid-column: 2;
             min-width: 0;
             max-width: 100%;
-        }
-
-        .cover[hidden] + .details {
-            grid-column: 1 / -1;
         }
 
         .title,
@@ -448,7 +448,7 @@
 </head>
 <body>
     <main class="player" id="player" data-status="unknown">
-        <img class="cover" id="cover" alt="" hidden>
+        <img class="cover cover-placeholder" id="cover" alt="">
         <section class="details">
             <div class="title" id="title">Kein Titel</div>
             <div class="artist" id="artist"></div>
@@ -722,7 +722,7 @@
             renderGroupMembers(data.groupMembers);
 
             const coverElement = document.getElementById("cover");
-            coverElement.hidden = cover === "";
+            coverElement.classList.toggle("cover-placeholder", cover === "");
             if (cover === "") {
                 coverElement.removeAttribute("src");
             } else if (coverElement.src !== cover) {
