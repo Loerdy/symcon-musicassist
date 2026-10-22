@@ -173,14 +173,54 @@ class MusicAssistantConfigurator extends IPSModule
     {
         $profile = $this->playlistProfileName();
 
-        $result = $this->sendApiRequest('music/playlists/library_items');
+        $result = $this->sendApiRequest('music/playlists/library_items', ['summary' => false]);
 
-        $items = [];
+        $items = null;
         if (is_array($result) && $this->isList($result)) {
             $items = $result;
-        } elseif (is_array($result) && isset($result['items']) && is_array($result['items'])) {
+        } elseif (is_array($result)
+            && isset($result['items'])
+            && is_array($result['items'])
+            && $this->isList($result['items'])) {
             $items = $result['items'];
         }
+        if ($items === null || count($items) === 0) {
+            throw new Exception('Playlist-Abfrage lieferte keine vollständige Liste. Vorhandene Daten wurden beibehalten.');
+        }
+
+        $map = [];
+        $associations = [];
+        $count = 0;
+        foreach ($items as $pl) {
+            if ($count >= 127) break;
+
+            if (!is_array($pl)
+                || !is_array($pl['provider_mappings'] ?? null)) {
+                throw new Exception('Playlist-Abfrage lieferte einen unvollständigen Eintrag. Vorhandene Daten wurden beibehalten.');
+            }
+
+            $idStr = (string)($pl['item_id'] ?? '');
+            $id    = (int)$idStr;
+            $name  = (string)($pl['name'] ?? ('Playlist ' . $idStr));
+            $uri   = (string)($pl['uri'] ?? '');
+
+            if ($id <= 0 || $uri === '') {
+                throw new Exception('Playlist-Abfrage lieferte einen unvollständigen Eintrag. Vorhandene Daten wurden beibehalten.');
+            }
+
+            $map[(string)$id] = [
+                'uri'               => $uri,
+                'provider_mappings' => $pl['provider_mappings']
+            ];
+            $associations[(string)$id] = $name;
+            $count++;
+        }
+
+        if ($count === 0) {
+            throw new Exception('Playlist-Abfrage lieferte keine verwendbaren Einträge. Vorhandene Daten wurden beibehalten.');
+        }
+
+        $mapJson = json_encode($map, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
         $this->ensureIntegerProfile($profile);
 
@@ -196,30 +236,13 @@ class MusicAssistantConfigurator extends IPSModule
         // 0 = "-" (Neutralwert)
         IPS_SetVariableProfileAssociation($profile, 0, '-', '', -1);
 
-        $map = [];
-        $count = 0;
-        foreach ($items as $pl) {
-            if ($count >= 127) break;
-
-            $idStr = (string)($pl['item_id'] ?? '');
-            $id    = (int)$idStr;
-            $name  = (string)($pl['name'] ?? ('Playlist ' . $idStr));
-            $uri   = (string)($pl['uri'] ?? '');
-
-            if ($id <= 0 || $uri === '') continue;
-
+        foreach ($associations as $id => $name) {
             // einzelne Playlist-Einträge ohne eigenes Icon -> Profil-Icon gilt als Default
             IPS_SetVariableProfileAssociation($profile, (float)$id, $name, '', -1);
-            $map[(string)$id] = [
-                'uri'               => $uri,
-                'provider_mappings' => is_array($pl['provider_mappings'] ?? null)
-                    ? $pl['provider_mappings']
-                    : []
-            ];
-            $count++;
         }
 
-        $this->SetBuffer('PlaylistMap', json_encode($map, JSON_UNESCAPED_SLASHES));
+        $this->SetBuffer('PlaylistMap', $mapJson);
+        $this->updateConnectedPlayerPlaylistMaps($mapJson);
         $this->SendDebug('Playlists', 'Profile=' . $profile . ' entries=' . $count, 0);
         $this->ReloadForm();
     }
@@ -533,6 +556,29 @@ class MusicAssistantConfigurator extends IPSModule
             'RadioProfile'    => $this->radioProfileName(),
             'RadioMap'        => json_encode($this->getRadioMap(), JSON_UNESCAPED_SLASHES)
         ];
+    }
+
+    private function updateConnectedPlayerPlaylistMaps(string $mapJson): void
+    {
+        $connectionId = $this->getConfiguratorConnectionId();
+        foreach (IPS_GetInstanceListByModuleID(self::PLAYER_MODULE_ID) as $playerInstanceId) {
+            if (!IPS_InstanceExists($playerInstanceId)) {
+                continue;
+            }
+            $instance = IPS_GetInstance($playerInstanceId);
+            if (!is_array($instance) || (int)($instance['ConnectionID'] ?? 0) !== $connectionId) {
+                continue;
+            }
+            if (IPS_GetProperty($playerInstanceId, 'PlaylistMap') === $mapJson) {
+                continue;
+            }
+            if (!IPS_SetProperty($playerInstanceId, 'PlaylistMap', $mapJson)) {
+                throw new Exception('PlaylistMap konnte für Player-Instanz ' . $playerInstanceId . ' nicht gesetzt werden.');
+            }
+            if (!IPS_ApplyChanges($playerInstanceId)) {
+                throw new Exception('PlaylistMap konnte für Player-Instanz ' . $playerInstanceId . ' nicht übernommen werden.');
+            }
+        }
     }
 
     private function getConfiguratorConnectionId(): int

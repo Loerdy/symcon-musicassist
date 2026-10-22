@@ -1573,7 +1573,7 @@ class MusicAssistantPlayer extends IPSModule
             }
         }
 
-        $result = $this->sendApiRequest('music/playlists/library_items');
+        $result = $this->sendApiRequest('music/playlists/library_items', ['summary' => false]);
         if (is_array($result) && $this->isList($result)) {
             foreach ($result as $playlist) {
                 if (!is_array($playlist) || (int)($playlist['item_id'] ?? 0) !== $itemId) {

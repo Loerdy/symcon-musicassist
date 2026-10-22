@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Playergruppen können optional ereignisgesteuerte Lautstärkeregler für ihre aktuellen Mitglieder bereitstellen.
+- Aktualisierte Playlist-Zuordnungen werden an bestehende Player derselben Music-Assistant-Verbindung übertragen.
 
 ## 2.0.2 — 2026-10-21
 
