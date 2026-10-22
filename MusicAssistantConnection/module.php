@@ -268,6 +268,9 @@ class MusicAssistantConnection extends IPSModule
         if ($command === 'ApiRequest') {
             return $this->handleApiRequest($request);
         }
+        if ($command === 'PlayRefreshedPlaylist') {
+            return $this->handlePlayRefreshedPlaylist($request);
+        }
         if ($command === 'ArtworkRequest') {
             return $this->handleArtworkRequest($request);
         }
@@ -338,6 +341,60 @@ class MusicAssistantConnection extends IPSModule
         } catch (Throwable $e) {
             $this->SendDebug('ApiRequest', 'HTTP-Anfrage fehlgeschlagen für Command: ' . $apiCommand, 0);
             return $this->apiErrorResponse('API_ERROR', 'Music-Assistant-Anfrage fehlgeschlagen.');
+        }
+    }
+
+    private function handlePlayRefreshedPlaylist(array $request): string
+    {
+        $allowedFields = ['DataID', 'Command', 'QueueID', 'ItemID', 'Provider'];
+        $queueId = is_string($request['QueueID'] ?? null) ? trim($request['QueueID']) : '';
+        if (count(array_diff(array_keys($request), $allowedFields)) > 0
+            || $queueId === ''
+            || strlen($queueId) > 1024
+            || preg_match('/[\x00-\x1F\x7F]/', $queueId)
+            || ($request['ItemID'] ?? null) !== 'random_tracks'
+            || ($request['Provider'] ?? null) !== 'builtin') {
+            return $this->apiErrorResponse('INVALID_REQUEST', 'Ungültige Anfrage für die aktualisierte Playlist-Wiedergabe.');
+        }
+
+        try {
+            $response = $this->maCall('music/playlists/playlist_tracks', [
+                'item_id'                        => 'random_tracks',
+                'provider_instance_id_or_domain' => 'builtin',
+                'force_refresh'                  => true
+            ], 20000, false);
+            $tracks = $response['result'] ?? null;
+            if (($response['success'] ?? false) !== true
+                || !is_array($tracks)
+                || count($tracks) === 0
+                || array_keys($tracks) !== range(0, count($tracks) - 1)) {
+                return $this->apiErrorResponse('PLAYLIST_REFRESH_FAILED', 'Die Zufallsplaylist konnte nicht vollständig aktualisiert werden.');
+            }
+
+            $trackUris = [];
+            foreach ($tracks as $track) {
+                if (!is_array($track)
+                    || !is_string($track['uri'] ?? null)
+                    || trim($track['uri']) === '') {
+                    return $this->apiErrorResponse('PLAYLIST_REFRESH_FAILED', 'Die Zufallsplaylist enthält einen ungültigen Titel.');
+                }
+                $trackUris[] = trim($track['uri']);
+            }
+
+            $playResponse = $this->maCall('player_queues/play_media', [
+                'queue_id' => $queueId,
+                'media'    => $trackUris,
+                'option'   => 'replace'
+            ], 20000, false);
+            if (($playResponse['success'] ?? false) !== true) {
+                return $this->apiErrorResponse('PLAY_MEDIA_FAILED', 'Die aktualisierte Zufallsplaylist konnte nicht gestartet werden.');
+            }
+
+            $this->SendDebug('PlayRefreshedPlaylist', 'Titel an Queue übergeben: ' . count($trackUris), 0);
+            return json_encode(['success' => true], JSON_UNESCAPED_SLASHES);
+        } catch (Throwable $e) {
+            $this->SendDebug('PlayRefreshedPlaylist', 'Aktualisierung oder Wiedergabe fehlgeschlagen', 0);
+            return $this->apiErrorResponse('PLAY_REFRESHED_PLAYLIST_FAILED', 'Die Zufallsplaylist konnte nicht aktualisiert und gestartet werden.');
         }
     }
 

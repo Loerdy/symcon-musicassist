@@ -1306,6 +1306,44 @@ class MusicAssistantPlayer extends IPSModule
         return $result['result'] ?? null;
     }
 
+    private function playRefreshedPlaylist(string $queueId, string $itemId, string $provider): void
+    {
+        try {
+            $response = $this->SendDataToParent(json_encode([
+                'DataID'   => self::CONNECTION_REQUEST,
+                'Command'  => 'PlayRefreshedPlaylist',
+                'QueueID'  => $queueId,
+                'ItemID'   => $itemId,
+                'Provider' => $provider
+            ], JSON_THROW_ON_ERROR));
+        } catch (Throwable $e) {
+            throw new Exception('PlayRefreshedPlaylist konnte nicht erzeugt oder gesendet werden.');
+        }
+
+        if (!is_string($response) || trim($response) === '') {
+            throw new Exception('PlayRefreshedPlaylist lieferte keine gültige Antwort.');
+        }
+
+        try {
+            $result = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            throw new Exception('PlayRefreshedPlaylist lieferte ungültiges JSON.');
+        }
+        if (!is_array($result)) {
+            throw new Exception('PlayRefreshedPlaylist-Antwort ist kein JSON-Objekt.');
+        }
+        if (($result['success'] ?? false) !== true) {
+            $error = is_array($result['error'] ?? null) ? $result['error'] : [];
+            $code = is_string($error['code'] ?? null) && trim($error['code']) !== ''
+                ? trim($error['code'])
+                : 'UNKNOWN_ERROR';
+            $message = is_string($error['message'] ?? null) && trim($error['message']) !== ''
+                ? trim($error['message'])
+                : 'PlayRefreshedPlaylist ist fehlgeschlagen.';
+            throw new Exception($code . ': ' . $message);
+        }
+    }
+
     // --------- MA Commands ---------
 
     public function SetShuffle(bool $enabled): void
@@ -1616,29 +1654,8 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
 
-        $tracks = $this->sendApiRequest('music/playlists/playlist_tracks', [
-            'item_id'                       => 'random_tracks',
-            'provider_instance_id_or_domain' => 'builtin',
-            'force_refresh'                 => true
-        ]);
-        if (!is_array($tracks) || !$this->isList($tracks) || count($tracks) === 0) {
-            throw new Exception('Refresh of builtin random_tracks returned no complete track list.');
-        }
-
-        $trackUris = [];
-        foreach ($tracks as $track) {
-            if (!is_array($track) || !is_string($track['uri'] ?? null) || trim($track['uri']) === '') {
-                throw new Exception('Refresh of builtin random_tracks returned an invalid track.');
-            }
-            $trackUris[] = trim($track['uri']);
-        }
-
         $queueId = $this->getQueueIdForPlayer();
-        $this->sendApiRequest('player_queues/play_media', [
-            'queue_id' => $queueId,
-            'media'    => $trackUris,
-            'option'   => 'replace'
-        ]);
+        $this->playRefreshedPlaylist($queueId, 'random_tracks', 'builtin');
     }
 
     private function isBuiltinRandomTracksPlaylist(array $playlist): bool
