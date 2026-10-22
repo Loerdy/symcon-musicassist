@@ -77,6 +77,8 @@
 
         .cover {
             display: block;
+            grid-column: 1;
+            grid-row: 1;
             width: 100%;
             max-width: 100%;
             aspect-ratio: 1;
@@ -85,6 +87,10 @@
             border-radius: 10%;
             background: color-mix(in srgb, currentColor 10%, transparent);
             box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+        }
+
+        .cover[hidden] {
+            display: none;
         }
 
         .cover.cover-placeholder {
@@ -96,6 +102,7 @@
 
         .details {
             grid-column: 2;
+            grid-row: 1;
             min-width: 0;
             max-width: 100%;
         }
@@ -451,7 +458,8 @@
 </head>
 <body>
     <main class="player" id="player" data-status="unknown">
-        <img class="cover cover-placeholder" id="cover" alt="">
+        <div class="cover cover-placeholder" id="cover-placeholder" aria-hidden="true"></div>
+        <img class="cover" id="cover" alt="" hidden>
         <section class="details">
             <div class="title" id="title">Kein Titel</div>
             <div class="artist" id="artist"></div>
@@ -725,7 +733,9 @@
             renderGroupMembers(data.groupMembers);
 
             const coverElement = document.getElementById("cover");
-            coverElement.classList.toggle("cover-placeholder", cover === "");
+            const coverPlaceholder = document.getElementById("cover-placeholder");
+            coverElement.hidden = cover === "";
+            coverPlaceholder.hidden = cover !== "";
             if (cover === "") {
                 coverElement.removeAttribute("src");
             } else if (coverElement.src !== cover) {
