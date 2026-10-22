@@ -538,7 +538,10 @@
                         const maximum = Math.max(pixels[index], pixels[index + 1], pixels[index + 2]);
                         const minimum = Math.min(pixels[index], pixels[index + 1], pixels[index + 2]);
                         const saturation = maximum === 0 ? 0 : (maximum - minimum) / maximum;
-                        const weight = 0.35 + saturation;
+                        const luminance = (pixels[index] * 0.2126
+                            + pixels[index + 1] * 0.7152
+                            + pixels[index + 2] * 0.0722) / 255;
+                        const weight = 0.3 + saturation * 1.4 + luminance * 0.65;
                         red += pixels[index] * weight;
                         green += pixels[index + 1] * weight;
                         blue += pixels[index + 2] * weight;
@@ -550,9 +553,17 @@
                         return;
                     }
                     const color = [red, green, blue].map((value) => Math.round(value / weightSum));
-                    const accent = color.map((value) => Math.round(value * 0.42));
-                    const middle = color.map((value) => Math.round(value * 0.2));
-                    setBackground(`linear-gradient(145deg, rgb(${accent.join(" ")}) 0%, rgb(${middle.join(" ")}) 55%, #090b0d 100%)`);
+                    const luminance = color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722;
+                    const saturationBoost = Math.max(...color) - Math.min(...color) < 8 ? 1.15 : 1.55;
+                    const saturated = color.map((value) => luminance + (value - luminance) * saturationBoost);
+                    const saturatedLuminance = saturated[0] * 0.2126
+                        + saturated[1] * 0.7152
+                        + saturated[2] * 0.0722;
+                    const targetLuminance = Math.max(62, Math.min(92, luminance * 1.15));
+                    const scale = targetLuminance / Math.max(1, saturatedLuminance);
+                    const accent = saturated.map((value) => Math.round(Math.max(0, Math.min(170, value * scale))));
+                    const lower = accent.map((value) => Math.round(value * 0.48 + 8));
+                    setBackground(`linear-gradient(155deg, rgb(${accent.join(" ")}) 0%, rgb(${lower.join(" ")}) 100%)`);
                 } catch (error) {
                     setBackground(neutralBackground);
                 }
