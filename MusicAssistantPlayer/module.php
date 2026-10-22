@@ -2198,14 +2198,26 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         $key = (string)$itemId;
+        $legacyEntry = null;
         if (isset($map[$key])) {
             $entry = $this->normalizePlaylistMapEntry($map[$key]);
             if ($entry !== null) {
-                return $entry;
+                if (!is_string($map[$key])) {
+                    return $entry;
+                }
+                $legacyEntry = $entry;
             }
         }
 
-        $result = $this->sendApiRequest('music/playlists/library_items', ['summary' => false]);
+        try {
+            $result = $this->sendApiRequest('music/playlists/library_items', ['summary' => false]);
+        } catch (Throwable $e) {
+            if ($legacyEntry !== null) {
+                $this->SendDebug('Playlist', 'Provider-Auflösung fehlgeschlagen: ' . $e->getMessage(), 0);
+                return $legacyEntry;
+            }
+            throw $e;
+        }
         if (is_array($result) && $this->isList($result)) {
             foreach ($result as $playlist) {
                 if (!is_array($playlist) || (int)($playlist['item_id'] ?? 0) !== $itemId) {
@@ -2219,6 +2231,10 @@ class MusicAssistantPlayer extends IPSModule
                     return $entry;
                 }
             }
+        }
+        if ($legacyEntry !== null) {
+            $this->SendDebug('Playlist', 'Keine Provider-Daten für item_id=' . $itemId . '; gespeicherte URI wird verwendet', 0);
+            return $legacyEntry;
         }
 
         throw new Exception('URI not found for item_id=' . $itemId);
