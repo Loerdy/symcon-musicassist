@@ -550,23 +550,30 @@ class MusicAssistantPlayer extends IPSModule
 
     private function requestGroupMemberVolumeAction(string $ident, $value): bool
     {
-        if (!$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
+        $playerId = $this->withGroupMemberVolumeLock(function () use ($ident, $value): ?string {
+            if (!$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
+                return null;
+            }
+            $map = $this->readGroupMemberVolumeMap();
+            if ($map === null || !isset($map[$ident])) {
+                return null;
+            }
+            $variableId = @$this->GetIDForIdent($ident);
+            if ($variableId !== $map[$ident]['variable_id'] || !IPS_VariableExists($variableId)
+                || (IPS_GetVariable($variableId)['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                return null;
+            }
+            if (!is_int($value) || $value < 0 || $value > 100) {
+                throw new InvalidArgumentException('Group member volume must be between 0 and 100.');
+            }
+            return $map[$ident]['player_id'];
+        });
+        if ($playerId === null) {
             return false;
-        }
-        $map = $this->readGroupMemberVolumeMap();
-        if ($map === null || !isset($map[$ident])) {
-            return false;
-        }
-        $variableId = @$this->GetIDForIdent($ident);
-        if ($variableId !== $map[$ident]['variable_id'] || !IPS_VariableExists($variableId)) {
-            return false;
-        }
-        if (!is_int($value) || $value < 0 || $value > 100) {
-            throw new InvalidArgumentException('Group member volume must be between 0 and 100.');
         }
 
         $this->sendApiRequest('players/cmd/volume_set', [
-            'player_id' => $map[$ident]['player_id'],
+            'player_id' => $playerId,
             'volume_level' => $value
         ]);
         return true;
@@ -591,40 +598,49 @@ class MusicAssistantPlayer extends IPSModule
             }
             sort($memberIds);
             $requestId = bin2hex(random_bytes(16));
-            $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
-            $map = $this->readGroupMemberVolumeMap();
-            if ($map === null) {
-                return;
-            }
-            $knownMemberIds = array_column($map, 'player_id');
-            sort($knownMemberIds);
-            $sortedMemberIds = $memberIds;
-            sort($sortedMemberIds);
-            if ($isResync || $knownMemberIds !== $sortedMemberIds) {
+            $refreshRequired = $this->withGroupMemberVolumeLock(function () use (
+                $requestId,
+                $memberIds,
+                $isResync
+            ): bool {
+                $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
+                $map = $this->readGroupMemberVolumeMap();
+                if ($map === null) {
+                    return false;
+                }
+                $knownMemberIds = array_column($map, 'player_id');
+                sort($knownMemberIds);
+                return $isResync || $knownMemberIds !== $memberIds;
+            });
+            if ($refreshRequired) {
                 $this->refreshGroupMemberVolumes($memberIds, $isResync, $requestId);
             }
             return;
         }
 
-        $map = $this->readGroupMemberVolumeMap();
-        if ($map === null) {
-            return;
-        }
-        foreach ($map as $ident => $entry) {
-            if ($entry['player_id'] !== $objectId) {
-                continue;
+        $updated = $this->withGroupMemberVolumeLock(function () use ($objectId, $data): bool {
+            $map = $this->readGroupMemberVolumeMap();
+            if ($map === null) {
+                return false;
             }
-            $variableId = @$this->GetIDForIdent($ident);
-            if ($variableId !== $entry['variable_id']) {
-                return;
-            }
-            $volume = $data['volume_level'] ?? null;
-            if (is_int($volume) && $volume >= 0 && $volume <= 100
-                && IPS_VariableExists($variableId)) {
+            foreach ($map as $ident => $entry) {
+                if ($entry['player_id'] !== $objectId) {
+                    continue;
+                }
+                $variableId = @$this->GetIDForIdent($ident);
+                $volume = $data['volume_level'] ?? null;
+                if ($variableId !== $entry['variable_id'] || !IPS_VariableExists($variableId)
+                    || (IPS_GetVariable($variableId)['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER
+                    || !is_int($volume) || $volume < 0 || $volume > 100) {
+                    return false;
+                }
                 $this->SetValue($ident, $volume);
-                $this->updateVisualization();
+                return true;
             }
-            return;
+            return false;
+        });
+        if ($updated) {
+            $this->updateVisualization();
         }
     }
 
@@ -642,53 +658,65 @@ class MusicAssistantPlayer extends IPSModule
             $requestId = bin2hex(random_bytes(16));
             $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
         }
-        $this->withGroupMemberVolumeLock(function () use (
+        $proceed = $this->withGroupMemberVolumeLock(function () use (
             $groupPlayerId,
             $confirmedMemberIds,
             $forceRefresh,
             $requestId
-        ): void {
+        ): bool {
             if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
                 || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
                 || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
                 || !$this->HasActiveParent()) {
-                return;
+                return false;
             }
             if ($confirmedMemberIds !== null && !$forceRefresh) {
                 $map = $this->readGroupMemberVolumeMap();
                 if ($map === null) {
-                    return;
+                    return false;
                 }
                 $knownMemberIds = array_column($map, 'player_id');
                 sort($knownMemberIds);
                 $currentMemberIds = $confirmedMemberIds;
                 sort($currentMemberIds);
                 if ($knownMemberIds === $currentMemberIds) {
-                    return;
+                    return false;
                 }
             }
+            return true;
+        });
+        if (!$proceed) {
+            return;
+        }
 
-            $players = $this->sendApiRequest('players/all', [
-                'return_unavailable' => true,
-                'return_disabled' => true
-            ]);
-            if (!is_array($players) || !$this->isList($players)) {
-                throw new UnexpectedValueException('players/all lieferte keine vollständige Playerliste.');
-            }
+        $players = $this->sendApiRequest('players/all', [
+            'return_unavailable' => true,
+            'return_disabled' => true
+        ]);
+        if (!is_array($players) || !$this->isList($players)) {
+            throw new UnexpectedValueException('players/all lieferte keine vollständige Playerliste.');
+        }
 
-            $playersById = [];
-            foreach ($players as $player) {
-                if (!is_array($player) || !is_string($player['player_id'] ?? null)
-                    || trim($player['player_id']) === '') {
-                    continue;
-                }
-                $playersById[trim($player['player_id'])] = $player;
+        $playersById = [];
+        foreach ($players as $player) {
+            if (!is_array($player) || !is_string($player['player_id'] ?? null)
+                || trim($player['player_id']) === '') {
+                continue;
             }
+            $playersById[trim($player['player_id'])] = $player;
+        }
+
+        $updated = $this->withGroupMemberVolumeLock(function () use (
+            $groupPlayerId,
+            $confirmedMemberIds,
+            $requestId,
+            $playersById
+        ): bool {
             if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
                 || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
                 || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
                 || !$this->HasActiveParent()) {
-                return;
+                return false;
             }
 
             if ($confirmedMemberIds === null) {
@@ -697,8 +725,7 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 $group = $playersById[$groupPlayerId];
                 if (($group['type'] ?? null) !== 'group') {
-                    $this->removeGroupMemberVolumeVariablesUnlocked();
-                    return;
+                    return $this->removeGroupMemberVolumeVariablesUnlocked();
                 }
                 if (!array_key_exists('group_members', $group)) {
                     throw new UnexpectedValueException('Der Gruppensnapshot enthält keine vollständige Mitgliederliste.');
@@ -732,10 +759,14 @@ class MusicAssistantPlayer extends IPSModule
                 || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
                 || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
                 || !$this->HasActiveParent()) {
-                return;
+                return false;
             }
             $this->reconcileGroupMemberVolumeVariables($members);
+            return true;
         });
+        if ($updated) {
+            $this->updateVisualization();
+        }
     }
 
     private function validateGroupMemberIds($value, string $groupPlayerId): ?array
@@ -835,26 +866,28 @@ class MusicAssistantPlayer extends IPSModule
             }
         }
         $this->writeGroupMemberVolumeMap($newMap);
-        $this->updateVisualization();
     }
 
     private function removeGroupMemberVolumeVariables(): void
     {
         $requestId = bin2hex(random_bytes(16));
         $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
-        $this->withGroupMemberVolumeLock(function () use ($requestId): void {
+        $updated = $this->withGroupMemberVolumeLock(function () use ($requestId): bool {
             if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId) {
-                return;
+                return false;
             }
-            $this->removeGroupMemberVolumeVariablesUnlocked();
+            return $this->removeGroupMemberVolumeVariablesUnlocked();
         });
+        if ($updated) {
+            $this->updateVisualization();
+        }
     }
 
-    private function removeGroupMemberVolumeVariablesUnlocked(): void
+    private function removeGroupMemberVolumeVariablesUnlocked(): bool
     {
         $map = $this->readGroupMemberVolumeMap();
         if ($map === null) {
-            return;
+            return false;
         }
         $remaining = [];
         foreach ($map as $ident => $entry) {
@@ -869,8 +902,9 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ($remaining !== $map) {
             $this->writeGroupMemberVolumeMap($remaining);
-            $this->updateVisualization();
+            return true;
         }
+        return false;
     }
 
     private function withGroupMemberVolumeLock(callable $operation)
@@ -1378,32 +1412,34 @@ class MusicAssistantPlayer extends IPSModule
         if (!$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
             return [];
         }
-        $map = $this->readGroupMemberVolumeMap();
-        if ($map === null) {
-            return [];
-        }
+        return $this->withGroupMemberVolumeLock(function (): array {
+            $map = $this->readGroupMemberVolumeMap();
+            if ($map === null) {
+                return [];
+            }
 
-        $members = [];
-        foreach ($map as $ident => $entry) {
-            $variableId = @$this->GetIDForIdent($ident);
-            if ($variableId !== $entry['variable_id'] || !IPS_VariableExists($variableId)) {
-                continue;
+            $members = [];
+            foreach ($map as $ident => $entry) {
+                $variableId = @$this->GetIDForIdent($ident);
+                if ($variableId !== $entry['variable_id'] || !IPS_VariableExists($variableId)) {
+                    continue;
+                }
+                $variable = IPS_GetVariable($variableId);
+                if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                    continue;
+                }
+                $volume = (int)$this->GetValue($ident);
+                if ($volume < 0 || $volume > 100) {
+                    continue;
+                }
+                $members[] = [
+                    'ident'  => $ident,
+                    'name'   => $entry['name'],
+                    'volume' => $volume
+                ];
             }
-            $variable = IPS_GetVariable($variableId);
-            if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-                continue;
-            }
-            $volume = (int)$this->GetValue($ident);
-            if ($volume < 0 || $volume > 100) {
-                continue;
-            }
-            $members[] = [
-                'ident'  => $ident,
-                'name'   => $entry['name'],
-                'volume' => $volume
-            ];
-        }
-        return $members;
+            return $members;
+        });
     }
 
     private function buildVisualizationSelectionOptions(
