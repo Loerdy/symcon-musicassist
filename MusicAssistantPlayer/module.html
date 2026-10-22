@@ -148,7 +148,18 @@
         }
 
         function handleMessage(data) {
-            renderState(data);
+            let message = data;
+            if (typeof message === "string") {
+                try {
+                    message = JSON.parse(message);
+                } catch (error) {
+                    return;
+                }
+            }
+            if (!message || typeof message !== "object" || Array.isArray(message)) {
+                return;
+            }
+            renderState(message);
         }
 
         renderState(__MUSIC_ASSISTANT_INITIAL_STATE__);

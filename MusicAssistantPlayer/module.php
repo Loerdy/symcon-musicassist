@@ -1315,7 +1315,7 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         try {
-            $this->UpdateVisualizationValue($this->buildVisualizationState());
+            $this->UpdateVisualizationValue(json_encode($this->buildVisualizationState(), JSON_THROW_ON_ERROR));
         } catch (Throwable $e) {
             $this->SendDebug('Visualization', 'Kachel konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
         }
