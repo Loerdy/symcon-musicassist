@@ -928,8 +928,26 @@
             toggleButton.setAttribute("aria-label", toggleButton.title);
 
             const volumeElement = document.getElementById("volume");
-            volumeElement.value = String(volume);
-            document.getElementById("volume-value").textContent = `${volume} %`;
+            const volumeValue = document.getElementById("volume-value");
+            const incomingVolume = String(volume);
+            volumeElement.dataset.serverVolume = incomingVolume;
+            if (volumeElement.dataset.interacting === "true"
+                || (volumeElement.dataset.requestedVolume !== undefined
+                    && volumeElement.dataset.requestedVolume !== incomingVolume)) {
+                volumeElement.dataset.deferredVolume = incomingVolume;
+            } else {
+                if (volumeElement.dataset.requestedVolume === incomingVolume) {
+                    if (volumeElement.confirmationTimer !== undefined) {
+                        window.clearTimeout(volumeElement.confirmationTimer);
+                        delete volumeElement.confirmationTimer;
+                    }
+                    delete volumeElement.dataset.requestedVolume;
+                    delete volumeElement.dataset.userVolume;
+                    delete volumeElement.dataset.deferredVolume;
+                }
+                volumeElement.value = incomingVolume;
+                volumeValue.textContent = `${volume} %`;
+            }
             document.getElementById("player").dataset.muted = String(muted);
 
             const muteButton = document.getElementById("mute");
@@ -992,11 +1010,73 @@
             const value = document.getElementById("player").dataset.status === "playing" ? 3 : 2;
             requestAction("Transport", value);
         });
-        document.getElementById("volume").addEventListener("input", (event) => {
-            document.getElementById("volume-value").textContent = `${event.target.value} %`;
+        const volumeElement = document.getElementById("volume");
+        const volumeValue = document.getElementById("volume-value");
+        volumeElement.addEventListener("pointerdown", () => {
+            volumeElement.dataset.interacting = "true";
         });
-        document.getElementById("volume").addEventListener("change", (event) => {
-            requestAction("VolumeLevel", Number(event.target.value));
+        volumeElement.addEventListener("pointerup", () => {
+            if (volumeElement.dataset.requestedVolume === undefined
+                && volumeElement.dataset.userVolume === undefined) {
+                delete volumeElement.dataset.interacting;
+            }
+        });
+        volumeElement.addEventListener("pointercancel", () => {
+            delete volumeElement.dataset.interacting;
+            delete volumeElement.dataset.userVolume;
+            if (volumeElement.dataset.requestedVolume !== undefined) {
+                volumeElement.value = volumeElement.dataset.requestedVolume;
+                volumeValue.textContent = `${volumeElement.dataset.requestedVolume} %`;
+                return;
+            }
+            if (volumeElement.confirmationTimer !== undefined) {
+                window.clearTimeout(volumeElement.confirmationTimer);
+                delete volumeElement.confirmationTimer;
+            }
+            const synchronizedVolume = volumeElement.dataset.deferredVolume
+                ?? volumeElement.dataset.serverVolume
+                ?? volumeElement.value;
+            delete volumeElement.dataset.deferredVolume;
+            volumeElement.value = synchronizedVolume;
+            volumeValue.textContent = `${synchronizedVolume} %`;
+        });
+        volumeElement.addEventListener("keydown", (event) => {
+            if (["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "End", "Home", "PageDown", "PageUp"]
+                .includes(event.key)) {
+                volumeElement.dataset.interacting = "true";
+            }
+        });
+        volumeElement.addEventListener("input", (event) => {
+            volumeElement.dataset.userVolume = event.target.value;
+            volumeValue.textContent = `${event.target.value} %`;
+        });
+        volumeElement.addEventListener("change", (event) => {
+            const requestedVolume = Number(volumeElement.dataset.userVolume ?? event.target.value);
+            delete volumeElement.dataset.interacting;
+            if (!Number.isInteger(requestedVolume) || requestedVolume < 0 || requestedVolume > 100) {
+                return;
+            }
+            volumeElement.value = String(requestedVolume);
+            volumeValue.textContent = `${requestedVolume} %`;
+            volumeElement.dataset.requestedVolume = String(requestedVolume);
+            if (volumeElement.confirmationTimer !== undefined) {
+                window.clearTimeout(volumeElement.confirmationTimer);
+            }
+            volumeElement.confirmationTimer = window.setTimeout(() => {
+                delete volumeElement.confirmationTimer;
+                if (volumeElement.dataset.requestedVolume !== String(requestedVolume)) {
+                    return;
+                }
+                const synchronizedVolume = volumeElement.dataset.deferredVolume
+                    ?? volumeElement.dataset.serverVolume
+                    ?? String(requestedVolume);
+                delete volumeElement.dataset.requestedVolume;
+                delete volumeElement.dataset.userVolume;
+                delete volumeElement.dataset.deferredVolume;
+                volumeElement.value = synchronizedVolume;
+                volumeValue.textContent = `${synchronizedVolume} %`;
+            }, 1500);
+            requestAction("VolumeLevel", requestedVolume);
         });
         document.getElementById("mute").addEventListener("click", () => {
             const muted = document.getElementById("player").dataset.muted === "true";
