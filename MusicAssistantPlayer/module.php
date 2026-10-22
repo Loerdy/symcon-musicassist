@@ -363,9 +363,11 @@ class MusicAssistantPlayer extends IPSModule
             return '';
         }
 
+        $this->SetBuffer('VisualizationStateHash', '');
         try {
+            $state = $this->buildVisualizationState();
             $initialState = json_encode(
-                $this->buildVisualizationState(),
+                $state,
                 JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR
             );
         } catch (Throwable $e) {
@@ -1355,7 +1357,19 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         try {
-            $this->UpdateVisualizationValue(json_encode($this->buildVisualizationState(), JSON_THROW_ON_ERROR));
+            $stateJson = json_encode($this->buildVisualizationState(), JSON_THROW_ON_ERROR);
+            $stateHash = hash('sha256', $stateJson);
+            if ($this->GetBuffer('VisualizationStateHash') === $stateHash) {
+                return;
+            }
+            $transmitted = $this->UpdateVisualizationValue($stateJson);
+            if ($transmitted !== true) {
+                if ($transmitted === false) {
+                    $this->SendDebug('Visualization', 'Kachelzustand konnte nicht übertragen werden', 0);
+                }
+                return;
+            }
+            $this->SetBuffer('VisualizationStateHash', $stateHash);
         } catch (Throwable $e) {
             $this->SendDebug('Visualization', 'Kachel konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
         }

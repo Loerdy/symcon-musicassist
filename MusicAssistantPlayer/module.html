@@ -674,6 +674,16 @@
 
         function renderOptions(selectId, options, placeholder) {
             const select = document.getElementById(selectId);
+            const normalized = Array.isArray(options)
+                ? options.filter((option) => option && Number.isInteger(option.value) && option.value > 0
+                    && typeof option.label === "string" && option.label !== "")
+                    .map((option) => ({value: option.value, label: option.label}))
+                : [];
+            const signature = JSON.stringify([placeholder, normalized]);
+            if (select.dataset.optionsSignature === signature) {
+                return;
+            }
+            select.dataset.optionsSignature = signature;
             select.replaceChildren();
 
             const emptyOption = document.createElement("option");
@@ -681,36 +691,45 @@
             emptyOption.textContent = placeholder;
             select.appendChild(emptyOption);
 
-            if (Array.isArray(options)) {
-                options.forEach((option) => {
-                    if (!option || !Number.isInteger(option.value) || option.value <= 0
-                        || typeof option.label !== "string" || option.label === "") {
-                        return;
-                    }
-                    const element = document.createElement("option");
-                    element.value = String(option.value);
-                    element.textContent = option.label;
-                    select.appendChild(element);
-                });
-            }
+            normalized.forEach((option) => {
+                const element = document.createElement("option");
+                element.value = String(option.value);
+                element.textContent = option.label;
+                select.appendChild(element);
+            });
             select.value = "";
             select.disabled = select.options.length <= 1;
         }
 
         function renderGroupMembers(members) {
             const container = document.getElementById("group-volumes");
-            container.replaceChildren();
+            const normalized = Array.isArray(members)
+                ? members.filter((member) => member && typeof member.ident === "string" && member.ident !== ""
+                    && typeof member.name === "string" && member.name !== ""
+                    && Number.isInteger(member.volume) && member.volume >= 0 && member.volume <= 100)
+                    .map((member) => ({ident: member.ident, name: member.name, volume: member.volume}))
+                : [];
+            const structureSignature = JSON.stringify(normalized.map((member) => [member.ident, member.name]));
 
-            if (!Array.isArray(members)) {
-                container.hidden = true;
+            if (container.dataset.structureSignature === structureSignature
+                && container.childElementCount === normalized.length) {
+                const rows = container.querySelectorAll(".group-volume");
+                normalized.forEach((member, index) => {
+                    const slider = rows[index].querySelector("input");
+                    const value = rows[index].querySelector("output");
+                    if (slider && value && slider.dataset.renderedVolume !== String(member.volume)) {
+                        slider.value = String(member.volume);
+                        slider.dataset.renderedVolume = String(member.volume);
+                        value.textContent = `${member.volume} %`;
+                    }
+                });
+                container.hidden = normalized.length === 0;
                 return;
             }
-            members.forEach((member) => {
-                if (!member || typeof member.ident !== "string" || member.ident === ""
-                    || typeof member.name !== "string" || member.name === ""
-                    || !Number.isInteger(member.volume) || member.volume < 0 || member.volume > 100) {
-                    return;
-                }
+
+            container.dataset.structureSignature = structureSignature;
+            container.replaceChildren();
+            normalized.forEach((member) => {
 
                 const row = document.createElement("div");
                 row.className = "group-volume";
@@ -727,6 +746,7 @@
                 slider.max = "100";
                 slider.step = "1";
                 slider.value = String(member.volume);
+                slider.dataset.renderedVolume = String(member.volume);
                 slider.setAttribute("aria-label", `Lautstärke ${member.name}`);
 
                 const value = document.createElement("output");
