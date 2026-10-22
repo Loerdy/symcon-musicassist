@@ -441,9 +441,14 @@
 
         @container tile (min-width: 520px) and (min-height: 420px) {
             .player {
-                grid-template-columns: clamp(150px, 30cqi, 240px) minmax(0, 1fr);
-                gap: clamp(18px, 4cqi, 32px);
+                grid-template-columns: clamp(160px, 32cqi, 260px) minmax(0, 1fr);
+                gap: clamp(20px, 4cqi, 36px);
                 padding: clamp(16px, 3cqi, 28px);
+            }
+
+            .cover,
+            .details {
+                transform: translateY(clamp(-24px, -3cqh, -12px));
             }
 
             .cover {
