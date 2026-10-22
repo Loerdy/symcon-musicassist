@@ -292,7 +292,9 @@ class MusicAssistantConfigurator extends IPSModule
             $count++;
         }
 
-        $this->SetBuffer('RadioMap', json_encode($map, JSON_UNESCAPED_SLASHES));
+        $mapJson = json_encode($map, JSON_UNESCAPED_SLASHES);
+        $this->SetBuffer('RadioMap', $mapJson);
+        $this->updateConnectedPlayerRadioMaps($mapJson);
         $this->SendDebug('Radios', 'Profile=' . $profile . ' entries=' . $count, 0);
         $this->ReloadForm();
     }
@@ -577,6 +579,29 @@ class MusicAssistantConfigurator extends IPSModule
             }
             if (!IPS_ApplyChanges($playerInstanceId)) {
                 throw new Exception('PlaylistMap konnte für Player-Instanz ' . $playerInstanceId . ' nicht übernommen werden.');
+            }
+        }
+    }
+
+    private function updateConnectedPlayerRadioMaps(string $mapJson): void
+    {
+        $connectionId = $this->getConfiguratorConnectionId();
+        foreach (IPS_GetInstanceListByModuleID(self::PLAYER_MODULE_ID) as $playerInstanceId) {
+            if (!IPS_InstanceExists($playerInstanceId)) {
+                continue;
+            }
+            $instance = IPS_GetInstance($playerInstanceId);
+            if (!is_array($instance) || (int)($instance['ConnectionID'] ?? 0) !== $connectionId) {
+                continue;
+            }
+            if (IPS_GetProperty($playerInstanceId, 'RadioMap') === $mapJson) {
+                continue;
+            }
+            if (!IPS_SetProperty($playerInstanceId, 'RadioMap', $mapJson)) {
+                throw new Exception('RadioMap konnte für Player-Instanz ' . $playerInstanceId . ' nicht gesetzt werden.');
+            }
+            if (!IPS_ApplyChanges($playerInstanceId)) {
+                throw new Exception('RadioMap konnte für Player-Instanz ' . $playerInstanceId . ' nicht übernommen werden.');
             }
         }
     }
