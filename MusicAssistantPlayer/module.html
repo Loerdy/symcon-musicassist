@@ -210,6 +210,27 @@
             box-shadow: 0 0 0.65rem rgb(229 57 53 / 35%);
         }
 
+        .media-selectors {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.4rem;
+            margin-top: 0.65rem;
+        }
+
+        .media-selectors select {
+            width: 100%;
+            min-width: 0;
+            height: 2rem;
+            padding: 0 1.6rem 0 0.55rem;
+            border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+            border-radius: 0.55rem;
+            color: inherit;
+            background-color: color-mix(in srgb, currentColor 8%, transparent);
+            font: inherit;
+            font-size: 0.78rem;
+            text-overflow: ellipsis;
+        }
+
         @media (max-width: 260px) {
             .player {
                 grid-template-columns: 64px minmax(0, 1fr);
@@ -245,6 +266,10 @@
                 <button type="button" id="repeat" title="Repeat aus" aria-label="Repeat aus" data-repeat="off">&#x1F501;</button>
                 <button type="button" id="favorite" title="Favorit" aria-label="Favorit" aria-pressed="false" hidden>&#x2661;</button>
             </div>
+            <div class="media-selectors">
+                <select id="playlist" aria-label="Playlist"><option value="">Playlist</option></select>
+                <select id="radio" aria-label="Radio"><option value="">Radio</option></select>
+            </div>
         </section>
     </main>
     <script>
@@ -256,6 +281,31 @@
             paused: "Pausiert",
             unknown: "Unbekannt"
         };
+
+        function renderOptions(selectId, options, placeholder) {
+            const select = document.getElementById(selectId);
+            select.replaceChildren();
+
+            const emptyOption = document.createElement("option");
+            emptyOption.value = "";
+            emptyOption.textContent = placeholder;
+            select.appendChild(emptyOption);
+
+            if (Array.isArray(options)) {
+                options.forEach((option) => {
+                    if (!option || !Number.isInteger(option.value) || option.value <= 0
+                        || typeof option.label !== "string" || option.label === "") {
+                        return;
+                    }
+                    const element = document.createElement("option");
+                    element.value = String(option.value);
+                    element.textContent = option.label;
+                    select.appendChild(element);
+                });
+            }
+            select.value = "";
+            select.disabled = select.options.length <= 1;
+        }
 
         function renderState(data) {
             if (!data || typeof data !== "object") {
@@ -317,6 +367,9 @@
             favoriteButton.textContent = favorite ? "\u2665" : "\u2661";
             favoriteButton.setAttribute("aria-pressed", String(favorite));
 
+            renderOptions("playlist", data.playlists, "Playlist");
+            renderOptions("radio", data.radios, "Radio");
+
             const coverElement = document.getElementById("cover");
             coverElement.hidden = cover === "";
             if (cover === "") {
@@ -372,6 +425,20 @@
             if (!event.currentTarget.hidden) {
                 requestAction("Favorite", event.currentTarget.getAttribute("aria-pressed") !== "true");
             }
+        });
+        document.getElementById("playlist").addEventListener("change", (event) => {
+            const itemId = Number(event.target.value);
+            if (Number.isInteger(itemId) && itemId > 0) {
+                requestAction("Playlist", itemId);
+            }
+            event.target.value = "";
+        });
+        document.getElementById("radio").addEventListener("change", (event) => {
+            const itemId = Number(event.target.value);
+            if (Number.isInteger(itemId) && itemId > 0) {
+                requestAction("Radio", itemId);
+            }
+            event.target.value = "";
         });
 
         renderState(__MUSIC_ASSISTANT_INITIAL_STATE__);

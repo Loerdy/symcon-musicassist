@@ -1349,6 +1349,8 @@ class MusicAssistantPlayer extends IPSModule
         $favorite = $showFavorite && @$this->GetIDForIdent('Favorite') > 0
             ? (bool)$this->GetValue('Favorite')
             : false;
+        $playlists = $this->buildVisualizationSelectionOptions('Playlist', 'PlaylistMap', 'PlaylistProfile');
+        $radios = $this->buildVisualizationSelectionOptions('Radio', 'RadioMap', 'RadioProfile');
 
         return [
             'cover'       => $this->readVisualizationCover(),
@@ -1360,8 +1362,70 @@ class MusicAssistantPlayer extends IPSModule
             'shuffle'     => $shuffle,
             'repeat'      => $repeat,
             'showFavorite' => $showFavorite,
-            'favorite'    => $favorite
+            'favorite'    => $favorite,
+            'playlists'   => $playlists,
+            'radios'      => $radios
         ];
+    }
+
+    private function buildVisualizationSelectionOptions(
+        string $ident,
+        string $mapProperty,
+        string $profileProperty
+    ): array
+    {
+        $variableId = @$this->GetIDForIdent($ident);
+        if ($variableId <= 0 || !IPS_VariableExists($variableId)) {
+            return [];
+        }
+        $variable = IPS_GetVariable($variableId);
+        if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            return [];
+        }
+
+        $profile = is_string($variable['VariableCustomProfile'] ?? null)
+            ? trim($variable['VariableCustomProfile'])
+            : '';
+        if ($profile === '') {
+            $profile = is_string($variable['VariableProfile'] ?? null)
+                ? trim($variable['VariableProfile'])
+                : trim($this->ReadPropertyString($profileProperty));
+        }
+        if ($profile === '' || !IPS_VariableProfileExists($profile)) {
+            return [];
+        }
+        $profileData = IPS_GetVariableProfile($profile);
+        if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            return [];
+        }
+
+        try {
+            $map = json_decode(trim($this->ReadPropertyString($mapProperty)), true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            return [];
+        }
+        if (!is_array($map)) {
+            return [];
+        }
+
+        $options = [];
+        foreach (($profileData['Associations'] ?? []) as $association) {
+            $value = $association['Value'] ?? null;
+            $name = $association['Name'] ?? null;
+            if ((!is_int($value) && !is_float($value)) || !is_string($name)) {
+                continue;
+            }
+            $itemId = (int)$value;
+            $key = (string)$itemId;
+            $validMapEntry = $mapProperty === 'PlaylistMap'
+                ? isset($map[$key]) && $this->normalizePlaylistMapEntry($map[$key]) !== null
+                : isset($map[$key]) && is_string($map[$key]) && trim($map[$key]) !== '';
+            if ($itemId <= 0 || (float)$itemId !== (float)$value || trim($name) === '' || !$validMapEntry) {
+                continue;
+            }
+            $options[] = ['value' => $itemId, 'label' => trim($name)];
+        }
+        return $options;
     }
 
     private function readVisualizationString(string $ident): string
