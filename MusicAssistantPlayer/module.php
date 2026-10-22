@@ -622,6 +622,7 @@ class MusicAssistantPlayer extends IPSModule
             if (is_int($volume) && $volume >= 0 && $volume <= 100
                 && IPS_VariableExists($variableId)) {
                 $this->SetValue($ident, $volume);
+                $this->updateVisualization();
             }
             return;
         }
@@ -834,6 +835,7 @@ class MusicAssistantPlayer extends IPSModule
             }
         }
         $this->writeGroupMemberVolumeMap($newMap);
+        $this->updateVisualization();
     }
 
     private function removeGroupMemberVolumeVariables(): void
@@ -867,6 +869,7 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ($remaining !== $map) {
             $this->writeGroupMemberVolumeMap($remaining);
+            $this->updateVisualization();
         }
     }
 
@@ -1351,6 +1354,7 @@ class MusicAssistantPlayer extends IPSModule
             : false;
         $playlists = $this->buildVisualizationSelectionOptions('Playlist', 'PlaylistMap', 'PlaylistProfile');
         $radios = $this->buildVisualizationSelectionOptions('Radio', 'RadioMap', 'RadioProfile');
+        $groupMembers = $this->buildVisualizationGroupMembers();
 
         return [
             'cover'       => $this->readVisualizationCover(),
@@ -1364,8 +1368,42 @@ class MusicAssistantPlayer extends IPSModule
             'showFavorite' => $showFavorite,
             'favorite'    => $favorite,
             'playlists'   => $playlists,
-            'radios'      => $radios
+            'radios'      => $radios,
+            'groupMembers' => $groupMembers
         ];
+    }
+
+    private function buildVisualizationGroupMembers(): array
+    {
+        if (!$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
+            return [];
+        }
+        $map = $this->readGroupMemberVolumeMap();
+        if ($map === null) {
+            return [];
+        }
+
+        $members = [];
+        foreach ($map as $ident => $entry) {
+            $variableId = @$this->GetIDForIdent($ident);
+            if ($variableId !== $entry['variable_id'] || !IPS_VariableExists($variableId)) {
+                continue;
+            }
+            $variable = IPS_GetVariable($variableId);
+            if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+                continue;
+            }
+            $volume = (int)$this->GetValue($ident);
+            if ($volume < 0 || $volume > 100) {
+                continue;
+            }
+            $members[] = [
+                'ident'  => $ident,
+                'name'   => $entry['name'],
+                'volume' => $volume
+            ];
+        }
+        return $members;
     }
 
     private function buildVisualizationSelectionOptions(

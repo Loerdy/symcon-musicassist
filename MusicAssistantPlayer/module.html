@@ -252,6 +252,33 @@
             text-overflow: ellipsis;
         }
 
+        .group-volumes {
+            display: grid;
+            gap: 0.35rem;
+            margin-top: clamp(0.3rem, 1.6vh, 0.65rem);
+        }
+
+        .group-volume {
+            display: grid;
+            grid-template-columns: minmax(4rem, 0.8fr) minmax(0, 1.4fr) 2.8rem;
+            gap: 0.5rem;
+            align-items: center;
+            min-width: 0;
+        }
+
+        .group-volume-name {
+            overflow: hidden;
+            font-size: 0.75rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .group-volume-value {
+            font-size: 0.75rem;
+            text-align: right;
+            opacity: 0.72;
+        }
+
         @media (max-width: 260px) {
             .player {
                 grid-template-columns: 64px minmax(0, 1fr);
@@ -291,6 +318,7 @@
                 <select id="playlist" aria-label="Playlist"><option value="">Playlist</option></select>
                 <select id="radio" aria-label="Radio"><option value="">Radio</option></select>
             </div>
+            <div class="group-volumes" id="group-volumes" aria-label="Gruppenlautstärken" hidden></div>
         </section>
     </main>
     <script>
@@ -326,6 +354,58 @@
             }
             select.value = "";
             select.disabled = select.options.length <= 1;
+        }
+
+        function renderGroupMembers(members) {
+            const container = document.getElementById("group-volumes");
+            container.replaceChildren();
+
+            if (!Array.isArray(members)) {
+                container.hidden = true;
+                return;
+            }
+            members.forEach((member) => {
+                if (!member || typeof member.ident !== "string" || member.ident === ""
+                    || typeof member.name !== "string" || member.name === ""
+                    || !Number.isInteger(member.volume) || member.volume < 0 || member.volume > 100) {
+                    return;
+                }
+
+                const row = document.createElement("div");
+                row.className = "group-volume";
+
+                const name = document.createElement("span");
+                name.className = "group-volume-name";
+                name.textContent = member.name;
+                name.title = member.name;
+
+                const slider = document.createElement("input");
+                slider.className = "volume-slider";
+                slider.type = "range";
+                slider.min = "0";
+                slider.max = "100";
+                slider.step = "1";
+                slider.value = String(member.volume);
+                slider.setAttribute("aria-label", `Lautstärke ${member.name}`);
+
+                const value = document.createElement("output");
+                value.className = "group-volume-value";
+                value.textContent = `${member.volume} %`;
+
+                slider.addEventListener("input", () => {
+                    value.textContent = `${slider.value} %`;
+                });
+                slider.addEventListener("change", () => {
+                    const volume = Number(slider.value);
+                    if (Number.isInteger(volume) && volume >= 0 && volume <= 100) {
+                        requestAction(member.ident, volume);
+                    }
+                });
+
+                row.append(name, slider, value);
+                container.appendChild(row);
+            });
+            container.hidden = container.childElementCount === 0;
         }
 
         function renderState(data) {
@@ -389,6 +469,7 @@
 
             renderOptions("playlist", data.playlists, "Playlist");
             renderOptions("radio", data.radios, "Radio");
+            renderGroupMembers(data.groupMembers);
 
             const coverElement = document.getElementById("cover");
             coverElement.hidden = cover === "";
