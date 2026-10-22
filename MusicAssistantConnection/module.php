@@ -995,6 +995,17 @@ class MusicAssistantConnection extends IPSModule
         if (!$this->setQueueMapping($playerId, $queueId, (string)$request['Generation'])) {
             return true;
         }
+        if (!$isResync) {
+            $this->SendDataToChildren(json_encode([
+                'DataID' => self::CONNECTION_EVENT,
+                'Event' => 'queue_updated',
+                'ObjectID' => $queueId,
+                'PlayerIDs' => [$playerId],
+                'Data' => $result
+            ], JSON_THROW_ON_ERROR));
+            $this->SendDebug('Active Queue', 'Queue-Snapshot verarbeitet: ' . $queueId . ' für PlayerID=' . $playerId, 0);
+            return true;
+        }
         if ($isResync) {
             if (!$this->isCurrentGeneration((string)$request['Generation'])) {
                 return true;
