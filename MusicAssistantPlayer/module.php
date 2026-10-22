@@ -10,6 +10,7 @@ class MusicAssistantPlayer extends IPSModule
     private const VOLDOWN_PROFILE = 'MA.VolumeDown';
     private const COVER_SEMAPHORE_TIMEOUT = 5000;
     private const GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT = 40000;
+    private const FAVORITE_SEMAPHORE_TIMEOUT = 20000;
     private const DEFAULT_COVER = '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCABAAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5qooooAKKK6Twd8OvEPj/AO1/2Dp/2/7Js879/HHs3btv32Gc7W6elAHN0V6rpH7MvjvUrlorixtdKQIWE13doyMcj5R5Rc55zyMcHnpnrdI/ZB1Ka2ZtU8R2tncbyFS0tmuEK4GCWZkIOc8Y7DnngA+faK+mfir8EPCvgn4R31/a2G/WrOK2Q3/nSjzHMsaO/llyo3ZbjtnjpXzNQAUUUUAFfSH7Hf8AzN3/AG5/+1q+b6+kP2O/+Zu/7c//AGtQBJ48/am1LQ9a1PSNL0K1juLC+ltmubudpUkVGZSQihCpJAP3jjkc9a4DV/2mvHepXKy299a6UgQKYbS0RkY5PzHzQ5zzjg44HHXPHfEv/ko/ir/sLXf/AKOarPhX4T+LfGtm15o+iT3NoOk8jJDG/JHyM5UPgqQducd8UAfSHxS1G41j9mY395J513dafp880m0LudpIWY4GAMkngV8hV9e/FLTrjR/2ZjYXkfk3drp+nwTR7g211khVhkZBwQeRXyFQAUUUUAdj8MPhhqXxR1qWyspUtLe3RZbm7mRikalgMDAwXI3EKSM7W5GK+p/g78Hf+FTf2v8A8Tf+1f7Q8n/l28ny9m//AG2znf7dK8g/ZO8U6bo2ta5pd7cJa3GopA1s0zqiSMjMvlgkglyZVwoBzhvTn6Q8U+KdN8G6LcapqlwkFvCjMqs6q8zBSwjQMQGchThc80AfDXxL/wCSj+Kv+wtd/wDo5q+z/hJ9j/4Vj4X+w+R5P9nw7vs+NvmbR5mcfxb9+7vuznnNfCup6jcaxqV3f3knnXd1K880m0LudiWY4GAMkngV0nhX4seLfBVm1no+tz21oekEipNGnJPyK4YJksSduM980AfSn7UXiKHSfhnJpzbHuNVuI4UQyBXVUYSM4XqwBRVPTHmDnoD8fVt+KvGuueNr1brXNTn1CVfuLIQI48gA7EGFXO0ZwBnGTzWJQAUUUUAFFFFABRRRQAUUUUAf/9k=';
 
     public function Create(): void
@@ -20,6 +21,7 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->RegisterPropertyString('PlayerID', '');
         $this->RegisterPropertyBoolean('ShowGroupMemberVolumes', false);
+        $this->RegisterPropertyBoolean('ShowFavorite', false);
 
         $this->RegisterPropertyString('PlaylistProfile', '');
         $this->RegisterPropertyString('PlaylistMap', '{}');
@@ -37,6 +39,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetBuffer('GroupMemberVolumeRefreshRequest', '');
         $this->SetBuffer('KnownPlayerTypeID', '');
         $this->SetBuffer('KnownPlayerType', '');
+        $this->SetBuffer('CurrentFavoriteTrack', '{}');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
@@ -129,6 +132,25 @@ class MusicAssistantPlayer extends IPSModule
         if ($albumCreated) {
             IPS_SetIcon($vidAlbum, 'album');
         }
+        $favoriteId = @$this->GetIDForIdent('Favorite');
+        $hadFavoriteVariable = $favoriteId > 0
+            && IPS_VariableExists($favoriteId)
+            && (IPS_GetVariable($favoriteId)['VariableType'] ?? -1) === VARIABLETYPE_BOOLEAN;
+        $showFavorite = $this->ReadPropertyBoolean('ShowFavorite');
+        $this->MaintainVariable('Favorite', 'Favorit', VARIABLETYPE_BOOLEAN, '~Switch', 140, $showFavorite);
+        if ($showFavorite) {
+            $favoriteId = @$this->GetIDForIdent('Favorite');
+            $favoriteCreated = !$hadFavoriteVariable
+                && $favoriteId > 0
+                && IPS_VariableExists($favoriteId)
+                && (IPS_GetVariable($favoriteId)['VariableType'] ?? -1) === VARIABLETYPE_BOOLEAN;
+            if ($favoriteCreated) {
+                IPS_SetIcon($favoriteId, 'Heart');
+            }
+            $this->EnableAction('Favorite');
+        } else {
+            $this->clearCurrentFavoriteTrack();
+        }
         $this->ensureCoverMedia();
 
         if ($this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
@@ -176,6 +198,11 @@ class MusicAssistantPlayer extends IPSModule
                 ['type' => 'Button', 'caption' => 'Konfiguration aktualisieren', 'onClick' => 'IPS_RequestAction($id, "UpdateConfigView", true);'],
                 [
                     'type' => 'CheckBox',
+                    'name' => 'ShowFavorite',
+                    'caption' => 'Favoritensteuerung für den aktuellen Titel anzeigen'
+                ],
+                [
+                    'type' => 'CheckBox',
                     'name' => 'ShowGroupMemberVolumes',
                     'caption' => 'Individuelle Lautstärkeregler für aktuelle Gruppenmitglieder anzeigen',
                     'visible' => $showGroupMemberVolumes
@@ -194,6 +221,16 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if (($packet['Event'] ?? null) === 'media_item_updated') {
+            if ($this->ReadPropertyBoolean('ShowFavorite')) {
+                try {
+                    $this->processFavoriteMediaItemUpdate($packet);
+                } catch (Throwable $e) {
+                    $this->SendDebug('Favorite', 'Medienaktualisierung konnte nicht verarbeitet werden: ' . $e->getMessage(), 0);
+                }
+            }
+            return '';
+        }
         if (($packet['Event'] ?? null) === 'queue_updated') {
             if (is_string($packet['ObjectID'] ?? null)
                 && is_array($packet['PlayerIDs'] ?? null)
@@ -210,6 +247,14 @@ class MusicAssistantPlayer extends IPSModule
                 if ($hasCurrentItem && ($data['current_item'] === null || !$isIdle)) {
                     if ($this->updateMetadataFromQueueItem($data['current_item'])) {
                         $this->SendDebug('queue_updated', 'Metadaten aktualisiert', 0);
+                    }
+                }
+                if ($this->ReadPropertyBoolean('ShowFavorite') && ($isIdle || $hasCurrentItem)) {
+                    try {
+                        $this->updateFavoriteFromQueueItem($isIdle ? null : $data['current_item']);
+                    } catch (Throwable $e) {
+                        $this->clearCurrentFavoriteTrack();
+                        $this->SendDebug('Favorite', 'Titel konnte nicht aufgelöst werden: ' . $e->getMessage(), 0);
                     }
                 }
                 if (array_key_exists('state', $data)) {
@@ -354,6 +399,15 @@ class MusicAssistantPlayer extends IPSModule
                 } catch (Throwable $e) {
                     $this->SendDebug('Mute failed', $e->getMessage(), 0);
                     $this->LogMessage('Mute failed: ' . $e->getMessage(), KL_ERROR);
+                }
+                break;
+
+            case 'Favorite':
+                try {
+                    $this->setCurrentTrackFavorite((bool)$Value);
+                } catch (Throwable $e) {
+                    $this->SendDebug('Favorite failed', $e->getMessage(), 0);
+                    $this->LogMessage('Favorite failed: ' . $e->getMessage(), KL_ERROR);
                 }
                 break;
 
@@ -903,6 +957,266 @@ class MusicAssistantPlayer extends IPSModule
         $captions = ['idle' => 'Stop', 'playing' => 'Play', 'paused' => 'Pause'];
         $this->SendDebug('Transport', 'Queue-State ' . $normalizedState . ' -> ' . $captions[$normalizedState], 0);
         return true;
+    }
+
+    private function updateFavoriteFromQueueItem($currentItem): void
+    {
+        $this->withFavoriteLock(function () use ($currentItem): void {
+            if ($currentItem === null) {
+                $this->clearCurrentFavoriteTrackUnlocked();
+                return;
+            }
+            if (!is_array($currentItem)
+                || !is_string($currentItem['queue_item_id'] ?? null)
+                || trim($currentItem['queue_item_id']) === '') {
+                $this->clearCurrentFavoriteTrackUnlocked();
+                return;
+            }
+
+            $queueItemId = trim($currentItem['queue_item_id']);
+            $currentState = $this->readCurrentFavoriteTrack();
+            if ($currentState !== null && $currentState['queue_item_id'] === $queueItemId) {
+                return;
+            }
+
+            $mediaItem = $currentItem['media_item'] ?? null;
+            if (!is_array($mediaItem)
+                || ($mediaItem['media_type'] ?? null) !== 'track'
+                || !is_string($mediaItem['item_id'] ?? null)
+                || trim($mediaItem['item_id']) === ''
+                || !is_string($mediaItem['provider'] ?? null)
+                || trim($mediaItem['provider']) === ''
+                || !is_string($mediaItem['uri'] ?? null)
+                || trim($mediaItem['uri']) === '') {
+                $this->clearCurrentFavoriteTrackUnlocked();
+                return;
+            }
+
+            $state = [
+                'queue_item_id'   => $queueItemId,
+                'source_uri'      => trim($mediaItem['uri']),
+                'source_item_id'  => trim($mediaItem['item_id']),
+                'source_provider' => trim($mediaItem['provider']),
+                'library_item_id' => '',
+                'library_uri'     => '',
+                'favorite'        => false,
+                'resolved'        => false
+            ];
+            if ($state['source_provider'] === 'library' && is_bool($mediaItem['favorite'] ?? null)) {
+                $state['library_item_id'] = $state['source_item_id'];
+                $state['library_uri'] = $state['source_uri'];
+                $state['favorite'] = $mediaItem['favorite'];
+                $state['resolved'] = true;
+            } else {
+                try {
+                    $state = $this->resolveFavoriteLibraryState($state);
+                } catch (Throwable $e) {
+                    $this->writeCurrentFavoriteTrack($state);
+                    $this->updateFavoriteValue(false);
+                    $this->SendDebug('Favorite', 'Library-Track konnte nicht aufgelöst werden: ' . $e->getMessage(), 0);
+                    return;
+                }
+            }
+            $this->writeCurrentFavoriteTrack($state);
+            $this->updateFavoriteValue($state['favorite']);
+        });
+    }
+
+    private function processFavoriteMediaItemUpdate(array $packet): void
+    {
+        if (!is_string($packet['ObjectID'] ?? null) || !is_array($packet['Data'] ?? null)) {
+            return;
+        }
+        $this->withFavoriteLock(function () use ($packet): void {
+            $state = $this->readCurrentFavoriteTrack();
+            if ($state === null) {
+                return;
+            }
+            $objectId = trim($packet['ObjectID']);
+            $data = $packet['Data'];
+            $eventUri = is_string($data['uri'] ?? null) ? trim($data['uri']) : '';
+            $eventItemId = is_string($data['item_id'] ?? null) ? trim($data['item_id']) : '';
+            $eventProvider = is_string($data['provider'] ?? null) ? trim($data['provider']) : '';
+            $matches = $objectId === $state['source_uri']
+                || ($state['library_uri'] !== '' && $objectId === $state['library_uri'])
+                || $eventUri === $state['source_uri']
+                || ($state['library_uri'] !== '' && $eventUri === $state['library_uri'])
+                || ($eventItemId === $state['source_item_id'] && $eventProvider === $state['source_provider'])
+                || ($state['library_item_id'] !== '' && $eventItemId === $state['library_item_id'])
+                || $this->favoriteEventHasSourceMapping($data, $state);
+            if (!$matches || (($data['media_type'] ?? 'track') !== 'track')) {
+                return;
+            }
+
+            if (is_bool($data['favorite'] ?? null)
+                && $eventItemId !== ''
+                && ($eventProvider === 'library'
+                    || $objectId === $state['library_uri']
+                    || $eventUri === $state['library_uri'])) {
+                $state['library_item_id'] = $eventItemId;
+                if ($eventUri !== '') {
+                    $state['library_uri'] = $eventUri;
+                }
+                $state['favorite'] = $data['favorite'];
+                $state['resolved'] = true;
+            } else {
+                $state = $this->resolveFavoriteLibraryState($state);
+            }
+            $this->writeCurrentFavoriteTrack($state);
+            $this->updateFavoriteValue($state['favorite']);
+        });
+    }
+
+    private function favoriteEventHasSourceMapping(array $mediaItem, array $state): bool
+    {
+        if (!is_array($mediaItem['provider_mappings'] ?? null)) {
+            return false;
+        }
+        foreach ($mediaItem['provider_mappings'] as $mapping) {
+            if (is_array($mapping)
+                && ($mapping['item_id'] ?? null) === $state['source_item_id']
+                && (($mapping['provider_instance'] ?? null) === $state['source_provider']
+                    || ($mapping['provider_domain'] ?? null) === $state['source_provider'])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function setCurrentTrackFavorite(bool $favorite): void
+    {
+        if (!$this->ReadPropertyBoolean('ShowFavorite')) {
+            throw new Exception('Favoritensteuerung ist deaktiviert.');
+        }
+        $this->withFavoriteLock(function () use ($favorite): void {
+            $state = $this->readCurrentFavoriteTrack();
+            if ($state === null || !$state['resolved'] || $state['source_uri'] === '') {
+                throw new Exception('Der aktuelle Titel konnte nicht eindeutig ermittelt werden.');
+            }
+            if ($favorite === $state['favorite']) {
+                $this->updateFavoriteValue($state['favorite']);
+                return;
+            }
+
+            if ($favorite) {
+                $this->sendApiRequest('music/favorites/add_item', ['item' => $state['source_uri']]);
+            } else {
+                if ($state['library_item_id'] === '') {
+                    throw new Exception('Die Library-ID des aktuellen Titels ist nicht verfügbar.');
+                }
+                $this->sendApiRequest('music/favorites/remove_item', [
+                    'media_type'     => 'track',
+                    'library_item_id' => $state['library_item_id']
+                ]);
+            }
+
+            $updatedState = $this->resolveFavoriteLibraryState($state);
+            if ($updatedState['favorite'] !== $favorite) {
+                throw new Exception('Der geänderte Favoritenstatus konnte nicht bestätigt werden.');
+            }
+            $this->writeCurrentFavoriteTrack($updatedState);
+            $this->updateFavoriteValue($updatedState['favorite']);
+        });
+    }
+
+    private function resolveFavoriteLibraryState(array $state): array
+    {
+        $libraryItem = $this->sendApiRequest('music/get_library_item', [
+            'media_type'                    => 'track',
+            'item_id'                       => $state['source_item_id'],
+            'provider_instance_id_or_domain' => $state['source_provider']
+        ]);
+        if ($libraryItem === null) {
+            $state['library_item_id'] = '';
+            $state['library_uri'] = '';
+            $state['favorite'] = false;
+            $state['resolved'] = true;
+            return $state;
+        }
+        if (!is_array($libraryItem)
+            || ($libraryItem['media_type'] ?? null) !== 'track'
+            || !is_string($libraryItem['item_id'] ?? null)
+            || trim($libraryItem['item_id']) === ''
+            || !is_bool($libraryItem['favorite'] ?? null)) {
+            throw new Exception('Music Assistant lieferte keinen vollständigen Library-Track.');
+        }
+        $state['library_item_id'] = trim($libraryItem['item_id']);
+        $state['library_uri'] = is_string($libraryItem['uri'] ?? null)
+            ? trim($libraryItem['uri'])
+            : '';
+        $state['favorite'] = $libraryItem['favorite'];
+        $state['resolved'] = true;
+        return $state;
+    }
+
+    private function readCurrentFavoriteTrack(): ?array
+    {
+        try {
+            $state = json_decode(trim($this->GetBuffer('CurrentFavoriteTrack')), true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Aktuelle Trackkennung enthält ungültiges JSON', 0);
+            return null;
+        }
+        if (!is_array($state) || count($state) === 0) {
+            return null;
+        }
+        foreach (['queue_item_id', 'source_uri', 'source_item_id', 'source_provider', 'library_item_id', 'library_uri'] as $key) {
+            if (!is_string($state[$key] ?? null)) {
+                $this->SendDebug('Favorite', 'Aktuelle Trackkennung hat eine ungültige Struktur', 0);
+                return null;
+            }
+        }
+        if ($state['queue_item_id'] === ''
+            || $state['source_uri'] === ''
+            || $state['source_item_id'] === ''
+            || $state['source_provider'] === ''
+            || !is_bool($state['favorite'] ?? null)
+            || !is_bool($state['resolved'] ?? null)) {
+            $this->SendDebug('Favorite', 'Aktuelle Trackkennung ist unvollständig', 0);
+            return null;
+        }
+        return $state;
+    }
+
+    private function writeCurrentFavoriteTrack(array $state): void
+    {
+        $this->SetBuffer('CurrentFavoriteTrack', json_encode($state, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    }
+
+    private function clearCurrentFavoriteTrack(): void
+    {
+        $this->withFavoriteLock(function (): void {
+            $this->clearCurrentFavoriteTrackUnlocked();
+        });
+    }
+
+    private function clearCurrentFavoriteTrackUnlocked(): void
+    {
+        $this->SetBuffer('CurrentFavoriteTrack', '{}');
+        $this->updateFavoriteValue(false);
+    }
+
+    private function updateFavoriteValue(bool $favorite): void
+    {
+        $variableId = @$this->GetIDForIdent('Favorite');
+        if ($variableId > 0
+            && IPS_VariableExists($variableId)
+            && (bool)$this->GetValue('Favorite') !== $favorite) {
+            $this->SetValue('Favorite', $favorite);
+        }
+    }
+
+    private function withFavoriteLock(callable $operation)
+    {
+        $semaphore = 'MA_FAVORITE_' . (string)$this->InstanceID;
+        if (!IPS_SemaphoreEnter($semaphore, self::FAVORITE_SEMAPHORE_TIMEOUT)) {
+            throw new RuntimeException('Favoriten-Semaphore konnte nicht erworben werden.');
+        }
+        try {
+            return $operation();
+        } finally {
+            IPS_SemaphoreLeave($semaphore);
+        }
     }
 
     private function updateMetadataFromQueueItem($currentItem): bool

@@ -33,7 +33,10 @@ class MusicAssistantConnection extends IPSModule
         'player_queues/play_media',
         'music/playlists/library_items',
         'music/playlists/playlist_tracks',
-        'music/radios/library_items'
+        'music/radios/library_items',
+        'music/get_library_item',
+        'music/favorites/add_item',
+        'music/favorites/remove_item'
     ];
 
     public function Create(): void
@@ -224,6 +227,21 @@ class MusicAssistantConnection extends IPSModule
                     ], JSON_THROW_ON_ERROR));
                     $this->SendDebug('queue_updated', 'Weitergeleitet an ' . count($playerIds) . ' Player', 0);
                 }
+            }
+            return '';
+        }
+
+        if (($message['event'] ?? null) === 'media_item_updated') {
+            $objectId = $message['object_id'] ?? null;
+            $data = $message['data'] ?? null;
+            if ($this->GetStatus() === 102 && is_string($objectId) && $objectId !== '' && is_array($data)) {
+                $this->SendDataToChildren(json_encode([
+                    'DataID' => self::CONNECTION_EVENT,
+                    'Event' => 'media_item_updated',
+                    'ObjectID' => $objectId,
+                    'Data' => $data
+                ], JSON_THROW_ON_ERROR));
+                $this->SendDebug('media_item_updated', 'Medienaktualisierung weitergeleitet', 0);
             }
             return '';
         }

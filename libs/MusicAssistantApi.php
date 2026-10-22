@@ -125,7 +125,9 @@ trait MusicAssistantApi
         }
 
         $success = !isset($data['error']);
-        $result  = $data['result'] ?? $data;
+        $result = array_key_exists('result', $data)
+            ? $data['result']
+            : $data;
 
         return [
             'raw' => $data,
