@@ -167,6 +167,49 @@
             opacity: 0.72;
         }
 
+        .mode-controls {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.4rem;
+            margin-top: 0.65rem;
+        }
+
+        .mode-controls button {
+            min-width: 0;
+            min-height: 2rem;
+            padding: 0.25rem;
+            border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+            border-radius: 0.55rem;
+            color: inherit;
+            background: color-mix(in srgb, currentColor 8%, transparent);
+            font: inherit;
+            font-size: 1rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        .mode-controls button:hover,
+        .mode-controls button:focus-visible {
+            background: color-mix(in srgb, currentColor 16%, transparent);
+        }
+
+        .mode-controls button[aria-pressed="true"] {
+            color: #42b883;
+            border-color: #42b883;
+        }
+
+        #repeat[data-repeat="one"],
+        #repeat[data-repeat="all"] {
+            color: #e8a838;
+            border-color: #e8a838;
+        }
+
+        #favorite[aria-pressed="true"] {
+            color: #e53935;
+            border-color: #e53935;
+            box-shadow: 0 0 0.65rem rgb(229 57 53 / 35%);
+        }
+
         @media (max-width: 260px) {
             .player {
                 grid-template-columns: 64px minmax(0, 1fr);
@@ -196,6 +239,11 @@
                 <button type="button" class="mute-button" id="mute" title="Stumm" aria-label="Stumm" aria-pressed="false">&#x1F50A;</button>
                 <input class="volume-slider" id="volume" type="range" min="0" max="100" step="1" value="0" aria-label="Lautstärke">
                 <output class="volume-value" id="volume-value" for="volume">0 %</output>
+            </div>
+            <div class="mode-controls">
+                <button type="button" id="shuffle" title="Shuffle" aria-label="Shuffle" aria-pressed="false">&#x1F500;</button>
+                <button type="button" id="repeat" title="Repeat aus" aria-label="Repeat aus" data-repeat="off">&#x1F501;</button>
+                <button type="button" id="favorite" title="Favorit" aria-label="Favorit" aria-pressed="false" hidden>&#x2661;</button>
             </div>
         </section>
     </main>
@@ -227,6 +275,10 @@
                 ? Math.max(0, Math.min(100, Math.round(data.volume)))
                 : 0;
             const muted = data.muted === true;
+            const shuffle = data.shuffle === true;
+            const repeat = ["off", "one", "all"].includes(data.repeat) ? data.repeat : "off";
+            const showFavorite = data.showFavorite === true;
+            const favorite = data.favorite === true;
 
             document.getElementById("title").textContent = title || "Kein Titel";
             document.getElementById("artist").textContent = artist;
@@ -249,6 +301,21 @@
             muteButton.title = muted ? "Ton einschalten" : "Stumm";
             muteButton.setAttribute("aria-label", muteButton.title);
             muteButton.setAttribute("aria-pressed", String(muted));
+
+            const shuffleButton = document.getElementById("shuffle");
+            shuffleButton.setAttribute("aria-pressed", String(shuffle));
+
+            const repeatButton = document.getElementById("repeat");
+            const repeatLabels = {off: "Repeat aus", one: "Titel wiederholen", all: "Alle wiederholen"};
+            repeatButton.dataset.repeat = repeat;
+            repeatButton.textContent = repeat === "one" ? "\u{1F502}" : "\u{1F501}";
+            repeatButton.title = repeatLabels[repeat];
+            repeatButton.setAttribute("aria-label", repeatButton.title);
+
+            const favoriteButton = document.getElementById("favorite");
+            favoriteButton.hidden = !showFavorite;
+            favoriteButton.textContent = favorite ? "\u2665" : "\u2661";
+            favoriteButton.setAttribute("aria-pressed", String(favorite));
 
             const coverElement = document.getElementById("cover");
             coverElement.hidden = cover === "";
@@ -292,6 +359,19 @@
         document.getElementById("mute").addEventListener("click", () => {
             const muted = document.getElementById("player").dataset.muted === "true";
             requestAction("Mute", !muted);
+        });
+        document.getElementById("shuffle").addEventListener("click", (event) => {
+            requestAction("Shuffle", event.currentTarget.getAttribute("aria-pressed") !== "true");
+        });
+        document.getElementById("repeat").addEventListener("click", (event) => {
+            const modes = ["off", "one", "all"];
+            const current = modes.indexOf(event.currentTarget.dataset.repeat);
+            requestAction("Repeat", modes[(current + 1) % modes.length]);
+        });
+        document.getElementById("favorite").addEventListener("click", (event) => {
+            if (!event.currentTarget.hidden) {
+                requestAction("Favorite", event.currentTarget.getAttribute("aria-pressed") !== "true");
+            }
         });
 
         renderState(__MUSIC_ASSISTANT_INITIAL_STATE__);

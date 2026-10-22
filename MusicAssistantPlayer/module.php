@@ -250,6 +250,7 @@ class MusicAssistantPlayer extends IPSModule
                 } catch (Throwable $e) {
                     $this->SendDebug('Favorite', 'Medienaktualisierung konnte nicht verarbeitet werden: ' . $e->getMessage(), 0);
                 }
+                $this->updateVisualization();
             }
             return '';
         }
@@ -450,6 +451,7 @@ class MusicAssistantPlayer extends IPSModule
             case 'Favorite':
                 try {
                     $this->setCurrentTrackFavorite((bool)$Value);
+                    $this->updateVisualization();
                 } catch (Throwable $e) {
                     $this->SendDebug('Favorite failed', $e->getMessage(), 0);
                     $this->LogMessage('Favorite failed: ' . $e->getMessage(), KL_ERROR);
@@ -1334,14 +1336,31 @@ class MusicAssistantPlayer extends IPSModule
         $muted = @$this->GetIDForIdent('Mute') > 0
             ? (bool)$this->GetValue('Mute')
             : false;
+        $shuffle = @$this->GetIDForIdent('Shuffle') > 0
+            ? (bool)$this->GetValue('Shuffle')
+            : false;
+        $repeat = @$this->GetIDForIdent('Repeat') > 0
+            ? strtolower(trim((string)$this->GetValue('Repeat')))
+            : 'off';
+        if (!in_array($repeat, ['off', 'one', 'all'], true)) {
+            $repeat = 'off';
+        }
+        $showFavorite = $this->ReadPropertyBoolean('ShowFavorite');
+        $favorite = $showFavorite && @$this->GetIDForIdent('Favorite') > 0
+            ? (bool)$this->GetValue('Favorite')
+            : false;
 
         return [
-            'cover'  => $this->readVisualizationCover(),
-            'title'  => $this->readVisualizationString('NowTitle'),
-            'artist' => $this->readVisualizationString('NowArtist'),
-            'status' => $states[$transport] ?? 'unknown',
-            'volume' => $volume,
-            'muted'  => $muted
+            'cover'       => $this->readVisualizationCover(),
+            'title'       => $this->readVisualizationString('NowTitle'),
+            'artist'      => $this->readVisualizationString('NowArtist'),
+            'status'      => $states[$transport] ?? 'unknown',
+            'volume'      => $volume,
+            'muted'       => $muted,
+            'shuffle'     => $shuffle,
+            'repeat'      => $repeat,
+            'showFavorite' => $showFavorite,
+            'favorite'    => $favorite
         ];
     }
 
