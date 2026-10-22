@@ -87,6 +87,42 @@
             background: #e8a838;
         }
 
+        .transport {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.4rem;
+            margin-top: 0.8rem;
+        }
+
+        .transport button {
+            min-width: 0;
+            min-height: 2rem;
+            padding: 0.25rem;
+            border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+            border-radius: 0.55rem;
+            color: inherit;
+            background: color-mix(in srgb, currentColor 8%, transparent);
+            font: inherit;
+            font-size: 1rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        .transport button:hover,
+        .transport button:focus-visible {
+            background: color-mix(in srgb, currentColor 16%, transparent);
+        }
+
+        .transport button:active {
+            transform: translateY(1px);
+        }
+
+        .player[data-status="playing"] #transport-toggle {
+            color: #42b883;
+            border-color: #42b883;
+            box-shadow: 0 0 0.65rem rgb(66 184 131 / 35%);
+        }
+
         @media (max-width: 260px) {
             .player {
                 grid-template-columns: 64px minmax(0, 1fr);
@@ -105,6 +141,12 @@
             <div class="status">
                 <span class="status-dot" aria-hidden="true"></span>
                 <span id="status">Unbekannt</span>
+            </div>
+            <div class="transport" aria-label="Wiedergabesteuerung">
+                <button type="button" data-transport="0" title="Zurück" aria-label="Zurück">&#x23EE;</button>
+                <button type="button" id="transport-toggle" title="Wiedergabe" aria-label="Wiedergabe">&#x25B6;</button>
+                <button type="button" data-transport="1" title="Stop" aria-label="Stop">&#x25A0;</button>
+                <button type="button" data-transport="4" title="Weiter" aria-label="Weiter">&#x23ED;</button>
             </div>
         </section>
     </main>
@@ -138,6 +180,12 @@
             document.getElementById("status").textContent = statusLabels[status];
             document.getElementById("player").dataset.status = status;
 
+            const toggleButton = document.getElementById("transport-toggle");
+            const isPlaying = status === "playing";
+            toggleButton.textContent = isPlaying ? "\u23F8" : "\u25B6";
+            toggleButton.title = isPlaying ? "Pause" : "Wiedergabe";
+            toggleButton.setAttribute("aria-label", toggleButton.title);
+
             const coverElement = document.getElementById("cover");
             coverElement.hidden = cover === "";
             if (cover === "") {
@@ -161,6 +209,16 @@
             }
             renderState(message);
         }
+
+        document.querySelectorAll("[data-transport]").forEach((button) => {
+            button.addEventListener("click", () => {
+                requestAction("Transport", Number(button.dataset.transport));
+            });
+        });
+        document.getElementById("transport-toggle").addEventListener("click", () => {
+            const value = document.getElementById("player").dataset.status === "playing" ? 3 : 2;
+            requestAction("Transport", value);
+        });
 
         renderState(__MUSIC_ASSISTANT_INITIAL_STATE__);
     </script>
