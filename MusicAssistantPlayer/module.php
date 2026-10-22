@@ -12,6 +12,7 @@ class MusicAssistantPlayer extends IPSModule
     private const COVER_SEMAPHORE_TIMEOUT = 5000;
     private const GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT = 40000;
     private const FAVORITE_SEMAPHORE_TIMEOUT = 20000;
+    private const TILE_COVER_MAX_BYTES = 524288;
     private const DEFAULT_COVER = '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCABAAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5qooooAKKK6Twd8OvEPj/AO1/2Dp/2/7Js879/HHs3btv32Gc7W6elAHN0V6rpH7MvjvUrlorixtdKQIWE13doyMcj5R5Rc55zyMcHnpnrdI/ZB1Ka2ZtU8R2tncbyFS0tmuEK4GCWZkIOc8Y7DnngA+faK+mfir8EPCvgn4R31/a2G/WrOK2Q3/nSjzHMsaO/llyo3ZbjtnjpXzNQAUUUUAFfSH7Hf8AzN3/AG5/+1q+b6+kP2O/+Zu/7c//AGtQBJ48/am1LQ9a1PSNL0K1juLC+ltmubudpUkVGZSQihCpJAP3jjkc9a4DV/2mvHepXKy299a6UgQKYbS0RkY5PzHzQ5zzjg44HHXPHfEv/ko/ir/sLXf/AKOarPhX4T+LfGtm15o+iT3NoOk8jJDG/JHyM5UPgqQducd8UAfSHxS1G41j9mY395J513dafp880m0LudpIWY4GAMkngV8hV9e/FLTrjR/2ZjYXkfk3drp+nwTR7g211khVhkZBwQeRXyFQAUUUUAdj8MPhhqXxR1qWyspUtLe3RZbm7mRikalgMDAwXI3EKSM7W5GK+p/g78Hf+FTf2v8A8Tf+1f7Q8n/l28ny9m//AG2znf7dK8g/ZO8U6bo2ta5pd7cJa3GopA1s0zqiSMjMvlgkglyZVwoBzhvTn6Q8U+KdN8G6LcapqlwkFvCjMqs6q8zBSwjQMQGchThc80AfDXxL/wCSj+Kv+wtd/wDo5q+z/hJ9j/4Vj4X+w+R5P9nw7vs+NvmbR5mcfxb9+7vuznnNfCup6jcaxqV3f3knnXd1K880m0LudiWY4GAMkngV0nhX4seLfBVm1no+tz21oekEipNGnJPyK4YJksSduM980AfSn7UXiKHSfhnJpzbHuNVuI4UQyBXVUYSM4XqwBRVPTHmDnoD8fVt+KvGuueNr1brXNTn1CVfuLIQI48gA7EGFXO0ZwBnGTzWJQAUUUUAFFFFABRRRQAUUUUAf/9k=';
 
     public function Create(): void
@@ -23,6 +24,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyString('PlayerID', '');
         $this->RegisterPropertyBoolean('ShowGroupMemberVolumes', false);
         $this->RegisterPropertyBoolean('ShowFavorite', false);
+        $this->RegisterPropertyBoolean('EnableCustomTile', false);
 
         $this->RegisterPropertyString('PlaylistProfile', '');
         $this->RegisterPropertyString('PlaylistMap', '{}');
@@ -49,6 +51,7 @@ class MusicAssistantPlayer extends IPSModule
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+        $this->configureVisualizationType();
         $this->registerParentStatusMessage();
         $this->registerWithParent();
 
@@ -217,6 +220,11 @@ class MusicAssistantPlayer extends IPSModule
                 ],
                 [
                     'type' => 'CheckBox',
+                    'name' => 'EnableCustomTile',
+                    'caption' => 'Eigene Player-Kachel in der Tile Visu anzeigen (ab IP-Symcon 7.1)'
+                ],
+                [
+                    'type' => 'CheckBox',
                     'name' => 'ShowGroupMemberVolumes',
                     'caption' => 'Individuelle Lautstärkeregler für aktuelle Gruppenmitglieder anzeigen',
                     'visible' => $showGroupMemberVolumes
@@ -291,6 +299,7 @@ class MusicAssistantPlayer extends IPSModule
                 if (array_key_exists('repeat_mode', $data)) {
                     $this->updateRepeatMode($data['repeat_mode']);
                 }
+                $this->updateVisualization();
             }
             return '';
         }
@@ -342,6 +351,27 @@ class MusicAssistantPlayer extends IPSModule
             $this->SendDebug('player_updated', 'Mute aktualisiert', 0);
         }
         return '';
+    }
+
+    public function GetVisualizationTile(): string
+    {
+        $template = @file_get_contents(__DIR__ . '/module.html');
+        if (!is_string($template)) {
+            $this->SendDebug('Visualization', 'HTML-Vorlage konnte nicht geladen werden', 0);
+            return '';
+        }
+
+        try {
+            $initialState = json_encode(
+                $this->buildVisualizationState(),
+                JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Visualization', 'Initialzustand konnte nicht erstellt werden: ' . $e->getMessage(), 0);
+            $initialState = '{"cover":"","title":"","artist":"","status":"unknown"}';
+        }
+
+        return str_replace('__MUSIC_ASSISTANT_INITIAL_STATE__', $initialState, $template);
     }
 
     public function RequestAction($Ident, $Value): void
@@ -1260,6 +1290,88 @@ class MusicAssistantPlayer extends IPSModule
         $changed = $this->setIfChangedString('NowTitle', $title);
         $changed = $this->setIfChangedString('NowArtist', $artist) || $changed;
         return $this->setIfChangedString('NowAlbum', $album) || $changed;
+    }
+
+    private function configureVisualizationType(): void
+    {
+        if (!method_exists($this, 'SetVisualizationType')
+            || !defined('INSTANCE_VISUALIZATION_TYPE_HTML')) {
+            return;
+        }
+
+        $visualizationType = $this->ReadPropertyBoolean('EnableCustomTile')
+            ? constant('INSTANCE_VISUALIZATION_TYPE_HTML')
+            : (defined('INSTANCE_VISUALIZATION_TYPE_NONE')
+                ? constant('INSTANCE_VISUALIZATION_TYPE_NONE')
+                : 0);
+        $this->SetVisualizationType($visualizationType);
+    }
+
+    private function updateVisualization(): void
+    {
+        if (!$this->ReadPropertyBoolean('EnableCustomTile')
+            || !method_exists($this, 'UpdateVisualizationValue')) {
+            return;
+        }
+
+        try {
+            $this->UpdateVisualizationValue($this->buildVisualizationState());
+        } catch (Throwable $e) {
+            $this->SendDebug('Visualization', 'Kachel konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
+        }
+    }
+
+    private function buildVisualizationState(): array
+    {
+        $transport = @$this->GetIDForIdent('Transport') > 0
+            ? (int)$this->GetValue('Transport')
+            : 0;
+        $states = [1 => 'idle', 2 => 'playing', 3 => 'paused'];
+
+        return [
+            'cover'  => $this->readVisualizationCover(),
+            'title'  => $this->readVisualizationString('NowTitle'),
+            'artist' => $this->readVisualizationString('NowArtist'),
+            'status' => $states[$transport] ?? 'unknown'
+        ];
+    }
+
+    private function readVisualizationString(string $ident): string
+    {
+        return @$this->GetIDForIdent($ident) > 0
+            ? (string)$this->GetValue($ident)
+            : '';
+    }
+
+    private function readVisualizationCover(): string
+    {
+        $mediaId = @$this->GetIDForIdent('Cover');
+        if ($mediaId <= 0 || !IPS_MediaExists($mediaId) || !$this->coverMediaHasContent($mediaId)) {
+            return '';
+        }
+
+        $media = IPS_GetMedia($mediaId);
+        if ((int)($media['MediaSize'] ?? 0) > self::TILE_COVER_MAX_BYTES) {
+            $this->SendDebug('Visualization', 'Cover ist für die Kachel zu groß', 0);
+            return '';
+        }
+        $content = IPS_GetMediaContent($mediaId);
+        if ($content === '') {
+            return '';
+        }
+        $signature = base64_decode(substr($content, 0, 16), true);
+        if (!is_string($signature)) {
+            return '';
+        }
+        if (substr($signature, 0, 3) === "\xFF\xD8\xFF") {
+            $contentType = 'image/jpeg';
+        } elseif (substr($signature, 0, 8) === "\x89PNG\r\n\x1A\n") {
+            $contentType = 'image/png';
+        } else {
+            return '';
+        }
+
+        return 'data:' . $contentType . ';base64,' . $content;
     }
 
     private function updateMetadataVisibilityFromQueueState($state): void

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            color-scheme: light dark;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-width: 0;
+            color: inherit;
+            background: transparent;
+        }
+
+        .player {
+            display: grid;
+            grid-template-columns: minmax(72px, 34%) minmax(0, 1fr);
+            gap: clamp(12px, 4vw, 24px);
+            align-items: center;
+            min-height: 100%;
+            padding: clamp(12px, 4vw, 24px);
+        }
+
+        .cover {
+            display: block;
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+            border-radius: 10%;
+            background: color-mix(in srgb, currentColor 10%, transparent);
+            box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+        }
+
+        .details {
+            min-width: 0;
+        }
+
+        .title,
+        .artist {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .title {
+            font-size: clamp(1rem, 5vw, 1.45rem);
+            font-weight: 650;
+            line-height: 1.2;
+        }
+
+        .artist {
+            margin-top: 0.35rem;
+            font-size: clamp(0.82rem, 3.8vw, 1rem);
+            opacity: 0.72;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            margin-top: 0.8rem;
+            font-size: 0.78rem;
+            opacity: 0.72;
+        }
+
+        .status-dot {
+            width: 0.6rem;
+            height: 0.6rem;
+            border-radius: 50%;
+            background: #777;
+        }
+
+        .player[data-status="playing"] .status-dot {
+            background: #42b883;
+            box-shadow: 0 0 0.7rem rgb(66 184 131 / 70%);
+        }
+
+        .player[data-status="paused"] .status-dot {
+            background: #e8a838;
+        }
+
+        @media (max-width: 260px) {
+            .player {
+                grid-template-columns: 64px minmax(0, 1fr);
+                gap: 10px;
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="player" id="player" data-status="unknown">
+        <img class="cover" id="cover" alt="" hidden>
+        <section class="details">
+            <div class="title" id="title">Kein Titel</div>
+            <div class="artist" id="artist"></div>
+            <div class="status">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span id="status">Unbekannt</span>
+            </div>
+        </section>
+    </main>
+    <script>
+        "use strict";
+
+        const statusLabels = {
+            idle: "Gestoppt",
+            playing: "Wiedergabe",
+            paused: "Pausiert",
+            unknown: "Unbekannt"
+        };
+
+        function renderState(data) {
+            if (!data || typeof data !== "object") {
+                return;
+            }
+
+            const title = typeof data.title === "string" ? data.title : "";
+            const artist = typeof data.artist === "string" ? data.artist : "";
+            const status = Object.prototype.hasOwnProperty.call(statusLabels, data.status)
+                ? data.status
+                : "unknown";
+            const cover = typeof data.cover === "string"
+                && /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(data.cover)
+                ? data.cover
+                : "";
+
+            document.getElementById("title").textContent = title || "Kein Titel";
+            document.getElementById("artist").textContent = artist;
+            document.getElementById("status").textContent = statusLabels[status];
+            document.getElementById("player").dataset.status = status;
+
+            const coverElement = document.getElementById("cover");
+            coverElement.hidden = cover === "";
+            if (cover === "") {
+                coverElement.removeAttribute("src");
+            } else if (coverElement.src !== cover) {
+                coverElement.src = cover;
+            }
+        }
+
+        function handleMessage(data) {
+            renderState(data);
+        }
+
+        renderState(__MUSIC_ASSISTANT_INITIAL_STATE__);
+    </script>
+</body>
+</html>

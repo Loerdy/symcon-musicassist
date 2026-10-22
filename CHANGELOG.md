@@ -8,6 +8,7 @@
 - Player können optional den Favoritenstatus des aktuellen Titels anzeigen und ändern.
 - Explizite API-Antworten mit `result: null` werden korrekt als Null-Ergebnis verarbeitet.
 - Die Favoritensteuerung wird als Herzschalter mit hervorgehobenem Aktivzustand dargestellt.
+- Player können optional eine lesende HTML-Kachel mit Cover, Titel, Interpret und Wiedergabestatus anzeigen.
 
 ## 2.0.2 — 2026-10-21
 
