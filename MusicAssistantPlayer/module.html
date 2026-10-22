@@ -26,10 +26,14 @@
             background: transparent;
             container-name: tile;
             container-type: size;
-            overflow: auto;
+            overflow: hidden;
         }
 
         .player {
+            --background-a: linear-gradient(145deg, #25282d 0%, #141619 58%, #0b0c0e 100%);
+            --background-b: var(--background-a);
+            position: relative;
+            isolation: isolate;
             display: grid;
             grid-template-columns: clamp(64px, 27cqi, 128px) minmax(0, 1fr);
             gap: clamp(8px, 3cqi, 18px);
@@ -38,6 +42,37 @@
             width: 100%;
             min-height: 100%;
             padding: clamp(8px, 2.5cqi, 16px);
+            overflow: hidden;
+            color: #f3f4f6;
+            color-scheme: dark;
+        }
+
+        .player::before,
+        .player::after {
+            position: absolute;
+            z-index: -1;
+            inset: 0;
+            content: "";
+            pointer-events: none;
+            transition: opacity 700ms ease;
+        }
+
+        .player::before {
+            background: var(--background-a);
+            opacity: 1;
+        }
+
+        .player::after {
+            background: var(--background-b);
+            opacity: 0;
+        }
+
+        .player[data-background-layer="b"]::before {
+            opacity: 0;
+        }
+
+        .player[data-background-layer="b"]::after {
+            opacity: 1;
         }
 
         .cover {
@@ -122,7 +157,7 @@
             border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
             border-radius: 0.55rem;
             color: inherit;
-            background: color-mix(in srgb, currentColor 8%, transparent);
+            background: rgb(0 0 0 / 22%);
             font: inherit;
             font-size: 1rem;
             line-height: 1;
@@ -159,7 +194,7 @@
             border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
             border-radius: 0.55rem;
             color: inherit;
-            background: color-mix(in srgb, currentColor 8%, transparent);
+            background: rgb(0 0 0 / 22%);
             font: inherit;
             font-size: 1rem;
             line-height: 1;
@@ -202,7 +237,7 @@
             border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
             border-radius: 0.55rem;
             color: inherit;
-            background: color-mix(in srgb, currentColor 8%, transparent);
+            background: rgb(0 0 0 / 22%);
             font: inherit;
             font-size: 1rem;
             line-height: 1;
@@ -266,7 +301,8 @@
             border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
             border-radius: 0.55rem;
             color: inherit;
-            background-color: color-mix(in srgb, currentColor 8%, transparent);
+            background-color: rgb(0 0 0 / 42%);
+            color-scheme: dark;
             font: inherit;
             font-size: 0.78rem;
             text-overflow: ellipsis;
@@ -452,6 +488,87 @@
             paused: "Pausiert",
             unknown: "Unbekannt"
         };
+        const neutralBackground = "linear-gradient(145deg, #25282d 0%, #141619 58%, #0b0c0e 100%)";
+        let analyzedCover = null;
+        let backgroundLayer = "a";
+
+        function setBackground(background) {
+            const player = document.getElementById("player");
+            backgroundLayer = backgroundLayer === "a" ? "b" : "a";
+            player.style.setProperty(`--background-${backgroundLayer}`, background);
+            player.dataset.backgroundLayer = backgroundLayer;
+        }
+
+        function analyzeCoverBackground(coverElement, cover) {
+            if (cover === analyzedCover) {
+                return;
+            }
+            analyzedCover = cover;
+
+            if (cover === "") {
+                setBackground(neutralBackground);
+                return;
+            }
+
+            const applyCoverBackground = () => {
+                if (analyzedCover !== cover) {
+                    return;
+                }
+                try {
+                    const canvas = document.createElement("canvas");
+                    const size = 24;
+                    canvas.width = size;
+                    canvas.height = size;
+                    const context = canvas.getContext("2d", {willReadFrequently: true});
+                    if (!context) {
+                        setBackground(neutralBackground);
+                        return;
+                    }
+                    context.drawImage(coverElement, 0, 0, size, size);
+                    const pixels = context.getImageData(0, 0, size, size).data;
+                    let red = 0;
+                    let green = 0;
+                    let blue = 0;
+                    let weightSum = 0;
+
+                    for (let index = 0; index < pixels.length; index += 4) {
+                        if (pixels[index + 3] < 128) {
+                            continue;
+                        }
+                        const maximum = Math.max(pixels[index], pixels[index + 1], pixels[index + 2]);
+                        const minimum = Math.min(pixels[index], pixels[index + 1], pixels[index + 2]);
+                        const saturation = maximum === 0 ? 0 : (maximum - minimum) / maximum;
+                        const weight = 0.35 + saturation;
+                        red += pixels[index] * weight;
+                        green += pixels[index + 1] * weight;
+                        blue += pixels[index + 2] * weight;
+                        weightSum += weight;
+                    }
+
+                    if (weightSum === 0) {
+                        setBackground(neutralBackground);
+                        return;
+                    }
+                    const color = [red, green, blue].map((value) => Math.round(value / weightSum));
+                    const accent = color.map((value) => Math.round(value * 0.42));
+                    const middle = color.map((value) => Math.round(value * 0.2));
+                    setBackground(`linear-gradient(145deg, rgb(${accent.join(" ")}) 0%, rgb(${middle.join(" ")}) 55%, #090b0d 100%)`);
+                } catch (error) {
+                    setBackground(neutralBackground);
+                }
+            };
+
+            if (coverElement.complete && coverElement.naturalWidth > 0) {
+                applyCoverBackground();
+            } else {
+                coverElement.addEventListener("load", applyCoverBackground, {once: true});
+                coverElement.addEventListener("error", () => {
+                    if (analyzedCover === cover) {
+                        setBackground(neutralBackground);
+                    }
+                }, {once: true});
+            }
+        }
 
         function renderOptions(selectId, options, placeholder) {
             const select = document.getElementById(selectId);
@@ -600,6 +717,7 @@
             } else if (coverElement.src !== cover) {
                 coverElement.src = cover;
             }
+            analyzeCoverBackground(coverElement, cover);
         }
 
         function handleMessage(data) {
