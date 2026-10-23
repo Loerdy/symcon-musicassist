@@ -200,6 +200,24 @@
             transform: translateY(1px);
         }
 
+        .transport svg,
+        .mute-button svg {
+            display: block;
+            width: 1.1rem;
+            height: 1.1rem;
+            margin: auto;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .transport svg[hidden],
+        .mute-button svg[hidden] {
+            display: none;
+        }
+
         .player[data-status="playing"] #transport-toggle {
             color: #42b883;
             border-color: #42b883;
@@ -490,13 +508,13 @@
                 <span id="status">Unbekannt</span>
             </div>
             <div class="transport" aria-label="Wiedergabesteuerung">
-                <button type="button" data-transport="0" title="Zurück" aria-label="Zurück">&#x23EE;</button>
-                <button type="button" id="transport-toggle" title="Wiedergabe" aria-label="Wiedergabe">&#x25B6;</button>
+                <button type="button" data-transport="0" title="Zurück" aria-label="Zurück"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 6 9 12l10 6Z"/></svg></button>
+                <button type="button" id="transport-toggle" title="Wiedergabe" aria-label="Wiedergabe"><svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M9 5v14M15 5v14"/></svg></button>
                 <button type="button" data-transport="1" title="Stop" aria-label="Stop">&#x25A0;</button>
-                <button type="button" data-transport="4" title="Weiter" aria-label="Weiter">&#x23ED;</button>
+                <button type="button" data-transport="4" title="Weiter" aria-label="Weiter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 6l10 6-10 6Z"/></svg></button>
             </div>
             <div class="volume-control">
-                <button type="button" class="mute-button" id="mute" title="Stumm" aria-label="Stumm" aria-pressed="false">&#x1F50A;</button>
+                <button type="button" class="mute-button" id="mute" title="Stumm" aria-label="Stumm" aria-pressed="false"><svg class="icon-unmuted" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6.5 9H3v6h3.5l4.5 4ZM15 9a4 4 0 0 1 0 6M17.5 6.5a8 8 0 0 1 0 11"/></svg><svg class="icon-muted" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M11 5 6.5 9H3v6h3.5l4.5 4ZM16 9l5 6M21 9l-5 6"/></svg></button>
                 <input class="volume-slider" id="volume" type="range" min="0" max="100" step="1" value="0" aria-label="Lautstärke">
                 <output class="volume-value" id="volume-value" for="volume">0 %</output>
             </div>
@@ -871,7 +889,8 @@
 
             const toggleButton = document.getElementById("transport-toggle");
             const isPlaying = status === "playing";
-            toggleButton.textContent = isPlaying ? "\u23F8" : "\u25B6";
+            toggleButton.querySelector(".icon-play").hidden = isPlaying;
+            toggleButton.querySelector(".icon-pause").hidden = !isPlaying;
             toggleButton.title = isPlaying ? "Pause" : "Wiedergabe";
             toggleButton.setAttribute("aria-label", toggleButton.title);
 
@@ -899,7 +918,8 @@
             document.getElementById("player").dataset.muted = String(muted);
 
             const muteButton = document.getElementById("mute");
-            muteButton.textContent = muted ? "\u{1F507}" : "\u{1F50A}";
+            muteButton.querySelector(".icon-unmuted").hidden = muted;
+            muteButton.querySelector(".icon-muted").hidden = !muted;
             muteButton.title = muted ? "Ton einschalten" : "Stumm";
             muteButton.setAttribute("aria-label", muteButton.title);
             muteButton.setAttribute("aria-pressed", String(muted));
