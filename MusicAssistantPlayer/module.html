@@ -174,8 +174,8 @@
         }
 
         .player[data-status="playing"] .status-dot {
-            background: #42b883;
-            box-shadow: 0 0 0.7rem rgb(66 184 131 / 70%);
+            background: var(--accent-color);
+            box-shadow: 0 0 0.7rem color-mix(in srgb, var(--accent-color) 70%, transparent);
         }
 
         .player[data-status="paused"] .status-dot {
@@ -271,7 +271,7 @@
         .volume-slider {
             width: 100%;
             min-width: 0;
-            accent-color: #42b883;
+            accent-color: var(--accent-color);
         }
 
         .volume-value {
