@@ -6,7 +6,7 @@ Diese IP-Symcon-Library bindet einen [Music-Assistant](https://www.music-assista
 
 ## Voraussetzungen
 
-- IP-Symcon ab Version 7.0
+- IP-Symcon ab Version 8.0
 - ein erreichbarer Music-Assistant-Server
 - Hostname oder IP-Adresse, Port und Zugriffstoken des Music-Assistant-Servers
 - Netzwerkzugriff des IP-Symcon-Systems auf die HTTP-API und den WebSocket von Music Assistant
@@ -194,7 +194,7 @@ Neu über den IP-Symcon-Configurator angelegte Player registrieren sich über `F
 
 ## Versionierung
 
-Aktuelle Stable-Version: **v2.1.0**.
+Aktuelle Stable-Version: **v2.1.1**.
 
 Der Tag [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) kennzeichnet den ersten veröffentlichten Stable-Stand.
 
@@ -208,7 +208,7 @@ This IP-Symcon library integrates a [Music Assistant](https://www.music-assistan
 
 ## Requirements
 
-- IP-Symcon version 7.0 or later
+- IP-Symcon version 8.0 or later
 - an accessible Music Assistant server
 - the hostname or IP address, port, and access token of the Music Assistant server
 - network access from the IP-Symcon system to the Music Assistant HTTP API and WebSocket
@@ -396,8 +396,6 @@ Players newly created through the IP-Symcon configurator reliably register with 
 
 ## Versioning
 
-Current stable version: **v2.1.0**.
+Current stable version: **v2.1.1**.
 
 The [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) tag marks the first published stable version.
-
-<!-- IP-Symcon module update detection test 2026-10-23 -->

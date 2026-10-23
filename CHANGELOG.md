@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.1.1 — 2026-10-23
+
+- Die Mindestversion wurde aufgrund der Verwendung moderner Variablenpräsentationen auf IP-Symcon 8.0 angehoben.
+- Gegenüber v2.1.0 gibt es keine funktionalen Änderungen.
+
 ## v2.1.0 — 2026-10-23
 
 - Player können optional eine responsive HTML-Kachel mit Cover, Titel, Interpret, Wiedergabestatus und Bedienelementen für Transport, Lautstärke, Mute, Shuffle, Repeat und Favoriten verwenden.
