@@ -21,6 +21,9 @@ class MusicAssistantConnection extends IPSModule
     private const RESYNC_MAX_ATTEMPTS = 3;
     private const RESYNC_RETRY_DELAY_SECONDS = 5;
     private const RESYNC_PROCESSING_TIMEOUT_SECONDS = 15;
+    private const HEALTH_CHECK_INTERVAL_SECONDS = 60;
+    private const HEALTH_CHECK_TIMEOUT_SECONDS = 15;
+    private const HEALTH_CHECK_MAX_FAILURES = 2;
     private const API_COMMANDS = [
         'players/cmd/previous',
         'players/cmd/stop',
@@ -62,6 +65,11 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('ParentReconnectPending', '0');
         $this->SetBuffer('ParentReconnectAttempted', '0');
+        $this->SetBuffer('HealthMessageId', '');
+        $this->SetBuffer('HealthGeneration', '');
+        $this->SetBuffer('HealthStarted', '0');
+        $this->SetBuffer('HealthNextAt', '0');
+        $this->SetBuffer('HealthFailures', '0');
         $this->withStateLock(function (): void {
             $this->invalidateQueueStateFromState();
             $this->SetBuffer('ResyncPlayers', '{}');
@@ -80,6 +88,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
         $this->resetAuthRetryState();
+        $this->resetHealthCheckState(false);
         $this->SetStatus($this->isConfigured() ? 104 : 201);
         $this->SetTimerInterval('CheckConnection', $this->isConfigured() ? 5000 : 0);
         try {
@@ -189,6 +198,7 @@ class MusicAssistantConnection extends IPSModule
                 $this->SetBuffer('AuthGeneration', '');
                 $this->SetBuffer('AuthStarted', '0');
                 $this->resetAuthRetryState();
+                $this->resetHealthCheckState(false);
                 $this->invalidateQueueStateFromState();
             });
             $this->SetBuffer('ParentReconnectPending', '0');
@@ -257,6 +267,9 @@ class MusicAssistantConnection extends IPSModule
         }
 
         $messageId = $message['message_id'] ?? null;
+        if (is_string($messageId) && $this->handleHealthResponse($messageId, $message)) {
+            return '';
+        }
         if (is_string($messageId) && $this->handleQueueResponse($messageId, $message)) {
             return '';
         }
@@ -276,6 +289,7 @@ class MusicAssistantConnection extends IPSModule
             && ($message['result']['authenticated'] ?? null) === true) {
             $this->prepareResyncGeneration();
             $this->SetStatus(102);
+            $this->resetHealthCheckState(true);
             $this->SendDebug('Authentication', 'Authentifizierung bestätigt', 0);
             $this->cleanupRegisteredPlayers();
             $this->resolveRegisteredPlayers();
@@ -629,9 +643,187 @@ class MusicAssistantConnection extends IPSModule
             && $this->GetBuffer('AuthRetryGeneration') === $this->GetBuffer('ConnectionGeneration')) {
             $this->authenticate();
         }
+        $this->checkWebSocketHealth();
+        if ($this->GetBuffer('ParentReconnectPending') === '1') {
+            return;
+        }
         $this->expireQueueRequests();
         $this->recoverStaleResyncProcessing();
         $this->retryPendingResyncs();
+    }
+
+    private function checkWebSocketHealth(): void
+    {
+        $now = time();
+        try {
+            $action = $this->withStateLock(function () use ($now): array {
+                if ($this->GetStatus() !== 102
+                    || $this->GetBuffer('ParentReconnectPending') === '1') {
+                    return ['Send' => false, 'FailureGeneration' => '', 'FailureMessageId' => ''];
+                }
+                $generation = $this->GetBuffer('ConnectionGeneration');
+                $messageId = $this->GetBuffer('HealthMessageId');
+                if ($messageId !== '') {
+                    if ($this->GetBuffer('HealthGeneration') !== $generation) {
+                        $this->resetHealthCheckState(false);
+                        return ['Send' => false, 'FailureGeneration' => '', 'FailureMessageId' => ''];
+                    }
+                    if ($now - (int)$this->GetBuffer('HealthStarted') >= self::HEALTH_CHECK_TIMEOUT_SECONDS) {
+                        return [
+                            'Send' => false,
+                            'FailureGeneration' => $generation,
+                            'FailureMessageId' => $messageId
+                        ];
+                    }
+                    return ['Send' => false, 'FailureGeneration' => '', 'FailureMessageId' => ''];
+                }
+                if ((int)$this->GetBuffer('HealthNextAt') > $now) {
+                    return ['Send' => false, 'FailureGeneration' => '', 'FailureMessageId' => ''];
+                }
+                $messageId = 'health-' . bin2hex(random_bytes(16));
+                $this->SetBuffer('HealthMessageId', $messageId);
+                $this->SetBuffer('HealthGeneration', $generation);
+                $this->SetBuffer('HealthStarted', (string)$now);
+                $this->SetBuffer(
+                    'HealthNextAt',
+                    (string)($now + self::HEALTH_CHECK_INTERVAL_SECONDS)
+                );
+                return [
+                    'Send' => true,
+                    'MessageId' => $messageId,
+                    'Generation' => $generation,
+                    'FailureGeneration' => '',
+                    'FailureMessageId' => ''
+                ];
+            });
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                throw $e;
+            }
+            $this->SendDebug('Healthcheck', 'Status konnte noch nicht geprüft werden', 0);
+            return;
+        }
+
+        if ($action['FailureGeneration'] !== '') {
+            $this->registerHealthCheckFailure(
+                $action['FailureMessageId'],
+                $action['FailureGeneration'],
+                'Antwort-Timeout'
+            );
+            return;
+        }
+        if (!$action['Send']) {
+            return;
+        }
+        try {
+            $this->sendWebSocketCommand($action['MessageId'], 'info', []);
+            $this->SendDebug('Healthcheck', 'Anfrage gesendet', 0);
+        } catch (Throwable $e) {
+            $this->registerHealthCheckFailure(
+                $action['MessageId'],
+                $action['Generation'],
+                'Senden fehlgeschlagen'
+            );
+        }
+    }
+
+    private function handleHealthResponse(string $messageId, array $message): bool
+    {
+        $generation = '';
+        $valid = false;
+        try {
+            $matched = $this->withStateLock(function () use ($messageId, $message, &$generation, &$valid): bool {
+                if ($this->GetBuffer('HealthMessageId') !== $messageId) {
+                    return false;
+                }
+                $generation = $this->GetBuffer('HealthGeneration');
+                $result = $message['result'] ?? null;
+                $valid = $generation !== ''
+                    && $generation === $this->GetBuffer('ConnectionGeneration')
+                    && $this->GetStatus() === 102
+                    && !array_key_exists('error_code', $message)
+                    && !array_key_exists('error', $message)
+                    && is_array($result)
+                    && is_string($result['server_id'] ?? null)
+                    && is_string($result['server_version'] ?? null)
+                    && is_int($result['schema_version'] ?? null)
+                    && is_int($result['min_supported_schema_version'] ?? null);
+                if ($valid) {
+                    $this->clearPendingHealthCheck();
+                    $this->SetBuffer('HealthFailures', '0');
+                    $this->SetBuffer(
+                        'HealthNextAt',
+                        (string)(time() + self::HEALTH_CHECK_INTERVAL_SECONDS)
+                    );
+                }
+                return true;
+            });
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                throw $e;
+            }
+            $this->SendDebug('Healthcheck', 'Antwort konnte noch nicht verarbeitet werden', 0);
+            return true;
+        }
+        if (!$matched) {
+            return false;
+        }
+        if ($valid) {
+            $this->SendDebug('Healthcheck', 'Antwort bestätigt', 0);
+        } else {
+            $this->registerHealthCheckFailure($messageId, $generation, 'Ungültige Antwort');
+        }
+        return true;
+    }
+
+    private function registerHealthCheckFailure(string $messageId, string $generation, string $reason): void
+    {
+        $result = $this->withStateLock(function () use ($messageId, $generation): array {
+            if ($generation === '' || $generation !== $this->GetBuffer('ConnectionGeneration')
+                || $this->GetStatus() !== 102
+                || $this->GetBuffer('HealthMessageId') !== $messageId
+                || $this->GetBuffer('HealthGeneration') !== $generation) {
+                return ['Counted' => false, 'Reconnect' => false];
+            }
+            $this->clearPendingHealthCheck();
+            $failures = (int)$this->GetBuffer('HealthFailures') + 1;
+            $this->SetBuffer('HealthFailures', (string)$failures);
+            $reconnect = $failures >= self::HEALTH_CHECK_MAX_FAILURES;
+            if ($reconnect) {
+                $this->SetBuffer('ParentReconnectAttempted', '0');
+                $this->SetBuffer('ParentReconnectPending', '1');
+            }
+            return [
+                'Counted' => true,
+                'Reconnect' => $reconnect
+            ];
+        });
+        if (!$result['Counted']) {
+            return;
+        }
+        $this->SendDebug('Healthcheck', $reason, 0);
+        if (!$result['Reconnect']) {
+            return;
+        }
+        $this->handleConnectionLost();
+        $this->SendDebug('Healthcheck', 'Zwei aufeinanderfolgende Fehler; Reconnect vorgesehen', 0);
+    }
+
+    private function clearPendingHealthCheck(): void
+    {
+        $this->SetBuffer('HealthMessageId', '');
+        $this->SetBuffer('HealthGeneration', '');
+        $this->SetBuffer('HealthStarted', '0');
+    }
+
+    private function resetHealthCheckState(bool $schedule): void
+    {
+        $this->clearPendingHealthCheck();
+        $this->SetBuffer('HealthFailures', '0');
+        $this->SetBuffer(
+            'HealthNextAt',
+            $schedule ? (string)(time() + self::HEALTH_CHECK_INTERVAL_SECONDS) : '0'
+        );
     }
 
     private function authenticate(): void
@@ -742,6 +934,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
         $this->resetAuthRetryState();
+        $this->resetHealthCheckState(false);
         $this->invalidateQueueState();
         $this->SetStatus($this->isConfigured() ? 104 : 201);
 
@@ -758,6 +951,7 @@ class MusicAssistantConnection extends IPSModule
         $this->handleConnectionLost();
 
         if ($parentId <= 0 || !IPS_ApplyChanges($parentId)) {
+            $this->SetBuffer('ParentReconnectAttempted', '0');
             $this->SetStatus(203);
             $this->SendDebug('WebSocket', 'Kontrollierter Reconnect konnte nicht gestartet werden', 0);
             return;
