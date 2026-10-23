@@ -343,6 +343,10 @@
             box-shadow: 0 0 0.65rem color-mix(in srgb, var(--accent-color) 35%, transparent);
         }
 
+        #favorite[aria-pressed="true"] svg {
+            fill: currentColor;
+        }
+
         .media-selectors {
             display: none;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -533,7 +537,7 @@
             <div class="mode-controls">
                 <button type="button" id="shuffle" title="Shuffle" aria-label="Shuffle" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h3c5 0 7 12 12 12h3"/><path d="m18 15 3 3-3 3"/><path d="M3 18h3c2.1 0 3.6-2.1 5-4.5"/><path d="M13 9.5C14.4 7.4 15.9 6 18 6h3"/><path d="m18 3 3 3-3 3"/></svg></button>
                 <button type="button" id="repeat" title="Repeat aus" aria-label="Repeat aus" data-repeat="off"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><path class="repeat-one" d="M12 10v4M10.8 11.2 12 10"/></svg></button>
-                <button type="button" id="favorite" title="Favorit" aria-label="Favorit" aria-pressed="false" hidden>&#x2661;</button>
+                <button type="button" id="favorite" title="Favorit" aria-label="Favorit" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg></button>
             </div>
             <div class="media-selectors">
                 <select id="playlist" aria-label="Playlist"><option value="">Playlist</option></select>
@@ -947,7 +951,6 @@
 
             const favoriteButton = document.getElementById("favorite");
             favoriteButton.hidden = !showFavorite;
-            favoriteButton.textContent = favorite ? "\u2665" : "\u2661";
             favoriteButton.setAttribute("aria-pressed", String(favorite));
 
             renderOptions("playlist", data.playlists, "Playlist");
