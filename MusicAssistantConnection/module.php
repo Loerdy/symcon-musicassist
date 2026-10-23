@@ -16,6 +16,8 @@ class MusicAssistantConnection extends IPSModule
     private const MAX_ARTWORK_SIZE = 5242880;
     private const STATE_SEMAPHORE_TIMEOUT = 5000;
     private const STATE_SEMAPHORE_ERROR = 1701;
+    private const AUTH_MAX_ATTEMPTS = 3;
+    private const AUTH_RETRY_DELAY_SECONDS = 5;
     private const API_COMMANDS = [
         'players/cmd/previous',
         'players/cmd/stop',
@@ -50,6 +52,9 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
+        $this->SetBuffer('AuthAttempts', '0');
+        $this->SetBuffer('AuthRetryAt', '0');
+        $this->SetBuffer('AuthRetryGeneration', '');
         $this->SetBuffer('ConnectionGeneration', '0');
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('ParentReconnectPending', '0');
@@ -71,6 +76,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
+        $this->resetAuthRetryState();
         $this->SetStatus($this->isConfigured() ? 104 : 201);
         $this->SetTimerInterval('CheckConnection', $this->isConfigured() ? 5000 : 0);
         try {
@@ -179,6 +185,7 @@ class MusicAssistantConnection extends IPSModule
                 $this->SetBuffer('AuthMessageId', '');
                 $this->SetBuffer('AuthGeneration', '');
                 $this->SetBuffer('AuthStarted', '0');
+                $this->resetAuthRetryState();
                 $this->invalidateQueueStateFromState();
             });
             $this->SetBuffer('ParentReconnectPending', '0');
@@ -261,6 +268,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
+        $this->SetBuffer('AuthRetryAt', '0');
         if (!array_key_exists('error_code', $message) && !array_key_exists('error', $message)
             && ($message['result']['authenticated'] ?? null) === true) {
             $this->prepareResyncGeneration();
@@ -602,18 +610,31 @@ class MusicAssistantConnection extends IPSModule
             return;
         }
         $started = (int)$this->GetBuffer('AuthStarted');
-        if ($started > 0 && time() - $started >= 15) {
+        $now = time();
+        if ($started > 0 && $now - $started >= 15) {
+            $generation = $this->GetBuffer('AuthGeneration');
             $this->SetBuffer('AuthMessageId', '');
             $this->SetBuffer('AuthGeneration', '');
             $this->SetBuffer('AuthStarted', '0');
             $this->SetStatus(203);
             $this->SendDebug('Authentication', 'Keine Bestätigung innerhalb von 15 Sekunden', 0);
+            $this->scheduleAuthRetry($generation);
+        }
+        $retryAt = (int)$this->GetBuffer('AuthRetryAt');
+        if ($retryAt > 0 && $now >= $retryAt
+            && $this->GetBuffer('AuthMessageId') === ''
+            && $this->GetBuffer('AuthRetryGeneration') === $this->GetBuffer('ConnectionGeneration')) {
+            $this->authenticate();
         }
         $this->expireQueueRequests();
     }
 
     private function authenticate(): void
     {
+        if ($this->GetStatus() === 102) {
+            $this->SetBuffer('AuthRetryAt', '0');
+            return;
+        }
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
@@ -622,6 +643,19 @@ class MusicAssistantConnection extends IPSModule
             $this->SetStatus(201);
             return;
         }
+        $generation = $this->GetBuffer('ConnectionGeneration');
+        if ($this->GetBuffer('AuthRetryGeneration') !== $generation) {
+            $this->resetAuthRetryState();
+        }
+        $attempts = (int)$this->GetBuffer('AuthAttempts');
+        if ($attempts >= self::AUTH_MAX_ATTEMPTS) {
+            $this->SetBuffer('AuthRetryAt', '0');
+            $this->SetStatus(203);
+            $this->SendDebug('Authentication', 'Maximale Anzahl automatischer Versuche erreicht', 0);
+            return;
+        }
+        $this->SetBuffer('AuthAttempts', (string)($attempts + 1));
+        $this->SetBuffer('AuthRetryAt', '0');
         $this->SetStatus(104);
         try {
             $id = 'auth-' . bin2hex(random_bytes(16));
@@ -647,7 +681,30 @@ class MusicAssistantConnection extends IPSModule
             $this->SetBuffer('AuthStarted', '0');
             $this->SetStatus(203);
             $this->SendDebug('Authentication', 'Auth-Nachricht konnte nicht gesendet werden', 0);
+            $this->scheduleAuthRetry($generation);
         }
+    }
+
+    private function resetAuthRetryState(): void
+    {
+        $this->SetBuffer('AuthAttempts', '0');
+        $this->SetBuffer('AuthRetryAt', '0');
+        $this->SetBuffer('AuthRetryGeneration', $this->GetBuffer('ConnectionGeneration'));
+    }
+
+    private function scheduleAuthRetry(string $generation): void
+    {
+        if ($generation === '' || $generation !== $this->GetBuffer('ConnectionGeneration')) {
+            return;
+        }
+        if ((int)$this->GetBuffer('AuthAttempts') >= self::AUTH_MAX_ATTEMPTS) {
+            $this->SetBuffer('AuthRetryAt', '0');
+            $this->SendDebug('Authentication', 'Maximale Anzahl automatischer Versuche erreicht', 0);
+            return;
+        }
+        $this->SetBuffer('AuthRetryGeneration', $generation);
+        $this->SetBuffer('AuthRetryAt', (string)(time() + self::AUTH_RETRY_DELAY_SECONDS));
+        $this->SendDebug('Authentication', 'Wiederholung in frühestens fünf Sekunden vorgesehen', 0);
     }
 
     private function registerParentStatusMessage(): void
@@ -679,6 +736,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
+        $this->resetAuthRetryState();
         $this->invalidateQueueState();
         $this->SetStatus($this->isConfigured() ? 104 : 201);
 
