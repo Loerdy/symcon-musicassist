@@ -146,7 +146,6 @@ class MusicAssistantPlayer extends IPSModule
                 'PRESENTATION'   => constant('VARIABLE_PRESENTATION_SWITCH'),
                 'USE_ICON_FALSE' => false,
                 'ICON_TRUE'      => 'heart',
-                'GLOW_COLOR'     => 0xE53935,
                 'GLOW_INTENSITY' => 30,
                 'USAGE_TYPE'     => 2
             ];
