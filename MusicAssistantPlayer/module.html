@@ -514,7 +514,7 @@
         <img class="cover" id="cover" alt="" hidden>
         <section class="details">
             <div class="title" id="title">Kein Titel</div>
-            <div class="artist" id="artist"></div>
+            <div class="artist" id="artist">–</div>
             <div class="status">
                 <span class="status-dot" aria-hidden="true"></span>
                 <span id="status">Unbekannt</span>
@@ -895,7 +895,7 @@
             const favorite = data.favorite === true;
 
             document.getElementById("title").textContent = title || "Kein Titel";
-            document.getElementById("artist").textContent = artist;
+            document.getElementById("artist").textContent = artist || "–";
             document.getElementById("status").textContent = statusLabels[status];
             document.getElementById("player").dataset.status = status;
 
