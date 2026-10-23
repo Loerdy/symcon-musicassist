@@ -399,3 +399,5 @@ Players newly created through the IP-Symcon configurator reliably register with 
 Current stable version: **v2.1.0**.
 
 The [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) tag marks the first published stable version.
+
+<!-- IP-Symcon module update detection test 2026-10-23 -->
