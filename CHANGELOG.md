@@ -1,14 +1,18 @@
 # Changelog
 
-## Unreleased
+## v2.1.0 — 2026-10-23
 
-- Playergruppen können optional ereignisgesteuerte Lautstärkeregler für ihre aktuellen Mitglieder bereitstellen.
-- Aktualisierte Playlist-Zuordnungen werden an bestehende Player derselben Music-Assistant-Verbindung übertragen.
+- Player können optional eine responsive HTML-Kachel mit Cover, Titel, Interpret, Wiedergabestatus und Bedienelementen für Transport, Lautstärke, Mute, Shuffle, Repeat und Favoriten verwenden.
+- Die HTML-Kachel unterstützt kompakte und erweiterte Layouts, Playlist- und Radio-Auswahl sowie individuelle Lautstärkeregler für aktuelle Mitglieder einer Playergruppe.
+- Coverabhängige Hintergründe, ein optimiertes Standardcover und die Farben des aktiven IP-Symcon-Themes sorgen für eine konsistente Darstellung in hellen und dunklen Designs.
+- Monochrome SVG-Symbole und aktive Bedienelemente verwenden die IP-Symcon-Akzentfarbe und werden auch unter iOS einheitlich dargestellt.
+- Player können den Favoritenstatus des aktuellen Titels anzeigen und ändern; die native Schalterdarstellung verwendet ein Herzsymbol.
+- Aktualisierte Playlist- und Radio-Zuordnungen werden an bestehende Player derselben Music-Assistant-Verbindung übertragen und bei ungültigen API-Antworten nicht verworfen.
 - Die Builtin-Zufallsplaylists für Tracks, Alben und Künstler werden innerhalb der Connection aktualisiert und gestartet, ohne vollständige Trackdaten an den Player zu übertragen.
-- Player können optional den Favoritenstatus des aktuellen Titels anzeigen und ändern.
+- Player- und Queue-Zustände sowie Gruppenlautstärken werden bei Ereignissen und nach einer Wiederverbindung zuverlässig synchronisiert.
+- Authentifizierungs- und Snapshot-Anfragen werden bei vorübergehenden Fehlern begrenzt wiederholt; Generationen-, Message-ID- und Semaphore-Prüfungen schützen die Wiederverbindung und Resynchronisierung vor konkurrierenden Antworten.
+- Visualisierungsaktualisierungen und Lautstärkeregler wurden gegen unnötige Aktualisierungen und springende Werte stabilisiert.
 - Explizite API-Antworten mit `result: null` werden korrekt als Null-Ergebnis verarbeitet.
-- Die Favoritensteuerung wird als Herzschalter mit hervorgehobenem Aktivzustand dargestellt.
-- Player können optional eine lesende HTML-Kachel mit Cover, Titel, Interpret und Wiedergabestatus anzeigen.
 
 ## 2.0.2 — 2026-10-21
 

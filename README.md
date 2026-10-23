@@ -194,7 +194,7 @@ Neu über den IP-Symcon-Configurator angelegte Player registrieren sich über `F
 
 ## Versionierung
 
-Der für die Veröffentlichung vorbereitete Stable-Stand ist **v2.0.2**.
+Aktuelle Stable-Version: **v2.1.0**.
 
 Der Tag [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) kennzeichnet den ersten veröffentlichten Stable-Stand.
 
@@ -396,6 +396,6 @@ Players newly created through the IP-Symcon configurator reliably register with 
 
 ## Versioning
 
-The stable release prepared for publication is **v2.0.2**.
+Current stable version: **v2.1.0**.
 
 The [`v1.0.0`](https://github.com/Loerdy/symcon-musicassist/tree/v1.0.0) tag marks the first published stable version.
