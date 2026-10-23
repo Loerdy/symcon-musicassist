@@ -231,9 +231,9 @@
         }
 
         .player[data-status="playing"] #transport-toggle {
-            color: #42b883;
-            border-color: #42b883;
-            box-shadow: 0 0 0.65rem rgb(66 184 131 / 35%);
+            color: var(--accent-color);
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0.65rem color-mix(in srgb, var(--accent-color) 35%, transparent);
         }
 
         .volume-control {
@@ -327,14 +327,14 @@
         }
 
         .mode-controls button[aria-pressed="true"] {
-            color: #42b883;
-            border-color: #42b883;
+            color: var(--accent-color);
+            border-color: var(--accent-color);
         }
 
         #repeat[data-repeat="one"],
         #repeat[data-repeat="all"] {
-            color: #e8a838;
-            border-color: #e8a838;
+            color: var(--accent-color);
+            border-color: var(--accent-color);
         }
 
         #favorite[aria-pressed="true"] {
@@ -901,8 +901,8 @@
 
             const toggleButton = document.getElementById("transport-toggle");
             const isPlaying = status === "playing";
-            toggleButton.querySelector(".icon-play").hidden = isPlaying;
-            toggleButton.querySelector(".icon-pause").hidden = !isPlaying;
+            toggleButton.querySelector(".icon-play").toggleAttribute("hidden", isPlaying);
+            toggleButton.querySelector(".icon-pause").toggleAttribute("hidden", !isPlaying);
             toggleButton.title = isPlaying ? "Pause" : "Wiedergabe";
             toggleButton.setAttribute("aria-label", toggleButton.title);
 
@@ -930,8 +930,8 @@
             document.getElementById("player").dataset.muted = String(muted);
 
             const muteButton = document.getElementById("mute");
-            muteButton.querySelector(".icon-unmuted").hidden = muted;
-            muteButton.querySelector(".icon-muted").hidden = !muted;
+            muteButton.querySelector(".icon-unmuted").toggleAttribute("hidden", muted);
+            muteButton.querySelector(".icon-muted").toggleAttribute("hidden", !muted);
             muteButton.title = muted ? "Ton einschalten" : "Stumm";
             muteButton.setAttribute("aria-label", muteButton.title);
             muteButton.setAttribute("aria-pressed", String(muted));
