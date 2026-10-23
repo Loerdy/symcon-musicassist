@@ -88,6 +88,18 @@
             opacity: 1;
         }
 
+        .player[data-status="idle"],
+        .player[data-status="unknown"] {
+            background-color: var(--card-color, transparent);
+        }
+
+        .player[data-status="idle"]::before,
+        .player[data-status="idle"]::after,
+        .player[data-status="unknown"]::before,
+        .player[data-status="unknown"]::after {
+            opacity: 0;
+        }
+
         .cover {
             display: block;
             grid-column: 1;
