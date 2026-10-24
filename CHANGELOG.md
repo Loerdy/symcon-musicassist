@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Playlist- und Radio-Zuordnungen des Configurators werden persistent gespeichert und bei bestehenden Installationen konfliktgeprüft aus verbundenen Playern übernommen.
 - Der Configurator bricht die Playlist- oder Radio-Synchronisierung bei einem gleichnamigen Variablenprofil mit falschem Datentyp ab, ohne das vorhandene Profil zu löschen oder zu verändern.
 - Die Favoritenauflösung des aktuellen Titels erfolgt ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und verwirft veraltete Ergebnisse nach Titel- oder Konfigurationswechseln.
 - Cover-Downloads erfolgen ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und übernehmen keine veralteten Ergebnisse nach Titel- oder Konfigurationswechseln.

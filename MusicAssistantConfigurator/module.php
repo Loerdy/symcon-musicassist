@@ -15,10 +15,8 @@ class MusicAssistantConfigurator extends IPSModule
         $this->RegisterPropertyInteger('TargetCategoryID', 0);
 
         $this->RegisterAttributeString('ProfileNames', '');
-
-        // item_id => uri
-        $this->SetBuffer('PlaylistMap', '{}');
-        $this->SetBuffer('RadioMap', '{}');
+        $this->RegisterAttributeString('PlaylistMap', '');
+        $this->RegisterAttributeString('RadioMap', '');
     }
 
     public function ApplyChanges(): void
@@ -29,6 +27,8 @@ class MusicAssistantConfigurator extends IPSModule
         } catch (Throwable $e) {
             $this->SendDebug('Profiles', $e->getMessage(), 0);
         }
+        $this->initializePersistentMap('PlaylistMap', true);
+        $this->initializePersistentMap('RadioMap', false);
     }
 
     public function ReceiveData($JSONString): string
@@ -241,7 +241,9 @@ class MusicAssistantConfigurator extends IPSModule
             IPS_SetVariableProfileAssociation($profile, (float)$id, $name, '', -1);
         }
 
-        $this->SetBuffer('PlaylistMap', $mapJson);
+        if (!$this->WriteAttributeString('PlaylistMap', $mapJson)) {
+            throw new Exception('PlaylistMap konnte nicht persistent gespeichert werden.');
+        }
         $this->updateConnectedPlayerPlaylistMaps($mapJson);
         $this->SendDebug('Playlists', 'Profile=' . $profile . ' entries=' . $count, 0);
         $this->ReloadForm();
@@ -313,7 +315,9 @@ class MusicAssistantConfigurator extends IPSModule
         }
 
         $mapJson = json_encode($map, JSON_UNESCAPED_SLASHES);
-        $this->SetBuffer('RadioMap', $mapJson);
+        if (!$this->WriteAttributeString('RadioMap', $mapJson)) {
+            throw new Exception('RadioMap konnte nicht persistent gespeichert werden.');
+        }
         $this->updateConnectedPlayerRadioMaps($mapJson);
         $this->SendDebug('Radios', 'Profile=' . $profile . ' entries=' . $count, 0);
         $this->ReloadForm();
@@ -504,16 +508,157 @@ class MusicAssistantConfigurator extends IPSModule
         $this->LogMessage($message, KL_ERROR);
     }
 
-    private function getPlaylistMap(): array
+    private function initializePersistentMap(string $attribute, bool $playlist): bool
     {
-        $arr = json_decode((string)$this->GetBuffer('PlaylistMap'), true);
-        return is_array($arr) ? $arr : [];
+        $stored = $this->readMap($this->ReadAttributeString($attribute), $playlist);
+        if ($stored['state'] === 'valid') {
+            return true;
+        }
+        if ($stored['state'] === 'invalid') {
+            $this->reportMapError(
+                $attribute,
+                'Das persistente Attribut ist beschädigt (' . $stored['reason'] . '). Die Originaldaten wurden beibehalten.'
+            );
+            return false;
+        }
+
+        try {
+            $connectionId = $this->getConfiguratorConnectionId();
+            $maps = [];
+            foreach (IPS_GetInstanceListByModuleID(self::PLAYER_MODULE_ID) as $playerInstanceId) {
+                if (!IPS_InstanceExists($playerInstanceId)) {
+                    continue;
+                }
+                $instance = IPS_GetInstance($playerInstanceId);
+                if (!is_array($instance) || (int)($instance['ConnectionID'] ?? 0) !== $connectionId) {
+                    continue;
+                }
+
+                $playerMap = $this->readMap((string)IPS_GetProperty($playerInstanceId, $attribute), $playlist);
+                if ($playerMap['state'] !== 'valid') {
+                    throw new Exception(
+                        'Player-Instanz ' . $playerInstanceId . ' enthält keine gültige ' . $attribute
+                        . ' (' . ($playerMap['reason'] !== '' ? $playerMap['reason'] : 'nicht gespeichert') . ').'
+                    );
+                }
+                $matchingMap = null;
+                foreach ($maps as $index => $candidate) {
+                    if ($candidate['map'] == $playerMap['map']) {
+                        $matchingMap = $index;
+                        break;
+                    }
+                }
+                if ($matchingMap === null) {
+                    $maps[] = [
+                        'map'       => $playerMap['map'],
+                        'json'      => $playerMap['json'],
+                        'playerIds' => [$playerInstanceId]
+                    ];
+                } else {
+                    $maps[$matchingMap]['playerIds'][] = $playerInstanceId;
+                }
+            }
+
+            if (count($maps) === 0) {
+                return true;
+            }
+            if (count($maps) > 1) {
+                $details = [];
+                foreach ($maps as $map) {
+                    $details[] = implode(', ', $map['playerIds']);
+                }
+                throw new Exception(
+                    'Verbundene Player enthalten widersprüchliche Maps (Instanzen: '
+                    . implode(' / ', $details) . ').'
+                );
+            }
+
+            $mapJson = $maps[0]['json'];
+            if (!$this->WriteAttributeString($attribute, $mapJson)) {
+                throw new Exception('Die Map konnte nicht als persistentes Attribut gespeichert werden.');
+            }
+            $this->SendDebug($attribute, 'Persistente Map aus verbundenen Playern übernommen.', 0);
+            return true;
+        } catch (Throwable $e) {
+            $this->reportMapError($attribute, 'Migration nicht durchgeführt: ' . $e->getMessage());
+            return false;
+        }
     }
 
-    private function getRadioMap(): array
+    /**
+     * @return array{state:string, map:array, json:string, reason:string}
+     */
+    private function readMap(string $value, bool $playlist): array
     {
-        $arr = json_decode((string)$this->GetBuffer('RadioMap'), true);
-        return is_array($arr) ? $arr : [];
+        $value = trim($value);
+        if ($value === '') {
+            return ['state' => 'missing', 'map' => [], 'json' => '', 'reason' => ''];
+        }
+
+        try {
+            $object = json_decode($value, false, 512, JSON_THROW_ON_ERROR);
+            $map = json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            return ['state' => 'invalid', 'map' => [], 'json' => '', 'reason' => 'ungültiges JSON'];
+        }
+        if (!is_object($object) || !is_array($map)) {
+            return ['state' => 'invalid', 'map' => [], 'json' => '', 'reason' => 'die Map ist kein JSON-Objekt'];
+        }
+
+        foreach ($map as $itemId => $entry) {
+            $itemId = (string)$itemId;
+            if ((int)$itemId <= 0 || (string)(int)$itemId !== $itemId) {
+                return ['state' => 'invalid', 'map' => [], 'json' => '', 'reason' => 'ungültige Eintrags-ID'];
+            }
+            if ($playlist) {
+                $legacyEntry = is_string($entry) && trim($entry) !== '';
+                $currentEntry = is_array($entry)
+                    && is_string($entry['uri'] ?? null)
+                    && trim($entry['uri']) !== ''
+                    && (!array_key_exists('provider_mappings', $entry)
+                        || is_array($entry['provider_mappings']));
+                if (!$legacyEntry && !$currentEntry) {
+                    return ['state' => 'invalid', 'map' => [], 'json' => '', 'reason' => 'ungültiger Playlist-Eintrag'];
+                }
+            } elseif (!is_string($entry) || trim($entry) === '') {
+                return ['state' => 'invalid', 'map' => [], 'json' => '', 'reason' => 'ungültiger Radio-Eintrag'];
+            }
+        }
+
+        ksort($map, SORT_NUMERIC);
+        return [
+            'state' => 'valid',
+            'map' => $map,
+            'json' => json_encode((object)$map, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'reason' => ''
+        ];
+    }
+
+    private function getPersistentMapJson(string $attribute, bool $playlist): string
+    {
+        $stored = $this->readMap($this->ReadAttributeString($attribute), $playlist);
+        if ($stored['state'] === 'missing') {
+            if (!$this->initializePersistentMap($attribute, $playlist)) {
+                throw new Exception($attribute . ' konnte nicht sicher aus den verbundenen Playern migriert werden.');
+            }
+            $stored = $this->readMap($this->ReadAttributeString($attribute), $playlist);
+        }
+        if ($stored['state'] === 'missing') {
+            return '{}';
+        }
+        if ($stored['state'] !== 'valid') {
+            throw new Exception(
+                $attribute . ' enthält beschädigte persistente Daten (' . $stored['reason'] . ').'
+            );
+        }
+        return $stored['json'];
+    }
+
+    private function reportMapError(string $attribute, string $message): void
+    {
+        $message = $attribute . ': ' . $message;
+        $this->SendDebug($attribute, $message, 0);
+        $this->LogMessage($message, KL_ERROR);
     }
 
     private function buildPlayerListValues(): array
@@ -577,9 +722,9 @@ class MusicAssistantConfigurator extends IPSModule
         return [
             'PlayerID'        => $playerId,
             'PlaylistProfile' => $this->playlistProfileName(),
-            'PlaylistMap'     => json_encode($this->getPlaylistMap(), JSON_UNESCAPED_SLASHES),
+            'PlaylistMap'     => $this->getPersistentMapJson('PlaylistMap', true),
             'RadioProfile'    => $this->radioProfileName(),
-            'RadioMap'        => json_encode($this->getRadioMap(), JSON_UNESCAPED_SLASHES)
+            'RadioMap'        => $this->getPersistentMapJson('RadioMap', false)
         ];
     }
 
