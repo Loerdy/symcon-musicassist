@@ -12,8 +12,6 @@ class MusicAssistantConfigurator extends IPSModule
     {
         parent::Create();
 
-        $this->RegisterPropertyInteger('TargetCategoryID', 0);
-
         $this->RegisterAttributeString('ProfileNames', '');
         $this->RegisterAttributeString('PlaylistMap', '');
         $this->RegisterAttributeString('RadioMap', '');
@@ -42,36 +40,10 @@ class MusicAssistantConfigurator extends IPSModule
 
     public function GetConfigurationForm(): string
     {
-        $targetCategoryId = null;
-        $targetCategoryError = '';
-        try {
-            $targetCategoryId = $this->getValidTargetCategoryId();
-        } catch (InvalidArgumentException $e) {
-            $targetCategoryError = $e->getMessage();
-            $this->SendDebug('Target category', $targetCategoryError, 0);
-        }
-        $values = $this->buildPlayerListValues($targetCategoryId, $targetCategoryError);
-
-        $targetCategoryElements = $targetCategoryId !== null
-            ? [[
-                'type'    => 'SelectCategory',
-                'name'    => 'TargetCategoryID',
-                'caption' => 'Endgültiger Zielordner für neue Player'
-            ]]
-            : [
-                [
-                    'type'    => 'Label',
-                    'caption' => $targetCategoryError
-                ],
-                [
-                    'type'    => 'Button',
-                    'caption' => 'Ungültige Zielkategorie zurücksetzen',
-                    'onClick' => 'echo MASS_ResetTargetCategory($id);'
-                ]
-            ];
+        $values = $this->buildPlayerListValues();
 
         $form = [
-            'elements' => array_merge($targetCategoryElements, [
+            'elements' => [
                 [
                     'type'    => 'Button',
                     'caption' => 'Playlists laden (Profil erstellen/aktualisieren)',
@@ -98,38 +70,30 @@ class MusicAssistantConfigurator extends IPSModule
                     ],
                     'values'   => $values
                 ]
-            ])
+            ]
         ];
 
         return json_encode($form);
     }
 
-    public function CreatePlayer(string $playerId, string $name): string
+    public function CreatePlayer(string $playerId, string $name, int $targetCategoryId = 0): string
     {
-        return $this->createPlayerInternal($playerId, $name, true);
+        return $this->createPlayerInternal($playerId, $name, true, $targetCategoryId);
     }
 
-    public function ResetTargetCategory(): string
-    {
-        $targetCategoryId = $this->ReadPropertyInteger('TargetCategoryID');
-        if ($targetCategoryId === 0 || ($targetCategoryId > 0 && IPS_CategoryExists($targetCategoryId))) {
-            return 'Die Zielkategorie ist bereits gültig.';
-        }
-        if (!IPS_SetProperty($this->InstanceID, 'TargetCategoryID', 0)) {
-            throw new Exception('Die ungültige Zielkategorie konnte nicht zurückgesetzt werden.');
-        }
-        if (!IPS_ApplyChanges($this->InstanceID)) {
-            throw new Exception('Die zurückgesetzte Zielkategorie konnte nicht übernommen werden.');
-        }
-        $this->ReloadForm();
-        return 'Die ungültige Zielkategorie wurde zurückgesetzt. Bitte wählen Sie den Zielordner erneut aus.';
-    }
-
-    private function createPlayerInternal(string $playerId, string $name, bool $reloadForm): string
+    private function createPlayerInternal(
+        string $playerId,
+        string $name,
+        bool $reloadForm,
+        int $targetCategoryId = 0
+    ): string
     {
         $playerId = trim($playerId);
         if ($playerId === '') {
             throw new Exception('Bitte zuerst einen Player in der Liste auswählen.');
+        }
+        if ($targetCategoryId < 0 || ($targetCategoryId > 0 && !IPS_CategoryExists($targetCategoryId))) {
+            throw new InvalidArgumentException('Die angegebene Zielkategorie ist ungültig oder nicht mehr vorhanden.');
         }
 
         $semaphore = 'MusicAssistantConfigurator.CreatePlayer.' . $this->InstanceID;
@@ -145,7 +109,6 @@ class MusicAssistantConfigurator extends IPSModule
                 return 'Player existiert bereits als Instanz ' . $existingPlayerId . '.';
             }
 
-            $targetCategoryId = $this->getValidTargetCategoryId();
             if (!IPS_IsModuleCompatible(self::PLAYER_MODULE_ID, self::CONNECTION_MODULE_ID)) {
                 throw new Exception('MusicAssistantPlayer und MusicAssistantConnection sind nicht kompatibel.');
             }
@@ -697,7 +660,7 @@ class MusicAssistantConfigurator extends IPSModule
         $this->LogMessage($message, KL_ERROR);
     }
 
-    private function buildPlayerListValues(?int $targetCategoryId, string $targetCategoryError): array
+    private function buildPlayerListValues(): array
     {
         $players = [];
         $connectionId = 0;
@@ -730,39 +693,18 @@ class MusicAssistantConfigurator extends IPSModule
                 'player_id'   => $playerId,
                 'provider'    => $provider,
                 'available'   => $avail ? 'Ja' : 'Nein',
-                'status'      => $instanceId > 0
-                    ? 'Vorhanden'
-                    : ($targetCategoryId !== null ? 'Nicht angelegt' : $targetCategoryError),
-                'instanceID'  => $instanceId
+                'status'      => $instanceId > 0 ? 'Vorhanden' : 'Nicht angelegt',
+                'instanceID'  => $instanceId,
+                'create'      => [
+                    'moduleID'      => self::PLAYER_MODULE_ID,
+                    'configuration' => $this->playerConfiguration($playerId),
+                    'name'          => 'MA Player - ' . $name
+                ]
             ];
-            if ($instanceId > 0) {
-                $row['create'] = [
-                    'moduleID'      => self::PLAYER_MODULE_ID,
-                    'configuration' => $this->playerConfiguration($playerId),
-                    'name'          => 'MA Player - ' . $name
-                ];
-            } elseif ($targetCategoryId !== null) {
-                $row['create'] = [
-                    'moduleID'      => self::PLAYER_MODULE_ID,
-                    'configuration' => $this->playerConfiguration($playerId),
-                    'name'          => 'MA Player - ' . $name
-                ];
-            }
             $rows[] = $row;
         }
 
         return $rows;
-    }
-
-    private function getValidTargetCategoryId(): int
-    {
-        $targetCategoryId = $this->ReadPropertyInteger('TargetCategoryID');
-        if ($targetCategoryId < 0 || ($targetCategoryId > 0 && !IPS_CategoryExists($targetCategoryId))) {
-            throw new InvalidArgumentException(
-                'Die ausgewählte Zielkategorie existiert nicht mehr. Bitte setzen Sie die Auswahl zurück und wählen Sie den Zielordner erneut aus.'
-            );
-        }
-        return $targetCategoryId;
     }
 
     private function playerConfiguration(string $playerId): array

@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Neue Player werden wieder über die native Configurator-Erstellung angelegt und anschließend einmalig anhand der konkreten Kategorie-ID in die ausgewählte gültige Zielkategorie verschoben, ohne zusätzliche Kategorien zu erzeugen.
-- Gelöschte Zielkategorien werden im Configurator verständlich gemeldet und können kontrolliert zurückgesetzt werden, ohne eine Player-Erstellung anzubieten.
+- Neue Player werden über die native Configurator-Erstellung direkt in der dort ausgewählten Zielkategorie angelegt; die separate Zielkategorie und nachträgliche Platzierung entfallen.
+- `CreatePlayer()` erstellt ohne explizite Kategorie in der Wurzel und unterstützt optional weiterhin eine validierte konkrete Kategorie-ID.
 - Playlist- und Radio-Zuordnungen des Configurators werden persistent gespeichert und bei bestehenden Installationen konfliktgeprüft aus verbundenen Playern übernommen.
 - Der Configurator bricht die Playlist- oder Radio-Synchronisierung bei einem gleichnamigen Variablenprofil mit falschem Datentyp ab, ohne das vorhandene Profil zu löschen oder zu verändern.
 - Die Favoritenauflösung des aktuellen Titels erfolgt ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und verwirft veraltete Ergebnisse nach Titel- oder Konfigurationswechseln.

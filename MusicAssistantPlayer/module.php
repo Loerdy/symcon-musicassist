@@ -21,7 +21,6 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterMessage($this->InstanceID, FM_CONNECT);
 
         $this->RegisterPropertyString('PlayerID', '');
-        $this->RegisterPropertyInteger('InitialTargetCategoryID', 0);
         $this->RegisterPropertyBoolean('ShowGroupMemberVolumes', false);
         $this->RegisterPropertyBoolean('ShowFavorite', false);
         $this->RegisterPropertyBoolean('EnableCustomTile', false);
@@ -36,7 +35,6 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterAttributeString('CoverTargetProxyID', '');
         $this->RegisterAttributeBoolean('CoverIsDefault', false);
         $this->RegisterAttributeString('GroupMemberVolumeMap', '{}');
-        $this->RegisterAttributeBoolean('InitialPlacementCompleted', false);
 
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
@@ -65,7 +63,6 @@ class MusicAssistantPlayer extends IPSModule
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
-        $this->applyInitialPlacement();
         $this->SetTimerInterval('ResolveFavorite', 0);
         try {
             $this->withFavoriteLock(function (): void {
@@ -226,33 +223,6 @@ class MusicAssistantPlayer extends IPSModule
 
         // Konfig-Anzeige initial aktualisieren
         $this->UpdateConfigView();
-    }
-
-    private function applyInitialPlacement(): void
-    {
-        if ($this->ReadAttributeBoolean('InitialPlacementCompleted')) {
-            return;
-        }
-
-        $targetCategoryId = $this->ReadPropertyInteger('InitialTargetCategoryID');
-        if ($targetCategoryId <= 0) {
-            $this->WriteAttributeBoolean('InitialPlacementCompleted', true);
-            return;
-        }
-        if (!IPS_CategoryExists($targetCategoryId)) {
-            $message = 'Initiale Zielkategorie ' . $targetCategoryId . ' ist nicht vorhanden.';
-            $this->SendDebug('Initial placement', $message, 0);
-            $this->LogMessage($message, KL_ERROR);
-            return;
-        }
-        if (!IPS_SetParent($this->InstanceID, $targetCategoryId)) {
-            $message = 'Player konnte nicht in die initiale Zielkategorie ' . $targetCategoryId . ' verschoben werden.';
-            $this->SendDebug('Initial placement', $message, 0);
-            $this->LogMessage($message, KL_ERROR);
-            return;
-        }
-
-        $this->WriteAttributeBoolean('InitialPlacementCompleted', true);
     }
 
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
