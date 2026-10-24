@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Die Favoritenauflösung des aktuellen Titels erfolgt ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und verwirft veraltete Ergebnisse nach Titel- oder Konfigurationswechseln.
+
 ## v2.1.1 — 2026-10-23
 
 - Die Mindestversion wurde aufgrund der Verwendung moderner Variablenpräsentationen auf IP-Symcon 8.0 angehoben.

@@ -42,14 +42,27 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetBuffer('KnownPlayerTypeID', '');
         $this->SetBuffer('KnownPlayerType', '');
         $this->SetBuffer('CurrentFavoriteTrack', '{}');
+        $this->SetBuffer('PendingFavoriteResolution', '{}');
+        $this->SetBuffer('FavoriteResolutionGeneration', '0');
+        $this->SetBuffer('RunningFavoriteResolution', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
+        $this->RegisterTimer('ResolveFavorite', 0, 'MASS_ProcessFavoriteResolution($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+        $this->SetTimerInterval('ResolveFavorite', 0);
+        try {
+            $this->withFavoriteLock(function (): void {
+                $this->invalidatePendingFavoriteResolutionUnlocked();
+                $this->SetBuffer('RunningFavoriteResolution', '');
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Ausstehende Auflösung konnte nicht verworfen werden: ' . $e->getMessage(), 0);
+        }
         $this->configureVisualizationType();
         $this->registerParentStatusMessage();
         $this->registerWithParent();
@@ -517,6 +530,86 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetTimerInterval('ResetRadio', 0);
         if (@$this->GetIDForIdent('Radio') > 0) {
             $this->SetValue('Radio', 0);
+        }
+    }
+
+    public function ProcessFavoriteResolution(): void
+    {
+        $this->SetTimerInterval('ResolveFavorite', 0);
+
+        try {
+            $job = $this->withFavoriteLock(function (): ?array {
+                if ($this->GetBuffer('RunningFavoriteResolution') !== '') {
+                    return null;
+                }
+                $pending = $this->readPendingFavoriteResolution();
+                if ($pending === null) {
+                    return null;
+                }
+                $this->SetBuffer('RunningFavoriteResolution', (string)$pending['generation']);
+                return $pending;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Auflösungsauftrag konnte nicht gestartet werden: ' . $e->getMessage(), 0);
+            return;
+        }
+        if ($job === null) {
+            return;
+        }
+
+        $updateVisualization = false;
+        try {
+            if ($this->GetStatus() !== IS_ACTIVE
+                || !$this->ReadPropertyBoolean('ShowFavorite')
+                || !$this->HasActiveParent()
+                || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']) {
+                return;
+            }
+
+            $resolvedState = $this->resolveFavoriteLibraryState($job['state']);
+            $updateVisualization = $this->withFavoriteLock(function () use ($job, $resolvedState): bool {
+                $pending = $this->readPendingFavoriteResolution();
+                $currentState = $this->readCurrentFavoriteTrack();
+                if ($pending === null
+                    || $pending['player_id'] !== $job['player_id']
+                    || $pending['generation'] !== $job['generation']
+                    || $this->GetStatus() !== IS_ACTIVE
+                    || !$this->ReadPropertyBoolean('ShowFavorite')
+                    || !$this->HasActiveParent()
+                    || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']
+                    || !$this->favoriteStatesIdentifySameTrack($currentState, $job['state'])) {
+                    return false;
+                }
+                $this->SetBuffer('PendingFavoriteResolution', '{}');
+                $this->writeCurrentFavoriteTrack($resolvedState);
+                $this->updateFavoriteValue($resolvedState['favorite']);
+                return true;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Library-Track konnte nicht aufgelöst werden: ' . $e->getMessage(), 0);
+        } finally {
+            try {
+                $restart = $this->withFavoriteLock(function () use ($job): bool {
+                    $pending = $this->readPendingFavoriteResolution();
+                    if ($pending !== null && $pending['generation'] === $job['generation']) {
+                        $this->SetBuffer('PendingFavoriteResolution', '{}');
+                        $pending = null;
+                    }
+                    if ($this->GetBuffer('RunningFavoriteResolution') === (string)$job['generation']) {
+                        $this->SetBuffer('RunningFavoriteResolution', '');
+                    }
+                    return $pending !== null;
+                });
+                if ($restart) {
+                    $this->SetTimerInterval('ResolveFavorite', 100);
+                }
+            } catch (Throwable $e) {
+                $this->SendDebug('Favorite', 'Auflösungsauftrag konnte nicht abgeschlossen werden: ' . $e->getMessage(), 0);
+            }
+        }
+
+        if ($updateVisualization) {
+            $this->updateVisualization();
         }
     }
 
@@ -1054,22 +1147,22 @@ class MusicAssistantPlayer extends IPSModule
 
     private function updateFavoriteFromQueueItem($currentItem): void
     {
-        $this->withFavoriteLock(function () use ($currentItem): void {
+        $schedule = $this->withFavoriteLock(function () use ($currentItem): bool {
             if ($currentItem === null) {
                 $this->clearCurrentFavoriteTrackUnlocked();
-                return;
+                return false;
             }
             if (!is_array($currentItem)
                 || !is_string($currentItem['queue_item_id'] ?? null)
                 || trim($currentItem['queue_item_id']) === '') {
                 $this->clearCurrentFavoriteTrackUnlocked();
-                return;
+                return false;
             }
 
             $queueItemId = trim($currentItem['queue_item_id']);
             $currentState = $this->readCurrentFavoriteTrack();
             if ($currentState !== null && $currentState['queue_item_id'] === $queueItemId) {
-                return;
+                return !$currentState['resolved'] && $this->queueFavoriteResolutionUnlocked($currentState);
             }
 
             $mediaItem = $currentItem['media_item'] ?? null;
@@ -1082,7 +1175,7 @@ class MusicAssistantPlayer extends IPSModule
                 || !is_string($mediaItem['uri'] ?? null)
                 || trim($mediaItem['uri']) === '') {
                 $this->clearCurrentFavoriteTrackUnlocked();
-                return;
+                return false;
             }
 
             $state = [
@@ -1100,19 +1193,19 @@ class MusicAssistantPlayer extends IPSModule
                 $state['library_uri'] = $state['source_uri'];
                 $state['favorite'] = $mediaItem['favorite'];
                 $state['resolved'] = true;
+                $this->invalidatePendingFavoriteResolutionUnlocked();
             } else {
-                try {
-                    $state = $this->resolveFavoriteLibraryState($state);
-                } catch (Throwable $e) {
-                    $this->writeCurrentFavoriteTrack($state);
-                    $this->updateFavoriteValue(false);
-                    $this->SendDebug('Favorite', 'Library-Track konnte nicht aufgelöst werden: ' . $e->getMessage(), 0);
-                    return;
-                }
+                $this->writeCurrentFavoriteTrack($state);
+                $this->updateFavoriteValue(false);
+                return $this->queueFavoriteResolutionUnlocked($state);
             }
             $this->writeCurrentFavoriteTrack($state);
             $this->updateFavoriteValue($state['favorite']);
+            return false;
         });
+        if ($schedule) {
+            $this->SetTimerInterval('ResolveFavorite', 100);
+        }
     }
 
     private function processFavoriteMediaItemUpdate(array $packet): void
@@ -1120,10 +1213,10 @@ class MusicAssistantPlayer extends IPSModule
         if (!is_string($packet['ObjectID'] ?? null) || !is_array($packet['Data'] ?? null)) {
             return;
         }
-        $this->withFavoriteLock(function () use ($packet): void {
+        $schedule = $this->withFavoriteLock(function () use ($packet): bool {
             $state = $this->readCurrentFavoriteTrack();
             if ($state === null) {
-                return;
+                return false;
             }
             $objectId = trim($packet['ObjectID']);
             $data = $packet['Data'];
@@ -1138,7 +1231,7 @@ class MusicAssistantPlayer extends IPSModule
                 || ($state['library_item_id'] !== '' && $eventItemId === $state['library_item_id'])
                 || $this->favoriteEventHasSourceMapping($data, $state);
             if (!$matches || (($data['media_type'] ?? 'track') !== 'track')) {
-                return;
+                return false;
             }
 
             if (is_bool($data['favorite'] ?? null)
@@ -1152,12 +1245,17 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 $state['favorite'] = $data['favorite'];
                 $state['resolved'] = true;
+                $this->invalidatePendingFavoriteResolutionUnlocked();
             } else {
-                $state = $this->resolveFavoriteLibraryState($state);
+                return $this->queueFavoriteResolutionUnlocked($state);
             }
             $this->writeCurrentFavoriteTrack($state);
             $this->updateFavoriteValue($state['favorite']);
+            return false;
         });
+        if ($schedule) {
+            $this->SetTimerInterval('ResolveFavorite', 100);
+        }
     }
 
     private function favoriteEventHasSourceMapping(array $mediaItem, array $state): bool
@@ -1181,32 +1279,49 @@ class MusicAssistantPlayer extends IPSModule
         if (!$this->ReadPropertyBoolean('ShowFavorite')) {
             throw new Exception('Favoritensteuerung ist deaktiviert.');
         }
-        $this->withFavoriteLock(function () use ($favorite): void {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        $snapshot = $this->withFavoriteLock(function () use ($favorite): array {
             $state = $this->readCurrentFavoriteTrack();
             if ($state === null || !$state['resolved'] || $state['source_uri'] === '') {
                 throw new Exception('Der aktuelle Titel konnte nicht eindeutig ermittelt werden.');
             }
             if ($favorite === $state['favorite']) {
                 $this->updateFavoriteValue($state['favorite']);
-                return;
+                return [];
             }
+            return [
+                'generation' => (int)$this->GetBuffer('FavoriteResolutionGeneration'),
+                'state'      => $state
+            ];
+        });
+        if ($snapshot === []) {
+            return;
+        }
+        $state = $snapshot['state'];
 
-            if ($favorite) {
-                $this->sendApiRequest('music/favorites/add_item', ['item' => $state['source_uri']]);
-            } else {
-                if ($state['library_item_id'] === '') {
-                    throw new Exception('Die Library-ID des aktuellen Titels ist nicht verfügbar.');
-                }
-                $this->sendApiRequest('music/favorites/remove_item', [
-                    'media_type'     => 'track',
-                    'library_item_id' => $state['library_item_id']
-                ]);
+        if ($favorite) {
+            $this->sendApiRequest('music/favorites/add_item', ['item' => $state['source_uri']]);
+        } else {
+            if ($state['library_item_id'] === '') {
+                throw new Exception('Die Library-ID des aktuellen Titels ist nicht verfügbar.');
             }
+            $this->sendApiRequest('music/favorites/remove_item', [
+                'media_type'     => 'track',
+                'library_item_id' => $state['library_item_id']
+            ]);
+        }
 
-            $updatedState = $this->resolveFavoriteLibraryState($state);
-            if ($updatedState['favorite'] !== $favorite) {
-                throw new Exception('Der geänderte Favoritenstatus konnte nicht bestätigt werden.');
+        $updatedState = $this->resolveFavoriteLibraryState($state);
+        if ($updatedState['favorite'] !== $favorite) {
+            throw new Exception('Der geänderte Favoritenstatus konnte nicht bestätigt werden.');
+        }
+        $this->withFavoriteLock(function () use ($playerId, $snapshot, $state, $updatedState): void {
+            if (trim($this->ReadPropertyString('PlayerID')) !== $playerId
+                || (int)$this->GetBuffer('FavoriteResolutionGeneration') !== $snapshot['generation']
+                || !$this->favoriteStatesIdentifySameTrack($this->readCurrentFavoriteTrack(), $state)) {
+                throw new Exception('Der aktuelle Titel hat sich während der Favoritenänderung geändert.');
             }
+            $this->invalidatePendingFavoriteResolutionUnlocked();
             $this->writeCurrentFavoriteTrack($updatedState);
             $this->updateFavoriteValue($updatedState['favorite']);
         });
@@ -1240,6 +1355,87 @@ class MusicAssistantPlayer extends IPSModule
         $state['favorite'] = $libraryItem['favorite'];
         $state['resolved'] = true;
         return $state;
+    }
+
+    private function queueFavoriteResolutionUnlocked(array $state): bool
+    {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if ($playerId === '') {
+            return false;
+        }
+        $pending = $this->readPendingFavoriteResolution();
+        if ($pending !== null
+            && $pending['player_id'] === $playerId
+            && $this->favoriteStatesIdentifySameTrack($pending['state'], $state)) {
+            if ($this->GetBuffer('RunningFavoriteResolution') !== (string)$pending['generation']) {
+                return true;
+            }
+        }
+
+        $generation = $this->nextFavoriteResolutionGenerationUnlocked();
+        $this->SetBuffer('PendingFavoriteResolution', json_encode([
+            'generation' => $generation,
+            'player_id'  => $playerId,
+            'state'      => $state
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        return true;
+    }
+
+    private function readPendingFavoriteResolution(): ?array
+    {
+        try {
+            $pending = json_decode(
+                trim($this->GetBuffer('PendingFavoriteResolution')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Auflösungsauftrag enthält ungültiges JSON', 0);
+            return null;
+        }
+        if (!is_array($pending) || count($pending) === 0) {
+            return null;
+        }
+        if (!is_int($pending['generation'] ?? null)
+            || $pending['generation'] <= 0
+            || !is_string($pending['player_id'] ?? null)
+            || trim($pending['player_id']) === ''
+            || !is_array($pending['state'] ?? null)
+            || !$this->favoriteStatesIdentifySameTrack($pending['state'], $pending['state'])) {
+            $this->SendDebug('Favorite', 'Auflösungsauftrag hat eine ungültige Struktur', 0);
+            return null;
+        }
+        return $pending;
+    }
+
+    private function favoriteStatesIdentifySameTrack(?array $left, array $right): bool
+    {
+        if ($left === null) {
+            return false;
+        }
+        foreach (['queue_item_id', 'source_uri', 'source_item_id', 'source_provider'] as $key) {
+            if (!is_string($left[$key] ?? null)
+                || !is_string($right[$key] ?? null)
+                || $left[$key] === ''
+                || $left[$key] !== $right[$key]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function nextFavoriteResolutionGenerationUnlocked(): int
+    {
+        $generation = (int)$this->GetBuffer('FavoriteResolutionGeneration') + 1;
+        $this->SetBuffer('FavoriteResolutionGeneration', (string)$generation);
+        return $generation;
+    }
+
+    private function invalidatePendingFavoriteResolutionUnlocked(): void
+    {
+        $this->nextFavoriteResolutionGenerationUnlocked();
+        $this->SetBuffer('PendingFavoriteResolution', '{}');
     }
 
     private function readCurrentFavoriteTrack(): ?array
@@ -1285,6 +1481,7 @@ class MusicAssistantPlayer extends IPSModule
 
     private function clearCurrentFavoriteTrackUnlocked(): void
     {
+        $this->invalidatePendingFavoriteResolutionUnlocked();
         $this->SetBuffer('CurrentFavoriteTrack', '{}');
         $this->updateFavoriteValue(false);
     }
