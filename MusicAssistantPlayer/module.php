@@ -274,7 +274,16 @@ class MusicAssistantPlayer extends IPSModule
                     try {
                         $this->updateFavoriteFromQueueItem($isIdle ? null : $data['current_item']);
                     } catch (Throwable $e) {
-                        $this->clearCurrentFavoriteTrack();
+                        try {
+                            $this->clearCurrentFavoriteTrack();
+                        } catch (Throwable $clearError) {
+                            $this->SendDebug(
+                                'Favorite',
+                                'Favoritenstatus konnte nach einem Fehler nicht zurückgesetzt werden: '
+                                    . $clearError->getMessage(),
+                                0
+                            );
+                        }
                         $this->SendDebug('Favorite', 'Titel konnte nicht aufgelöst werden: ' . $e->getMessage(), 0);
                     }
                 }
