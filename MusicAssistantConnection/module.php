@@ -536,17 +536,14 @@ class MusicAssistantConnection extends IPSModule
             $headers[] = 'Authorization: Bearer ' . trim($this->ReadPropertyString('Token'));
         }
 
-        if (!IPS_SemaphoreEnter($this->maSemaphoreName(), 15000)) {
-            throw new Exception('Timeout beim Erwerb des HTTP-Semaphors');
+        $body = '';
+        $sizeExceeded = false;
+        $maxArtworkSize = self::MAX_ARTWORK_SIZE;
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new Exception('Imageproxy konnte nicht initialisiert werden.');
         }
         try {
-            $body = '';
-            $sizeExceeded = false;
-            $maxArtworkSize = self::MAX_ARTWORK_SIZE;
-            $ch = curl_init($url);
-            if ($ch === false) {
-                throw new Exception('Imageproxy konnte nicht initialisiert werden.');
-            }
             curl_setopt_array($ch, [
                 CURLOPT_HTTPGET           => true,
                 CURLOPT_HTTPHEADER        => $headers,
@@ -572,9 +569,9 @@ class MusicAssistantConnection extends IPSModule
             $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $contentType = strtolower(trim((string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE)));
             $curlErrorNumber = curl_errno($ch);
-            curl_close($ch);
         } finally {
-            IPS_SemaphoreLeave($this->maSemaphoreName());
+            curl_close($ch);
+            unset($ch);
         }
 
         if ($sizeExceeded || $curlErrorNumber === CURLE_FILESIZE_EXCEEDED) {
