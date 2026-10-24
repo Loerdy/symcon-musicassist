@@ -46,20 +46,32 @@ class MusicAssistantConfigurator extends IPSModule
         $targetCategoryError = '';
         try {
             $targetCategoryId = $this->getValidTargetCategoryId();
-        } catch (Throwable $e) {
+        } catch (InvalidArgumentException $e) {
             $targetCategoryError = $e->getMessage();
             $this->SendDebug('Target category', $targetCategoryError, 0);
         }
         $values = $this->buildPlayerListValues($targetCategoryId, $targetCategoryError);
 
-        $form = [
-            'elements' => [
+        $targetCategoryElements = $targetCategoryId !== null
+            ? [[
+                'type'    => 'SelectCategory',
+                'name'    => 'TargetCategoryID',
+                'caption' => 'Endgültiger Zielordner für neue Player'
+            ]]
+            : [
                 [
-                    'type'    => 'SelectCategory',
-                    'name'    => 'TargetCategoryID',
-                    'caption' => 'Zielordner für neue Player'
+                    'type'    => 'Label',
+                    'caption' => $targetCategoryError
                 ],
+                [
+                    'type'    => 'Button',
+                    'caption' => 'Ungültige Zielkategorie zurücksetzen',
+                    'onClick' => 'echo MASS_ResetTargetCategory($id);'
+                ]
+            ];
 
+        $form = [
+            'elements' => array_merge($targetCategoryElements, [
                 [
                     'type'    => 'Button',
                     'caption' => 'Playlists laden (Profil erstellen/aktualisieren)',
@@ -86,7 +98,7 @@ class MusicAssistantConfigurator extends IPSModule
                     ],
                     'values'   => $values
                 ]
-            ]
+            ])
         ];
 
         return json_encode($form);
@@ -95,6 +107,22 @@ class MusicAssistantConfigurator extends IPSModule
     public function CreatePlayer(string $playerId, string $name): string
     {
         return $this->createPlayerInternal($playerId, $name, true);
+    }
+
+    public function ResetTargetCategory(): string
+    {
+        $targetCategoryId = $this->ReadPropertyInteger('TargetCategoryID');
+        if ($targetCategoryId === 0 || ($targetCategoryId > 0 && IPS_CategoryExists($targetCategoryId))) {
+            return 'Die Zielkategorie ist bereits gültig.';
+        }
+        if (!IPS_SetProperty($this->InstanceID, 'TargetCategoryID', 0)) {
+            throw new Exception('Die ungültige Zielkategorie konnte nicht zurückgesetzt werden.');
+        }
+        if (!IPS_ApplyChanges($this->InstanceID)) {
+            throw new Exception('Die zurückgesetzte Zielkategorie konnte nicht übernommen werden.');
+        }
+        $this->ReloadForm();
+        return 'Die ungültige Zielkategorie wurde zurückgesetzt. Bitte wählen Sie den Zielordner erneut aus.';
     }
 
     private function createPlayerInternal(string $playerId, string $name, bool $reloadForm): string
@@ -734,7 +762,9 @@ class MusicAssistantConfigurator extends IPSModule
     {
         $targetCategoryId = $this->ReadPropertyInteger('TargetCategoryID');
         if ($targetCategoryId < 0 || ($targetCategoryId > 0 && !IPS_CategoryExists($targetCategoryId))) {
-            throw new Exception('Der ausgewählte Zielordner ist keine gültige Kategorie.');
+            throw new InvalidArgumentException(
+                'Die ausgewählte Zielkategorie existiert nicht mehr. Bitte setzen Sie die Auswahl zurück und wählen Sie den Zielordner erneut aus.'
+            );
         }
         return $targetCategoryId;
     }
