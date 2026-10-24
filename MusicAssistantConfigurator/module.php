@@ -42,7 +42,15 @@ class MusicAssistantConfigurator extends IPSModule
 
     public function GetConfigurationForm(): string
     {
-        $values = $this->buildPlayerListValues();
+        $targetCategoryId = null;
+        $targetCategoryError = '';
+        try {
+            $targetCategoryId = $this->getValidTargetCategoryId();
+        } catch (Throwable $e) {
+            $targetCategoryError = $e->getMessage();
+            $this->SendDebug('Target category', $targetCategoryError, 0);
+        }
+        $values = $this->buildPlayerListValues($targetCategoryId, $targetCategoryError);
 
         $form = [
             'elements' => [
@@ -61,12 +69,6 @@ class MusicAssistantConfigurator extends IPSModule
                     'type'    => 'Button',
                     'caption' => 'Radios laden (Profil erstellen/aktualisieren)',
                     'onClick' => 'MASS_SyncRadiosProfile($id);'
-                ],
-
-                [
-                    'type'    => 'Button',
-                    'caption' => 'Ausgewählten Player erstellen',
-                    'onClick' => 'echo MASS_CreatePlayer($id, (string) ($Players[\'player_id\'] ?? \'\'), (string) ($Players[\'name\'] ?? \'\'));'
                 ],
 
                 [
@@ -667,7 +669,7 @@ class MusicAssistantConfigurator extends IPSModule
         $this->LogMessage($message, KL_ERROR);
     }
 
-    private function buildPlayerListValues(): array
+    private function buildPlayerListValues(?int $targetCategoryId, string $targetCategoryError): array
     {
         $players = [];
         $connectionId = 0;
@@ -700,13 +702,25 @@ class MusicAssistantConfigurator extends IPSModule
                 'player_id'   => $playerId,
                 'provider'    => $provider,
                 'available'   => $avail ? 'Ja' : 'Nein',
-                'status'      => $instanceId > 0 ? 'Vorhanden' : 'Nicht angelegt',
+                'status'      => $instanceId > 0
+                    ? 'Vorhanden'
+                    : ($targetCategoryId !== null ? 'Nicht angelegt' : $targetCategoryError),
                 'instanceID'  => $instanceId
             ];
             if ($instanceId > 0) {
                 $row['create'] = [
                     'moduleID'      => self::PLAYER_MODULE_ID,
                     'configuration' => $this->playerConfiguration($playerId),
+                    'name'          => 'MA Player - ' . $name
+                ];
+            } elseif ($targetCategoryId !== null) {
+                $configuration = $this->playerConfiguration($playerId);
+                if ($targetCategoryId > 0) {
+                    $configuration['InitialTargetCategoryID'] = $targetCategoryId;
+                }
+                $row['create'] = [
+                    'moduleID'      => self::PLAYER_MODULE_ID,
+                    'configuration' => $configuration,
                     'name'          => 'MA Player - ' . $name
                 ];
             }
