@@ -67,7 +67,6 @@ class MusicAssistantPlayer extends IPSModule
         try {
             $this->withFavoriteLock(function (): void {
                 $this->invalidatePendingFavoriteResolutionUnlocked();
-                $this->SetBuffer('RunningFavoriteResolution', '');
             });
         } catch (Throwable $e) {
             $this->SendDebug('Favorite', 'Ausstehende Auflösung konnte nicht verworfen werden: ' . $e->getMessage(), 0);
