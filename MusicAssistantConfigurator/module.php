@@ -742,13 +742,9 @@ class MusicAssistantConfigurator extends IPSModule
                     'name'          => 'MA Player - ' . $name
                 ];
             } elseif ($targetCategoryId !== null) {
-                $configuration = $this->playerConfiguration($playerId);
-                if ($targetCategoryId > 0) {
-                    $configuration['InitialTargetCategoryID'] = $targetCategoryId;
-                }
                 $row['create'] = [
                     'moduleID'      => self::PLAYER_MODULE_ID,
-                    'configuration' => $configuration,
+                    'configuration' => $this->playerConfiguration($playerId),
                     'name'          => 'MA Player - ' . $name
                 ];
             }
