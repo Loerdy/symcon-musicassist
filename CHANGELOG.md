@@ -4,6 +4,7 @@
 
 - Die Favoritenauflösung des aktuellen Titels erfolgt ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und verwirft veraltete Ergebnisse nach Titel- oder Konfigurationswechseln.
 - Cover-Downloads erfolgen ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und übernehmen keine veralteten Ergebnisse nach Titel- oder Konfigurationswechseln.
+- Gruppen-Snapshots für dynamische Lautstärkeregler werden ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung geladen; neuere Lautstärkeereignisse bleiben dabei erhalten.
 
 ## v2.1.1 — 2026-10-23
 

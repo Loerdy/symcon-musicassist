@@ -38,7 +38,11 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
-        $this->SetBuffer('GroupMemberVolumeRefreshRequest', '');
+        $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+        $this->SetBuffer('GroupMemberVolumeRefreshGeneration', '0');
+        $this->SetBuffer('RunningGroupMemberVolumeRefresh', '');
+        $this->SetBuffer('GroupMemberVolumeUpdateGeneration', '0');
+        $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
         $this->SetBuffer('KnownPlayerTypeID', '');
         $this->SetBuffer('KnownPlayerType', '');
         $this->SetBuffer('CurrentFavoriteTrack', '{}');
@@ -53,6 +57,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResolveFavorite', 0, 'MASS_ProcessFavoriteResolution($_IPS["TARGET"]);');
         $this->RegisterTimer('DownloadCover', 0, 'MASS_ProcessCoverDownload($_IPS["TARGET"]);');
+        $this->RegisterTimer('RefreshGroupMemberVolumes', 0, 'MASS_ProcessGroupMemberVolumeRefresh($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges(): void
@@ -74,6 +79,15 @@ class MusicAssistantPlayer extends IPSModule
             });
         } catch (Throwable $e) {
             $this->SendDebug('Artwork', 'Ausstehender Download konnte nicht verworfen werden: ' . $e->getMessage(), 0);
+        }
+        $this->SetTimerInterval('RefreshGroupMemberVolumes', 0);
+        try {
+            $this->withGroupMemberVolumeLock(function (): void {
+                $this->invalidatePendingGroupMemberVolumeRefreshUnlocked();
+                $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Ausstehende Aktualisierung konnte nicht verworfen werden: ' . $e->getMessage(), 0);
         }
         $this->configureVisualizationType();
         $this->registerParentStatusMessage();
@@ -735,6 +749,145 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
+    public function ProcessGroupMemberVolumeRefresh(): void
+    {
+        $this->SetTimerInterval('RefreshGroupMemberVolumes', 0);
+
+        try {
+            $job = $this->withGroupMemberVolumeLock(function (): ?array {
+                if ($this->GetBuffer('RunningGroupMemberVolumeRefresh') !== '') {
+                    return null;
+                }
+                $pending = $this->readPendingGroupMemberVolumeRefresh();
+                if ($pending === null) {
+                    return null;
+                }
+                $this->SetBuffer('RunningGroupMemberVolumeRefresh', (string)$pending['generation']);
+                return $pending;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Aktualisierung konnte nicht gestartet werden: ' . $e->getMessage(), 0);
+            return;
+        }
+        if ($job === null) {
+            return;
+        }
+
+        $updated = false;
+        try {
+            if ($this->GetStatus() !== IS_ACTIVE
+                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
+                || !$this->HasActiveParent()
+                || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']) {
+                return;
+            }
+
+            $players = $this->sendApiRequest('players/all', [
+                'return_unavailable' => true,
+                'return_disabled' => true
+            ]);
+            if (!is_array($players) || !$this->isList($players)) {
+                throw new UnexpectedValueException('players/all lieferte keine vollständige Playerliste.');
+            }
+            $playersById = [];
+            foreach ($players as $player) {
+                if (!is_array($player) || !is_string($player['player_id'] ?? null)
+                    || trim($player['player_id']) === '') {
+                    continue;
+                }
+                $playersById[trim($player['player_id'])] = $player;
+            }
+
+            $updated = $this->withGroupMemberVolumeLock(function () use ($job, $playersById): bool {
+                $pending = $this->readPendingGroupMemberVolumeRefresh();
+                if ($pending === null
+                    || $pending['generation'] !== $job['generation']
+                    || $pending['player_id'] !== $job['player_id']
+                    || $pending['member_ids'] !== $job['member_ids']
+                    || $this->GetStatus() !== IS_ACTIVE
+                    || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
+                    || !$this->HasActiveParent()
+                    || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']) {
+                    return false;
+                }
+
+                if ($job['member_ids'] === null) {
+                    if (!isset($playersById[$job['player_id']])) {
+                        throw new UnexpectedValueException('Der konfigurierte Player fehlt in players/all.');
+                    }
+                    $group = $playersById[$job['player_id']];
+                    if (($group['type'] ?? null) !== 'group') {
+                        $changed = $this->removeGroupMemberVolumeVariablesUnlocked();
+                        $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+                        $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
+                        return $changed;
+                    }
+                    if (!array_key_exists('group_members', $group)) {
+                        throw new UnexpectedValueException('Der Gruppensnapshot enthält keine vollständige Mitgliederliste.');
+                    }
+                    $memberIds = $this->validateGroupMemberIds($group['group_members'], $job['player_id']);
+                    if ($memberIds === null) {
+                        throw new UnexpectedValueException('Der Gruppensnapshot enthält ungültige Mitglieder-IDs.');
+                    }
+                } else {
+                    $memberIds = $job['member_ids'];
+                }
+
+                $volumeUpdates = $this->readGroupMemberVolumeUpdates();
+                $members = [];
+                foreach ($memberIds as $memberId) {
+                    if (!isset($playersById[$memberId])) {
+                        throw new UnexpectedValueException('Ein Gruppenmitglied fehlt in players/all.');
+                    }
+                    $member = $playersById[$memberId];
+                    $name = is_string($member['name'] ?? null) ? trim($member['name']) : '';
+                    $volume = $member['volume_level'] ?? null;
+                    if (isset($volumeUpdates[$memberId])
+                        && $volumeUpdates[$memberId]['generation'] > $job['volume_generation']) {
+                        $volume = $volumeUpdates[$memberId]['volume_level'];
+                    }
+                    if ($name === '' || ($volume !== null && (!is_int($volume) || $volume < 0 || $volume > 100))) {
+                        throw new UnexpectedValueException('Ein Gruppenmitglied enthält unvollständige Playerdaten.');
+                    }
+                    $members[] = [
+                        'player_id' => $memberId,
+                        'name' => $name,
+                        'volume_level' => $volume
+                    ];
+                }
+                $this->reconcileGroupMemberVolumeVariables($members);
+                $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+                $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
+                return true;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Aktualisierung fehlgeschlagen: ' . $e->getMessage(), 0);
+        } finally {
+            try {
+                $restart = $this->withGroupMemberVolumeLock(function () use ($job): bool {
+                    $pending = $this->readPendingGroupMemberVolumeRefresh();
+                    if ($pending !== null && $pending['generation'] === $job['generation']) {
+                        $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+                        $pending = null;
+                    }
+                    if ($this->GetBuffer('RunningGroupMemberVolumeRefresh') === (string)$job['generation']) {
+                        $this->SetBuffer('RunningGroupMemberVolumeRefresh', '');
+                    }
+                    return $pending !== null;
+                });
+                if ($restart) {
+                    $this->SetTimerInterval('RefreshGroupMemberVolumes', 100);
+                }
+            } catch (Throwable $e) {
+                $this->SendDebug('Group member volumes', 'Aktualisierung konnte nicht abgeschlossen werden: ' . $e->getMessage(), 0);
+            }
+        }
+
+        if ($updated) {
+            $this->updateVisualization();
+        }
+    }
+
     public function UpdateConfigView(): void
     {
         $cfg = [
@@ -821,23 +974,25 @@ class MusicAssistantPlayer extends IPSModule
                 return;
             }
             sort($memberIds);
-            $requestId = bin2hex(random_bytes(16));
-            $refreshRequired = $this->withGroupMemberVolumeLock(function () use (
-                $requestId,
-                $memberIds,
-                $isResync
-            ): bool {
-                $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
+            $schedule = $this->withGroupMemberVolumeLock(function () use ($memberIds, $isResync): bool {
                 $map = $this->readGroupMemberVolumeMap();
                 if ($map === null) {
                     return false;
                 }
                 $knownMemberIds = array_column($map, 'player_id');
                 sort($knownMemberIds);
-                return $isResync || $knownMemberIds !== $memberIds;
+                if (!$isResync && $knownMemberIds === $memberIds) {
+                    $pending = $this->readPendingGroupMemberVolumeRefresh();
+                    if ($pending !== null && $pending['member_ids'] !== null
+                        && $pending['member_ids'] !== $memberIds) {
+                        $this->invalidatePendingGroupMemberVolumeRefreshUnlocked();
+                    }
+                    return false;
+                }
+                return $this->queueGroupMemberVolumeRefreshUnlocked($memberIds, $isResync);
             });
-            if ($refreshRequired) {
-                $this->refreshGroupMemberVolumes($memberIds, $isResync, $requestId);
+            if ($schedule) {
+                $this->SetTimerInterval('RefreshGroupMemberVolumes', 100);
             }
             return;
         }
@@ -847,19 +1002,29 @@ class MusicAssistantPlayer extends IPSModule
             if ($map === null) {
                 return false;
             }
+            $volume = $data['volume_level'] ?? null;
+            if (!is_int($volume) || $volume < 0 || $volume > 100) {
+                return false;
+            }
+            $pending = $this->readPendingGroupMemberVolumeRefresh();
+            $isPendingMember = $pending !== null
+                && ($pending['member_ids'] === null || in_array($objectId, $pending['member_ids'], true));
             foreach ($map as $ident => $entry) {
                 if ($entry['player_id'] !== $objectId) {
                     continue;
                 }
+                $this->recordGroupMemberVolumeUpdateUnlocked($objectId, $volume);
                 $variableId = @$this->GetIDForIdent($ident);
-                $volume = $data['volume_level'] ?? null;
                 if ($variableId !== $entry['variable_id'] || !IPS_VariableExists($variableId)
                     || (IPS_GetVariable($variableId)['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER
-                    || !is_int($volume) || $volume < 0 || $volume > 100) {
+                ) {
                     return false;
                 }
                 $this->SetValue($ident, $volume);
                 return true;
+            }
+            if ($isPendingMember) {
+                $this->recordGroupMemberVolumeUpdateUnlocked($objectId, $volume);
             }
             return false;
         });
@@ -868,129 +1033,141 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    private function refreshGroupMemberVolumes(
-        ?array $confirmedMemberIds = null,
-        bool $forceRefresh = false,
-        ?string $requestId = null
-    ): void
+    private function refreshGroupMemberVolumes(): void
     {
         $groupPlayerId = trim($this->ReadPropertyString('PlayerID'));
-        if ($groupPlayerId === '' || !$this->HasActiveParent()) {
+        if ($groupPlayerId === '' || $this->GetStatus() !== IS_ACTIVE || !$this->HasActiveParent()) {
             return;
         }
-        if ($requestId === null) {
-            $requestId = bin2hex(random_bytes(16));
-            $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
-        }
-        $proceed = $this->withGroupMemberVolumeLock(function () use (
-            $groupPlayerId,
-            $confirmedMemberIds,
-            $forceRefresh,
-            $requestId
-        ): bool {
-            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
-                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
-                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
-                || !$this->HasActiveParent()) {
+        $schedule = $this->withGroupMemberVolumeLock(function (): bool {
+            if (!$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
                 return false;
             }
-            if ($confirmedMemberIds !== null && !$forceRefresh) {
-                $map = $this->readGroupMemberVolumeMap();
-                if ($map === null) {
-                    return false;
-                }
-                $knownMemberIds = array_column($map, 'player_id');
-                sort($knownMemberIds);
-                $currentMemberIds = $confirmedMemberIds;
-                sort($currentMemberIds);
-                if ($knownMemberIds === $currentMemberIds) {
-                    return false;
-                }
-            }
-            return true;
+            return $this->queueGroupMemberVolumeRefreshUnlocked(null, true);
         });
-        if (!$proceed) {
-            return;
+        if ($schedule) {
+            $this->SetTimerInterval('RefreshGroupMemberVolumes', 100);
+        }
+    }
+
+    private function queueGroupMemberVolumeRefreshUnlocked(?array $memberIds, bool $forceRefresh): bool
+    {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if ($playerId === '') {
+            return false;
+        }
+        if ($memberIds !== null) {
+            sort($memberIds);
+        }
+        $pending = $this->readPendingGroupMemberVolumeRefresh();
+        if ($pending !== null
+            && $pending['player_id'] === $playerId
+            && $pending['member_ids'] === $memberIds
+            && ($pending['force_refresh'] || !$forceRefresh)) {
+            return $this->GetBuffer('RunningGroupMemberVolumeRefresh') !== (string)$pending['generation'];
         }
 
-        $players = $this->sendApiRequest('players/all', [
-            'return_unavailable' => true,
-            'return_disabled' => true
-        ]);
-        if (!is_array($players) || !$this->isList($players)) {
-            throw new UnexpectedValueException('players/all lieferte keine vollständige Playerliste.');
+        $generation = $this->nextGroupMemberVolumeRefreshGenerationUnlocked();
+        $this->SetBuffer('PendingGroupMemberVolumeRefresh', json_encode([
+            'generation'        => $generation,
+            'player_id'         => $playerId,
+            'member_ids'        => $memberIds,
+            'force_refresh'     => $forceRefresh,
+            'volume_generation' => (int)$this->GetBuffer('GroupMemberVolumeUpdateGeneration')
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        return true;
+    }
+
+    private function readPendingGroupMemberVolumeRefresh(): ?array
+    {
+        try {
+            $pending = json_decode(
+                trim($this->GetBuffer('PendingGroupMemberVolumeRefresh')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Aktualisierungsauftrag enthält ungültiges JSON', 0);
+            return null;
         }
-
-        $playersById = [];
-        foreach ($players as $player) {
-            if (!is_array($player) || !is_string($player['player_id'] ?? null)
-                || trim($player['player_id']) === '') {
-                continue;
-            }
-            $playersById[trim($player['player_id'])] = $player;
+        if (!is_array($pending) || count($pending) === 0) {
+            return null;
         }
-
-        $updated = $this->withGroupMemberVolumeLock(function () use (
-            $groupPlayerId,
-            $confirmedMemberIds,
-            $requestId,
-            $playersById
-        ): bool {
-            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
-                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
-                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
-                || !$this->HasActiveParent()) {
-                return false;
-            }
-
-            if ($confirmedMemberIds === null) {
-                if (!isset($playersById[$groupPlayerId])) {
-                    throw new UnexpectedValueException('Der konfigurierte Player fehlt in players/all.');
-                }
-                $group = $playersById[$groupPlayerId];
-                if (($group['type'] ?? null) !== 'group') {
-                    return $this->removeGroupMemberVolumeVariablesUnlocked();
-                }
-                if (!array_key_exists('group_members', $group)) {
-                    throw new UnexpectedValueException('Der Gruppensnapshot enthält keine vollständige Mitgliederliste.');
-                }
-                $memberIds = $this->validateGroupMemberIds($group['group_members'], $groupPlayerId);
-                if ($memberIds === null) {
-                    throw new UnexpectedValueException('Der Gruppensnapshot enthält ungültige Mitglieder-IDs.');
-                }
-            } else {
-                $memberIds = $confirmedMemberIds;
-            }
-
-            $members = [];
-            foreach ($memberIds as $memberId) {
-                if (!isset($playersById[$memberId])) {
-                    throw new UnexpectedValueException('Ein Gruppenmitglied fehlt in players/all.');
-                }
-                $member = $playersById[$memberId];
-                $name = is_string($member['name'] ?? null) ? trim($member['name']) : '';
-                $volume = $member['volume_level'] ?? null;
-                if ($name === '' || ($volume !== null && (!is_int($volume) || $volume < 0 || $volume > 100))) {
-                    throw new UnexpectedValueException('Ein Gruppenmitglied enthält unvollständige Playerdaten.');
-                }
-                $members[] = [
-                    'player_id' => $memberId,
-                    'name' => $name,
-                    'volume_level' => $volume
-                ];
-            }
-            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
-                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
-                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
-                || !$this->HasActiveParent()) {
-                return false;
-            }
-            $this->reconcileGroupMemberVolumeVariables($members);
-            return true;
-        });
-        if ($updated) {
-            $this->updateVisualization();
+        $memberIds = $pending['member_ids'] ?? null;
+        if (!is_int($pending['generation'] ?? null)
+            || $pending['generation'] <= 0
+            || !is_string($pending['player_id'] ?? null)
+            || trim($pending['player_id']) === ''
+            || ($memberIds !== null && $this->validateGroupMemberIds($memberIds, $pending['player_id']) === null)
+            || !is_bool($pending['force_refresh'] ?? null)
+            || !is_int($pending['volume_generation'] ?? null)
+            || $pending['volume_generation'] < 0) {
+            $this->SendDebug('Group member volumes', 'Aktualisierungsauftrag hat eine ungültige Struktur', 0);
+            return null;
         }
+        if ($memberIds !== null) {
+            sort($memberIds);
+        }
+        return [
+            'generation'        => $pending['generation'],
+            'player_id'         => trim($pending['player_id']),
+            'member_ids'        => $memberIds,
+            'force_refresh'     => $pending['force_refresh'],
+            'volume_generation' => $pending['volume_generation']
+        ];
+    }
+
+    private function nextGroupMemberVolumeRefreshGenerationUnlocked(): int
+    {
+        $generation = (int)$this->GetBuffer('GroupMemberVolumeRefreshGeneration') + 1;
+        $this->SetBuffer('GroupMemberVolumeRefreshGeneration', (string)$generation);
+        return $generation;
+    }
+
+    private function invalidatePendingGroupMemberVolumeRefreshUnlocked(): void
+    {
+        $this->nextGroupMemberVolumeRefreshGenerationUnlocked();
+        $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+    }
+
+    private function recordGroupMemberVolumeUpdateUnlocked(string $playerId, int $volume): void
+    {
+        $generation = (int)$this->GetBuffer('GroupMemberVolumeUpdateGeneration') + 1;
+        $this->SetBuffer('GroupMemberVolumeUpdateGeneration', (string)$generation);
+        $updates = $this->readGroupMemberVolumeUpdates();
+        $updates[$playerId] = [
+            'generation'   => $generation,
+            'volume_level' => $volume
+        ];
+        $this->SetBuffer('GroupMemberVolumeUpdates', json_encode($updates, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    }
+
+    private function readGroupMemberVolumeUpdates(): array
+    {
+        try {
+            $updates = json_decode(
+                trim($this->GetBuffer('GroupMemberVolumeUpdates')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Lautstärkeaktualisierungen enthalten ungültiges JSON', 0);
+            return [];
+        }
+        if (!is_array($updates)) {
+            return [];
+        }
+        foreach ($updates as $playerId => $update) {
+            if (!is_string($playerId) || trim($playerId) === '' || !is_array($update)
+                || !is_int($update['generation'] ?? null) || $update['generation'] <= 0
+                || !is_int($update['volume_level'] ?? null)
+                || $update['volume_level'] < 0 || $update['volume_level'] > 100) {
+                unset($updates[$playerId]);
+            }
+        }
+        return $updates;
     }
 
     private function validateGroupMemberIds($value, string $groupPlayerId): ?array
@@ -1094,12 +1271,10 @@ class MusicAssistantPlayer extends IPSModule
 
     private function removeGroupMemberVolumeVariables(): void
     {
-        $requestId = bin2hex(random_bytes(16));
-        $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
-        $updated = $this->withGroupMemberVolumeLock(function () use ($requestId): bool {
-            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId) {
-                return false;
-            }
+        $this->SetTimerInterval('RefreshGroupMemberVolumes', 0);
+        $updated = $this->withGroupMemberVolumeLock(function (): bool {
+            $this->invalidatePendingGroupMemberVolumeRefreshUnlocked();
+            $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
             return $this->removeGroupMemberVolumeVariablesUnlocked();
         });
         if ($updated) {
