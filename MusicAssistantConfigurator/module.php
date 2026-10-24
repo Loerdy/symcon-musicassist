@@ -42,7 +42,15 @@ class MusicAssistantConfigurator extends IPSModule
 
     public function GetConfigurationForm(): string
     {
-        $values = $this->buildPlayerListValues();
+        $targetLocation = null;
+        $targetLocationError = '';
+        try {
+            $targetLocation = $this->getTargetCategoryLocation();
+        } catch (Throwable $e) {
+            $targetLocationError = $e->getMessage();
+            $this->SendDebug('Target category', $targetLocationError, 0);
+        }
+        $values = $this->buildPlayerListValues($targetLocation, $targetLocationError);
 
         $form = [
             'elements' => [
@@ -661,7 +669,7 @@ class MusicAssistantConfigurator extends IPSModule
         $this->LogMessage($message, KL_ERROR);
     }
 
-    private function buildPlayerListValues(): array
+    private function buildPlayerListValues(?array $targetLocation, string $targetLocationError): array
     {
         $players = [];
         $connectionId = 0;
@@ -689,19 +697,28 @@ class MusicAssistantConfigurator extends IPSModule
 
             $instanceId = $this->findExistingPlayerInstance($playerId, $connectionId);
 
+            $create = [
+                'moduleID'      => self::PLAYER_MODULE_ID,
+                'configuration' => $this->playerConfiguration($playerId),
+                'name'          => 'MA Player - ' . $name
+            ];
+            if ($targetLocation !== null) {
+                $create['location'] = $targetLocation;
+            }
+
             $row = [
                 'name'        => $name,
                 'player_id'   => $playerId,
                 'provider'    => $provider,
                 'available'   => $avail ? 'Ja' : 'Nein',
-                'status'      => $instanceId > 0 ? 'Vorhanden' : 'Nicht angelegt',
-                'instanceID'  => $instanceId,
-                'create'      => [
-                    'moduleID'      => self::PLAYER_MODULE_ID,
-                    'configuration' => $this->playerConfiguration($playerId),
-                    'name'          => 'MA Player - ' . $name
-                ]
+                'status'      => $instanceId > 0
+                    ? 'Vorhanden'
+                    : ($targetLocation !== null ? 'Nicht angelegt' : $targetLocationError),
+                'instanceID'  => $instanceId
             ];
+            if ($instanceId > 0 || $targetLocation !== null) {
+                $row['create'] = $create;
+            }
             $rows[] = $row;
         }
 
@@ -715,6 +732,42 @@ class MusicAssistantConfigurator extends IPSModule
             throw new Exception('Der ausgewählte Zielordner ist keine gültige Kategorie.');
         }
         return $targetCategoryId;
+    }
+
+    private function getTargetCategoryLocation(): array
+    {
+        $categoryId = $this->getValidTargetCategoryId();
+        $location = [];
+        while ($categoryId > 0) {
+            $name = trim(IPS_GetName($categoryId));
+            if ($name === '') {
+                throw new Exception('Der ausgewählte Zielordner besitzt keinen gültigen Namen.');
+            }
+            $parentId = IPS_GetParent($categoryId);
+            if ($parentId < 0 || $parentId === $categoryId) {
+                throw new Exception('Der Kategoriepfad des ausgewählten Zielordners ist ungültig.');
+            }
+            if ($parentId > 0 && !IPS_CategoryExists($parentId)) {
+                throw new Exception(
+                    'Der ausgewählte Zielordner kann nicht als Kategoriepfad für den Configurator verwendet werden.'
+                );
+            }
+            $matchingCategories = 0;
+            foreach (IPS_GetChildrenIDs($parentId) as $childId) {
+                if (IPS_CategoryExists($childId) && trim(IPS_GetName($childId)) === $name) {
+                    $matchingCategories++;
+                }
+            }
+            if ($matchingCategories !== 1) {
+                throw new Exception(
+                    'Der ausgewählte Zielordner kann wegen mehrdeutiger Kategorienamen nicht sicher verwendet werden.'
+                );
+            }
+
+            array_unshift($location, $name);
+            $categoryId = $parentId;
+        }
+        return $location;
     }
 
     private function playerConfiguration(string $playerId): array
