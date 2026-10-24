@@ -45,10 +45,14 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetBuffer('PendingFavoriteResolution', '{}');
         $this->SetBuffer('FavoriteResolutionGeneration', '0');
         $this->SetBuffer('RunningFavoriteResolution', '');
+        $this->SetBuffer('PendingCoverDownload', '{}');
+        $this->SetBuffer('CoverDownloadGeneration', '0');
+        $this->SetBuffer('RunningCoverDownload', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResolveFavorite', 0, 'MASS_ProcessFavoriteResolution($_IPS["TARGET"]);');
+        $this->RegisterTimer('DownloadCover', 0, 'MASS_ProcessCoverDownload($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges(): void
@@ -62,6 +66,14 @@ class MusicAssistantPlayer extends IPSModule
             });
         } catch (Throwable $e) {
             $this->SendDebug('Favorite', 'Ausstehende Auflösung konnte nicht verworfen werden: ' . $e->getMessage(), 0);
+        }
+        $this->SetTimerInterval('DownloadCover', 0);
+        try {
+            $this->withCoverLock(function (): void {
+                $this->invalidatePendingCoverDownloadUnlocked();
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Ausstehender Download konnte nicht verworfen werden: ' . $e->getMessage(), 0);
         }
         $this->configureVisualizationType();
         $this->registerParentStatusMessage();
@@ -605,6 +617,116 @@ class MusicAssistantPlayer extends IPSModule
                 }
             } catch (Throwable $e) {
                 $this->SendDebug('Favorite', 'Auflösungsauftrag konnte nicht abgeschlossen werden: ' . $e->getMessage(), 0);
+            }
+        }
+
+        if ($updateVisualization) {
+            $this->updateVisualization();
+        }
+    }
+
+    public function ProcessCoverDownload(): void
+    {
+        $this->SetTimerInterval('DownloadCover', 0);
+
+        try {
+            $job = $this->withCoverLock(function (): ?array {
+                if ($this->GetBuffer('RunningCoverDownload') !== '') {
+                    return null;
+                }
+                $pending = $this->readPendingCoverDownload();
+                if ($pending === null
+                    || $this->ReadAttributeString('CoverTargetProxyID') !== $pending['proxy_id']) {
+                    return null;
+                }
+                $this->SetBuffer('RunningCoverDownload', (string)$pending['generation']);
+                return $pending;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Cover-Download konnte nicht gestartet werden: ' . $e->getMessage(), 0);
+            return;
+        }
+        if ($job === null) {
+            return;
+        }
+
+        $updateVisualization = false;
+        try {
+            if ($this->GetStatus() !== IS_ACTIVE
+                || !$this->HasActiveParent()
+                || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']) {
+                return;
+            }
+
+            $response = $this->requestArtwork($job['proxy_id']);
+            $content = $response['content'] ?? null;
+            $contentType = $response['content_type'] ?? null;
+            if (($response['proxy_id'] ?? null) !== $job['proxy_id']
+                || !in_array($contentType, ['image/jpeg', 'image/png'], true)
+                || !is_string($content)) {
+                throw new Exception('Artwork-Antwort ist ungültig.');
+            }
+            $binary = base64_decode($content, true);
+            $validSignature = is_string($binary) && $binary !== '' && ($contentType === 'image/jpeg'
+                ? substr($binary, 0, 3) === "\xFF\xD8\xFF"
+                : substr($binary, 0, 8) === "\x89PNG\r\n\x1A\n");
+            if (!$validSignature) {
+                throw new Exception('Artwork-Signatur passt nicht zum Content-Type.');
+            }
+
+            $updateVisualization = $this->withCoverLock(function () use ($job, $content, $contentType): bool {
+                $pending = $this->readPendingCoverDownload();
+                if ($pending === null
+                    || $pending['generation'] !== $job['generation']
+                    || $pending['player_id'] !== $job['player_id']
+                    || $pending['proxy_id'] !== $job['proxy_id']
+                    || $this->GetStatus() !== IS_ACTIVE
+                    || !$this->HasActiveParent()
+                    || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']
+                    || $this->ReadAttributeString('CoverTargetProxyID') !== $job['proxy_id']) {
+                    return false;
+                }
+                $mediaId = $this->ensureCoverMedia();
+                if ($mediaId <= 0) {
+                    throw new Exception('Cover-Medium ist nicht verfügbar.');
+                }
+                $this->ensureCoverMediaFormat($mediaId, $contentType);
+                if (!IPS_SetMediaContent($mediaId, $content)) {
+                    throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
+                }
+                if (!$this->WriteAttributeString('CoverProxyID', $job['proxy_id'])) {
+                    throw new Exception('Cover-Cache konnte nicht gespeichert werden.');
+                }
+                if (!$this->WriteAttributeBoolean('CoverIsDefault', false)) {
+                    throw new Exception('Cover-Status konnte nicht gespeichert werden.');
+                }
+                $this->updateCoverVisibilityFromQueueState($job['state'], true);
+                $this->SetBuffer('PendingCoverDownload', '{}');
+                return true;
+            });
+            if ($updateVisualization) {
+                $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
+            }
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Cover konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
+        } finally {
+            try {
+                $restart = $this->withCoverLock(function () use ($job): bool {
+                    $pending = $this->readPendingCoverDownload();
+                    if ($pending !== null && $pending['generation'] === $job['generation']) {
+                        $this->SetBuffer('PendingCoverDownload', '{}');
+                        $pending = null;
+                    }
+                    if ($this->GetBuffer('RunningCoverDownload') === (string)$job['generation']) {
+                        $this->SetBuffer('RunningCoverDownload', '');
+                    }
+                    return $pending !== null;
+                });
+                if ($restart) {
+                    $this->SetTimerInterval('DownloadCover', 100);
+                }
+            } catch (Throwable $e) {
+                $this->SendDebug('Artwork', 'Cover-Download konnte nicht abgeschlossen werden: ' . $e->getMessage(), 0);
             }
         }
 
@@ -1781,6 +1903,15 @@ class MusicAssistantPlayer extends IPSModule
                 $proxyId = $candidate;
             }
         }
+        if ($proxyId === '') {
+            $this->withCoverLock(function (): void {
+                $this->invalidatePendingCoverDownloadUnlocked();
+                if ($this->ReadAttributeString('CoverTargetProxyID') !== ''
+                    && !$this->WriteAttributeString('CoverTargetProxyID', '')) {
+                    throw new Exception('Cover-Ziel konnte nicht zurückgesetzt werden.');
+                }
+            });
+        }
         $mediaId = $this->ensureCoverMedia();
         if ($mediaId <= 0) {
             throw new Exception('Cover-Medium ist nicht verfügbar.');
@@ -1790,8 +1921,9 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
 
-        $needsDownload = $this->withCoverLock(function () use ($mediaId, $proxyId, $state): bool {
+        $schedule = $this->withCoverLock(function () use ($mediaId, $proxyId, $state): bool {
             if ($this->ReadAttributeString('CoverTargetProxyID') !== $proxyId) {
+                $this->invalidatePendingCoverDownloadUnlocked();
                 if (!$this->WriteAttributeString('CoverTargetProxyID', $proxyId)) {
                     throw new Exception('Cover-Ziel konnte nicht gespeichert werden.');
                 }
@@ -1800,52 +1932,17 @@ class MusicAssistantPlayer extends IPSModule
             if ($this->ReadAttributeString('CoverProxyID') === $proxyId
                 && !$this->ReadAttributeBoolean('CoverIsDefault')
                 && $this->coverMediaHasContent($mediaId)) {
+                $this->invalidatePendingCoverDownloadUnlocked();
                 $this->updateCoverVisibilityFromQueueState($state, true);
                 return false;
             }
             if ($this->ReadAttributeBoolean('CoverIsDefault') || !$this->coverMediaHasContent($mediaId)) {
                 $this->setDefaultCover($mediaId, $state);
             }
-            return true;
+            return $this->queueCoverDownloadUnlocked($proxyId, $state);
         });
-        if (!$needsDownload) {
-            return;
-        }
-
-        $response = $this->requestArtwork($proxyId);
-        $content = $response['content'] ?? null;
-        $contentType = $response['content_type'] ?? null;
-        if (($response['proxy_id'] ?? null) !== $proxyId
-            || !in_array($contentType, ['image/jpeg', 'image/png'], true)
-            || !is_string($content)) {
-            throw new Exception('Artwork-Antwort ist ungültig.');
-        }
-        $binary = base64_decode($content, true);
-        $validSignature = is_string($binary) && $binary !== '' && ($contentType === 'image/jpeg'
-            ? substr($binary, 0, 3) === "\xFF\xD8\xFF"
-            : substr($binary, 0, 8) === "\x89PNG\r\n\x1A\n");
-        if (!$validSignature) {
-            throw new Exception('Artwork-Signatur passt nicht zum Content-Type.');
-        }
-        $updated = $this->withCoverLock(function () use ($mediaId, $proxyId, $content, $contentType, $state): bool {
-            if ($this->ReadAttributeString('CoverTargetProxyID') !== $proxyId) {
-                return false;
-            }
-            $this->ensureCoverMediaFormat($mediaId, $contentType);
-            if (!IPS_SetMediaContent($mediaId, $content)) {
-                throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
-            }
-            if (!$this->WriteAttributeString('CoverProxyID', $proxyId)) {
-                throw new Exception('Cover-Cache konnte nicht gespeichert werden.');
-            }
-            if (!$this->WriteAttributeBoolean('CoverIsDefault', false)) {
-                throw new Exception('Cover-Status konnte nicht gespeichert werden.');
-            }
-            $this->updateCoverVisibilityFromQueueState($state, true);
-            return true;
-        });
-        if ($updated) {
-            $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
+        if ($schedule) {
+            $this->SetTimerInterval('DownloadCover', 100);
         }
     }
 
@@ -1944,6 +2041,71 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
+    private function queueCoverDownloadUnlocked(string $proxyId, $state): bool
+    {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if ($playerId === '') {
+            return false;
+        }
+        $pending = $this->readPendingCoverDownload();
+        if ($pending !== null
+            && $pending['player_id'] === $playerId
+            && $pending['proxy_id'] === $proxyId) {
+            return $this->GetBuffer('RunningCoverDownload') !== (string)$pending['generation'];
+        }
+
+        $generation = $this->nextCoverDownloadGenerationUnlocked();
+        $this->SetBuffer('PendingCoverDownload', json_encode([
+            'generation' => $generation,
+            'player_id'  => $playerId,
+            'proxy_id'   => $proxyId,
+            'state'      => $state
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        return true;
+    }
+
+    private function readPendingCoverDownload(): ?array
+    {
+        try {
+            $pending = json_decode(
+                trim($this->GetBuffer('PendingCoverDownload')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Download-Auftrag enthält ungültiges JSON', 0);
+            return null;
+        }
+        if (!is_array($pending) || count($pending) === 0) {
+            return null;
+        }
+        if (!is_int($pending['generation'] ?? null)
+            || $pending['generation'] <= 0
+            || !is_string($pending['player_id'] ?? null)
+            || trim($pending['player_id']) === ''
+            || !is_string($pending['proxy_id'] ?? null)
+            || preg_match('/^[a-f0-9]{64}$/D', $pending['proxy_id']) !== 1
+            || !array_key_exists('state', $pending)) {
+            $this->SendDebug('Artwork', 'Download-Auftrag hat eine ungültige Struktur', 0);
+            return null;
+        }
+        return $pending;
+    }
+
+    private function nextCoverDownloadGenerationUnlocked(): int
+    {
+        $generation = (int)$this->GetBuffer('CoverDownloadGeneration') + 1;
+        $this->SetBuffer('CoverDownloadGeneration', (string)$generation);
+        return $generation;
+    }
+
+    private function invalidatePendingCoverDownloadUnlocked(): void
+    {
+        $this->nextCoverDownloadGenerationUnlocked();
+        $this->SetBuffer('PendingCoverDownload', '{}');
+    }
+
     private function requestArtwork(string $proxyId): array
     {
         $response = $this->SendDataToParent(json_encode([
@@ -2002,9 +2164,13 @@ class MusicAssistantPlayer extends IPSModule
     {
         $mediaId = $this->ensureCoverMedia();
         if ($mediaId <= 0) {
+            $this->withCoverLock(function (): void {
+                $this->invalidatePendingCoverDownloadUnlocked();
+            });
             return;
         }
         $this->withCoverLock(function () use ($mediaId): void {
+            $this->invalidatePendingCoverDownloadUnlocked();
             $hadContent = $this->coverMediaHasContent($mediaId);
             $hadProxyId = $this->ReadAttributeString('CoverProxyID') !== '';
             if ($hadContent && !IPS_SetMediaContent($mediaId, '')) {

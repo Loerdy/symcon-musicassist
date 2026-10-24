@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Die Favoritenauflösung des aktuellen Titels erfolgt ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und verwirft veraltete Ergebnisse nach Titel- oder Konfigurationswechseln.
+- Cover-Downloads erfolgen ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und übernehmen keine veralteten Ergebnisse nach Titel- oder Konfigurationswechseln.
 
 ## v2.1.1 — 2026-10-23
 
