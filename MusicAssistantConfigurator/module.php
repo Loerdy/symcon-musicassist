@@ -324,7 +324,10 @@ class MusicAssistantConfigurator extends IPSModule
         if (IPS_VariableProfileExists($profile)) {
             $p = IPS_GetVariableProfile($profile);
             if (($p['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-                IPS_DeleteVariableProfile($profile);
+                throw new Exception(
+                    'Variablenprofil ' . $profile
+                    . ' hat nicht den erwarteten Typ Integer. Synchronisierung wurde abgebrochen; das Profil blieb unverändert.'
+                );
             }
         }
         if (!IPS_VariableProfileExists($profile)) {
