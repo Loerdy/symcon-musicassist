@@ -7,9 +7,6 @@ class MusicAssistantPlayer extends IPSModule
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const REPEAT_MODE_TO_VALUE = ['off' => 0, 'all' => 1, 'one' => 2];
     private const REPEAT_VALUE_TO_MODE = [0 => 'off', 1 => 'all', 2 => 'one'];
-    private const VOLUP_PROFILE   = 'MA.VolumeUp';
-    private const VOLDOWN_PROFILE = 'MA.VolumeDown';
-    private const FAVORITE_PROFILE = 'MA.Favorite';
     private const COVER_SEMAPHORE_TIMEOUT = 5000;
     private const GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT = 40000;
     private const GROUP_MEMBER_REMOVAL_CONFIRMATION_DELAY = 1500;
@@ -162,7 +159,6 @@ class MusicAssistantPlayer extends IPSModule
         $this->EnableAction('VolumeLevel');
 
         // Volume Buttons (Group Up/Down)
-        $volumeButtonProfiles = $this->ensureVolumeButtonProfiles();
         $this->MaintainVariable(
             'VolumeUp',
             $this->Translate('Volume +'),
@@ -239,18 +235,13 @@ class MusicAssistantPlayer extends IPSModule
             && IPS_VariableExists($favoriteId)
             && (IPS_GetVariable($favoriteId)['VariableType'] ?? -1) === VARIABLETYPE_BOOLEAN;
         $showFavorite = $this->ReadPropertyBoolean('ShowFavorite');
-        $favoritePresentation = '~Switch';
-        if (defined('VARIABLE_PRESENTATION_SWITCH')) {
-            $favoritePresentation = [
-                'PRESENTATION'   => constant('VARIABLE_PRESENTATION_SWITCH'),
-                'USE_ICON_FALSE' => false,
-                'ICON_TRUE'      => 'heart',
-                'GLOW_INTENSITY' => 30,
-                'USAGE_TYPE'     => 2
-            ];
-        } elseif ($showFavorite && $this->ensureFavoriteProfile()) {
-            $favoritePresentation = self::FAVORITE_PROFILE;
-        }
+        $favoritePresentation = [
+            'PRESENTATION'   => constant('VARIABLE_PRESENTATION_SWITCH'),
+            'USE_ICON_FALSE' => false,
+            'ICON_TRUE'      => 'heart',
+            'GLOW_INTENSITY' => 30,
+            'USAGE_TYPE'     => 2
+        ];
         $this->MaintainVariable('Favorite', $this->Translate('Favorite'), VARIABLETYPE_BOOLEAN, $favoritePresentation, 140, $showFavorite);
         if ($showFavorite) {
             $favoriteId = @$this->GetIDForIdent('Favorite');
@@ -319,7 +310,7 @@ class MusicAssistantPlayer extends IPSModule
                 [
                     'type' => 'CheckBox',
                     'name' => 'EnableCustomTile',
-                    'caption' => 'Show custom player tile in the Tile Visualization (IP-Symcon 7.1 or newer)'
+                    'caption' => 'Show custom player tile in the Tile Visualization'
                 ],
                 [
                     'type' => 'CheckBox',
@@ -2025,23 +2016,14 @@ class MusicAssistantPlayer extends IPSModule
 
     private function configureVisualizationType(): void
     {
-        if (!method_exists($this, 'SetVisualizationType')
-            || !defined('INSTANCE_VISUALIZATION_TYPE_HTML')) {
-            return;
-        }
-
-        $visualizationType = $this->ReadPropertyBoolean('EnableCustomTile')
-            ? constant('INSTANCE_VISUALIZATION_TYPE_HTML')
-            : (defined('INSTANCE_VISUALIZATION_TYPE_NONE')
-                ? constant('INSTANCE_VISUALIZATION_TYPE_NONE')
-                : 0);
-        $this->SetVisualizationType($visualizationType);
+        $this->SetVisualizationType(
+            $this->ReadPropertyBoolean('EnableCustomTile') ? 1 : 0
+        );
     }
 
     private function updateVisualization(bool $force = false): void
     {
-        if (!$this->ReadPropertyBoolean('EnableCustomTile')
-            || !method_exists($this, 'UpdateVisualizationValue')) {
+        if (!$this->ReadPropertyBoolean('EnableCustomTile')) {
             return;
         }
 
@@ -2804,79 +2786,6 @@ class MusicAssistantPlayer extends IPSModule
     }
 
     // --------- intern ---------
-
-    private function ensureVolumeButtonProfiles(): array
-    {
-        return [
-            self::VOLUP_PROFILE   => $this->ensureIntButtonProfile(self::VOLUP_PROFILE, $this->Translate('Up'), 'volume-up'),
-            self::VOLDOWN_PROFILE => $this->ensureIntButtonProfile(self::VOLDOWN_PROFILE, $this->Translate('Down'), 'volume-down')
-        ];
-    }
-
-    private function ensureFavoriteProfile(): bool
-    {
-        $profileCreated = !IPS_VariableProfileExists(self::FAVORITE_PROFILE);
-        if ($profileCreated) {
-            IPS_CreateVariableProfile(self::FAVORITE_PROFILE, VARIABLETYPE_BOOLEAN);
-        }
-        if (!IPS_VariableProfileExists(self::FAVORITE_PROFILE)) {
-            $this->LogMessage(
-                sprintf($this->Translate('Variable profile %s could not be created.'), self::FAVORITE_PROFILE),
-                KL_ERROR
-            );
-            return false;
-        }
-
-        $profileData = IPS_GetVariableProfile(self::FAVORITE_PROFILE);
-        if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_BOOLEAN) {
-            $this->LogMessage(
-                sprintf(
-                    $this->Translate('Variable profile %s does not have the expected type Boolean and will not be changed.'),
-                    self::FAVORITE_PROFILE
-                ),
-                KL_ERROR
-            );
-            return false;
-        }
-
-        if ($profileCreated) {
-            IPS_SetVariableProfileAssociation(self::FAVORITE_PROFILE, false, $this->Translate('Favorite'), 'Heart', 0x555555);
-            IPS_SetVariableProfileAssociation(self::FAVORITE_PROFILE, true, $this->Translate('Favorite'), 'Heart', 0xE53935);
-        }
-        return true;
-    }
-
-    private function ensureIntButtonProfile(string $profile, string $caption, string $icon): bool
-    {
-        $profileCreated = !IPS_VariableProfileExists($profile);
-        if ($profileCreated) {
-            IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
-        }
-        if (!IPS_VariableProfileExists($profile)) {
-            $this->LogMessage(
-                sprintf($this->Translate('Variable profile %s could not be created.'), $profile),
-                KL_ERROR
-            );
-            return false;
-        }
-
-        $profileData = IPS_GetVariableProfile($profile);
-        if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-            $this->LogMessage(
-                sprintf(
-                    $this->Translate('Variable profile %s does not have the expected type Integer and will not be changed.'),
-                    $profile
-                ),
-                KL_ERROR
-            );
-            return false;
-        }
-
-        if ($profileCreated) {
-            IPS_SetVariableProfileAssociation($profile, 1, $caption, $icon, -1);
-        }
-        return true;
-    }
 
     private function ExecuteTransport(int $value): void
     {

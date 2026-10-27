@@ -6,7 +6,7 @@
             "Configuration (read-only):": "Konfiguration (read-only):",
             "Update configuration": "Konfiguration aktualisieren",
             "Show favorite control for the current track": "Favoritensteuerung für den aktuellen Titel anzeigen",
-            "Show custom player tile in the Tile Visualization (IP-Symcon 7.1 or newer)": "Eigene Player-Kachel in der Tile Visu anzeigen (ab IP-Symcon 7.1)",
+            "Show custom player tile in the Tile Visualization": "Eigene Player-Kachel in der Tile Visu anzeigen",
             "Show individual volume controls for current group members": "Individuelle Lautstärkeregler für aktuelle Gruppenmitglieder anzeigen",
             "Playlist": "Playlist",
             "Radio": "Radio",
