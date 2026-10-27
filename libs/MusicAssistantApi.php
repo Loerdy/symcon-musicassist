@@ -7,6 +7,9 @@ trait MusicAssistantApi
     {
         $host = trim($this->ReadPropertyString('Host'));
         $port = (int)$this->ReadPropertyInteger('Port');
+        if (strpos($host, ':') !== false && $host[0] !== '[') {
+            $host = '[' . $host . ']';
+        }
         return sprintf('http://%s:%d', $host, $port);
     }
 
@@ -17,16 +20,22 @@ trait MusicAssistantApi
 
     private function maNextMessageId(): string
     {
-        $id = (int)$this->GetBuffer('MsgId');
-        $id++;
-        $this->SetBuffer('MsgId', (string)$id);
-        return (string)$id;
+        if (!IPS_SemaphoreEnter($this->maMessageIdSemaphoreName(), 1000)) {
+            throw new Exception('MA message ID semaphore timeout');
+        }
+        try {
+            $id = (int)$this->GetBuffer('MsgId');
+            $id++;
+            $this->SetBuffer('MsgId', (string)$id);
+            return (string)$id;
+        } finally {
+            IPS_SemaphoreLeave($this->maMessageIdSemaphoreName());
+        }
     }
 
-    private function maSemaphoreName(): string
+    private function maMessageIdSemaphoreName(): string
     {
-        // pro Instanz serialisieren
-        return 'MA_API_' . (string)$this->InstanceID;
+        return 'MA_MESSAGE_ID_' . (string)$this->InstanceID;
     }
 
     /**
@@ -61,13 +70,8 @@ trait MusicAssistantApi
             0
         );
 
-        // Konkurrierende HTTP-/Artwork-Zugriffe auf dieselbe Connection serialisieren.
-        if (!IPS_SemaphoreEnter($this->maSemaphoreName(), 15000)) {
-            throw new Exception('MA API semaphore timeout (parallel requests blocked)');
-        }
-
+        $ch = curl_init($this->maApiUrl());
         try {
-            $ch = curl_init($this->maApiUrl());
             curl_setopt_array($ch, [
                 CURLOPT_RETURNTRANSFER     => true,
                 CURLOPT_POST               => true,
@@ -75,15 +79,17 @@ trait MusicAssistantApi
                 CURLOPT_POSTFIELDS         => $reqJson,
                 CURLOPT_TIMEOUT_MS         => $timeoutMs,
                 CURLOPT_CONNECTTIMEOUT_MS  => 5000,
-                CURLOPT_FOLLOWLOCATION     => true
+                CURLOPT_FOLLOWLOCATION     => false
             ]);
 
             $respBody = curl_exec($ch);
             $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $err      = (string)curl_error($ch);
-            curl_close($ch);
         } finally {
-            IPS_SemaphoreLeave($this->maSemaphoreName());
+            if ($ch !== false) {
+                curl_close($ch);
+                unset($ch);
+            }
         }
 
         if ($respBody === false || $respBody === null) {

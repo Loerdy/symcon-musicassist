@@ -1,0 +1,15 @@
+{
+    "translations": {
+        "de": {
+            "Server": "Server",
+            "Port": "Port",
+            "Token": "Token",
+            "WebSocket login and real-time updates of player volume and mute.": "WebSocket-Anmeldung und Echtzeitaktualisierung von Player-Lautstärke und Mute.",
+            "Authenticated": "Authentifiziert",
+            "Waiting for connection / server greeting": "Warte auf Verbindung / Server-Begrüßung",
+            "Not configured: Check host, port and token": "Nicht konfiguriert: Host, Port und Token prüfen",
+            "Authentication failed": "Authentifizierung fehlgeschlagen",
+            "Authentication: Sending failed or timed out": "Authentifizierung: Senden fehlgeschlagen oder Zeitüberschreitung"
+        }
+    }
+}

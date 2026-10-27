@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -517,46 +517,66 @@
         <div class="cover cover-placeholder" id="cover-placeholder" aria-hidden="true"></div>
         <img class="cover" id="cover" alt="" hidden>
         <section class="details">
-            <div class="title" id="title">Kein Titel</div>
+            <div class="title" id="title">No title</div>
             <div class="artist" id="artist">–</div>
             <div class="status">
                 <span class="status-dot" aria-hidden="true"></span>
-                <span id="status">Unbekannt</span>
+                <span id="status">Unknown</span>
             </div>
-            <div class="transport" aria-label="Wiedergabesteuerung">
-                <button type="button" data-transport="0" title="Zurück" aria-label="Zurück"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 6 9 12l10 6Z"/></svg></button>
-                <button type="button" id="transport-toggle" title="Wiedergabe" aria-label="Wiedergabe"><svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M9 5v14M15 5v14"/></svg></button>
+            <div class="transport" aria-label="Playback controls">
+                <button type="button" data-transport="0" title="Previous" aria-label="Previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 6 9 12l10 6Z"/></svg></button>
+                <button type="button" id="transport-toggle" title="Play" aria-label="Play"><svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M9 5v14M15 5v14"/></svg></button>
                 <button type="button" data-transport="1" title="Stop" aria-label="Stop">&#x25A0;</button>
-                <button type="button" data-transport="4" title="Weiter" aria-label="Weiter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 6l10 6-10 6Z"/></svg></button>
+                <button type="button" data-transport="4" title="Next" aria-label="Next"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 6l10 6-10 6Z"/></svg></button>
             </div>
             <div class="volume-control">
-                <button type="button" class="mute-button" id="mute" title="Stumm" aria-label="Stumm" aria-pressed="false"><svg class="icon-unmuted" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6.5 9H3v6h3.5l4.5 4ZM15 9a4 4 0 0 1 0 6M17.5 6.5a8 8 0 0 1 0 11"/></svg><svg class="icon-muted" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M11 5 6.5 9H3v6h3.5l4.5 4ZM16 9l5 6M21 9l-5 6"/></svg></button>
-                <input class="volume-slider" id="volume" type="range" min="0" max="100" step="1" value="0" aria-label="Lautstärke">
+                <button type="button" class="mute-button" id="mute" title="Mute" aria-label="Mute" aria-pressed="false"><svg class="icon-unmuted" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6.5 9H3v6h3.5l4.5 4ZM15 9a4 4 0 0 1 0 6M17.5 6.5a8 8 0 0 1 0 11"/></svg><svg class="icon-muted" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M11 5 6.5 9H3v6h3.5l4.5 4ZM16 9l5 6M21 9l-5 6"/></svg></button>
+                <input class="volume-slider" id="volume" type="range" min="0" max="100" step="1" value="0" aria-label="Volume">
                 <output class="volume-value" id="volume-value" for="volume">0 %</output>
             </div>
             <div class="mode-controls">
                 <button type="button" id="shuffle" title="Shuffle" aria-label="Shuffle" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h3c5 0 7 12 12 12h3"/><path d="m18 15 3 3-3 3"/><path d="M3 18h3c2.1 0 3.6-2.1 5-4.5"/><path d="M13 9.5C14.4 7.4 15.9 6 18 6h3"/><path d="m18 3 3 3-3 3"/></svg></button>
-                <button type="button" id="repeat" title="Repeat aus" aria-label="Repeat aus" data-repeat="off"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><path class="repeat-one" d="M12 10v4M10.8 11.2 12 10"/></svg></button>
-                <button type="button" id="favorite" title="Favorit" aria-label="Favorit" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg></button>
+                <button type="button" id="repeat" title="Repeat off" aria-label="Repeat off" data-repeat="off"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><path class="repeat-one" d="M12 10v4M10.8 11.2 12 10"/></svg></button>
+                <button type="button" id="favorite" title="Favorite" aria-label="Favorite" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg></button>
             </div>
             <div class="media-selectors">
                 <select id="playlist" aria-label="Playlist"><option value="">Playlist</option></select>
                 <select id="radio" aria-label="Radio"><option value="">Radio</option></select>
             </div>
-            <div class="group-volumes" id="group-volumes" aria-label="Gruppenlautstärken" hidden></div>
+            <div class="group-volumes" id="group-volumes" aria-label="Group volumes" hidden></div>
         </section>
     </main>
     <script>
         "use strict";
 
         const statusLabels = {
-            idle: "Gestoppt",
-            playing: "Wiedergabe",
-            paused: "Pausiert",
-            unknown: "Unbekannt"
+            idle: translate("Stopped"),
+            playing: translate("Playing"),
+            paused: translate("Paused"),
+            unknown: translate("Unknown")
         };
+
+        document.querySelector(".transport").setAttribute("aria-label", translate("Playback controls"));
+        document.querySelector('[data-transport="0"]').title = translate("Previous");
+        document.querySelector('[data-transport="0"]').setAttribute("aria-label", translate("Previous"));
+        document.querySelector('[data-transport="1"]').title = translate("Stop");
+        document.querySelector('[data-transport="1"]').setAttribute("aria-label", translate("Stop"));
+        document.querySelector('[data-transport="4"]').title = translate("Next");
+        document.querySelector('[data-transport="4"]').setAttribute("aria-label", translate("Next"));
+        document.getElementById("volume").setAttribute("aria-label", translate("Volume"));
+        document.getElementById("shuffle").title = translate("Shuffle");
+        document.getElementById("shuffle").setAttribute("aria-label", translate("Shuffle"));
+        document.getElementById("favorite").title = translate("Favorite");
+        document.getElementById("favorite").setAttribute("aria-label", translate("Favorite"));
+        document.getElementById("playlist").setAttribute("aria-label", translate("Playlist"));
+        document.getElementById("radio").setAttribute("aria-label", translate("Radio"));
+        document.getElementById("group-volumes").setAttribute("aria-label", translate("Group volumes"));
         const neutralBackgroundDark = "linear-gradient(145deg, #25282d 0%, #141619 58%, #0b0c0e 100%)";
         const neutralBackgroundLight = "linear-gradient(145deg, color-mix(in srgb, var(--card-color, #eef0f2) 88%, white) 0%, color-mix(in srgb, var(--card-color, #e3e6e9) 92%, black) 100%)";
+        const selectionConfirmationTimeout = 30000;
+        const pendingSelections = {playlist: null, radio: null};
+        const suppressedSelections = {playlist: false, radio: false};
+        let pendingSelectionGeneration = 0;
         let analyzedCover = null;
         let failedCover = null;
         let backgroundLayer = "a";
@@ -711,7 +731,44 @@
             }
         }
 
-        function renderOptions(selectId, options, placeholder) {
+        function setRenderedSelection(select, selection) {
+            const value = Number.isInteger(selection) && selection > 0 ? String(selection) : "";
+            select.value = Array.from(select.options).some((option) => option.value === value) ? value : "";
+        }
+
+        function cancelPendingSelection(selectId) {
+            const pending = pendingSelections[selectId];
+            if (pending !== null) {
+                window.clearTimeout(pending.timeout);
+                pendingSelections[selectId] = null;
+            }
+        }
+
+        function beginPendingSelection(selectId, selection) {
+            const otherSelectId = selectId === "playlist" ? "radio" : "playlist";
+            cancelPendingSelection(otherSelectId);
+            suppressedSelections[otherSelectId] = true;
+            suppressedSelections[selectId] = false;
+            setRenderedSelection(document.getElementById(otherSelectId), 0);
+            cancelPendingSelection(selectId);
+
+            const generation = ++pendingSelectionGeneration;
+            const timeout = window.setTimeout(() => {
+                const pending = pendingSelections[selectId];
+                if (pending === null || pending.generation !== generation) {
+                    return;
+                }
+                pendingSelections[selectId] = null;
+                const select = document.getElementById(selectId);
+                setRenderedSelection(select, Number(select.dataset.serverSelection));
+            }, selectionConfirmationTimeout);
+            const currentRevision = Number(document.getElementById(selectId).dataset.serverSelectionRevision);
+            const revision = Number.isInteger(currentRevision) && currentRevision >= 0 ? currentRevision : 0;
+            pendingSelections[selectId] = {selection, generation, timeout, revision};
+            setRenderedSelection(document.getElementById(selectId), selection);
+        }
+
+        function renderOptions(selectId, options, placeholder, selection, selectionRevision) {
             const select = document.getElementById(selectId);
             const normalized = Array.isArray(options)
                 ? options.filter((option) => option && Number.isInteger(option.value) && option.value > 0
@@ -719,24 +776,34 @@
                     .map((option) => ({value: option.value, label: option.label}))
                 : [];
             const signature = JSON.stringify([placeholder, normalized]);
-            if (select.dataset.optionsSignature === signature) {
-                return;
+            if (select.dataset.optionsSignature !== signature) {
+                select.dataset.optionsSignature = signature;
+                select.replaceChildren();
+
+                const emptyOption = document.createElement("option");
+                emptyOption.value = "";
+                emptyOption.textContent = placeholder;
+                translateHTML(emptyOption);
+                select.appendChild(emptyOption);
+
+                normalized.forEach((option) => {
+                    const element = document.createElement("option");
+                    element.value = String(option.value);
+                    element.textContent = option.label;
+                    select.appendChild(element);
+                });
             }
-            select.dataset.optionsSignature = signature;
-            select.replaceChildren();
-
-            const emptyOption = document.createElement("option");
-            emptyOption.value = "";
-            emptyOption.textContent = placeholder;
-            select.appendChild(emptyOption);
-
-            normalized.forEach((option) => {
-                const element = document.createElement("option");
-                element.value = String(option.value);
-                element.textContent = option.label;
-                select.appendChild(element);
-            });
-            select.value = "";
+            select.dataset.serverSelection = String(selection);
+            select.dataset.serverSelectionRevision = String(selectionRevision);
+            const pending = pendingSelections[selectId];
+            if (pending !== null && selection === pending.selection && selectionRevision > pending.revision) {
+                window.clearTimeout(pending.timeout);
+                pendingSelections[selectId] = null;
+            }
+            const renderedSelection = suppressedSelections[selectId]
+                ? 0
+                : (pendingSelections[selectId]?.selection ?? selection);
+            setRenderedSelection(select, renderedSelection);
             select.disabled = select.options.length <= 1;
         }
 
@@ -807,7 +874,7 @@
                 slider.step = "1";
                 slider.value = String(member.volume);
                 slider.dataset.renderedVolume = String(member.volume);
-                slider.setAttribute("aria-label", `Lautstärke ${member.name}`);
+                slider.setAttribute("aria-label", translate("Volume %s").replace("%s", () => member.name));
 
                 const value = document.createElement("output");
                 value.className = "group-volume-value";
@@ -897,8 +964,18 @@
             const repeat = ["off", "one", "all"].includes(data.repeat) ? data.repeat : "off";
             const showFavorite = data.showFavorite === true;
             const favorite = data.favorite === true;
+            const playlistSelection = Number.isInteger(data.playlistSelection) && data.playlistSelection > 0
+                ? data.playlistSelection
+                : 0;
+            const radioSelection = Number.isInteger(data.radioSelection) && data.radioSelection > 0
+                ? data.radioSelection
+                : 0;
+            const playlistSelectionRevision = Number.isInteger(data.playlistSelectionRevision)
+                && data.playlistSelectionRevision >= 0 ? data.playlistSelectionRevision : 0;
+            const radioSelectionRevision = Number.isInteger(data.radioSelectionRevision)
+                && data.radioSelectionRevision >= 0 ? data.radioSelectionRevision : 0;
 
-            document.getElementById("title").textContent = title || "Kein Titel";
+            document.getElementById("title").textContent = title || translate("No title");
             document.getElementById("artist").textContent = artist || "–";
             document.getElementById("status").textContent = statusLabels[status];
             document.getElementById("player").dataset.status = status;
@@ -907,7 +984,7 @@
             const isPlaying = status === "playing";
             toggleButton.querySelector(".icon-play").toggleAttribute("hidden", isPlaying);
             toggleButton.querySelector(".icon-pause").toggleAttribute("hidden", !isPlaying);
-            toggleButton.title = isPlaying ? "Pause" : "Wiedergabe";
+            toggleButton.title = isPlaying ? translate("Pause") : translate("Play");
             toggleButton.setAttribute("aria-label", toggleButton.title);
 
             const volumeElement = document.getElementById("volume");
@@ -936,7 +1013,7 @@
             const muteButton = document.getElementById("mute");
             muteButton.querySelector(".icon-unmuted").toggleAttribute("hidden", muted);
             muteButton.querySelector(".icon-muted").toggleAttribute("hidden", !muted);
-            muteButton.title = muted ? "Ton einschalten" : "Stumm";
+            muteButton.title = muted ? translate("Unmute") : translate("Mute");
             muteButton.setAttribute("aria-label", muteButton.title);
             muteButton.setAttribute("aria-pressed", String(muted));
 
@@ -944,7 +1021,11 @@
             shuffleButton.setAttribute("aria-pressed", String(shuffle));
 
             const repeatButton = document.getElementById("repeat");
-            const repeatLabels = {off: "Repeat aus", one: "Titel wiederholen", all: "Alle wiederholen"};
+            const repeatLabels = {
+                off: translate("Repeat off"),
+                one: translate("Repeat one"),
+                all: translate("Repeat all")
+            };
             repeatButton.dataset.repeat = repeat;
             repeatButton.title = repeatLabels[repeat];
             repeatButton.setAttribute("aria-label", repeatButton.title);
@@ -953,8 +1034,8 @@
             favoriteButton.hidden = !showFavorite;
             favoriteButton.setAttribute("aria-pressed", String(favorite));
 
-            renderOptions("playlist", data.playlists, "Playlist");
-            renderOptions("radio", data.radios, "Radio");
+            renderOptions("playlist", data.playlists, "Playlist", playlistSelection, playlistSelectionRevision);
+            renderOptions("radio", data.radios, "Radio", radioSelection, radioSelectionRevision);
             renderGroupMembers(data.groupMembers);
 
             const coverElement = document.getElementById("cover");
@@ -1084,16 +1165,16 @@
         document.getElementById("playlist").addEventListener("change", (event) => {
             const itemId = Number(event.target.value);
             if (Number.isInteger(itemId) && itemId > 0) {
+                beginPendingSelection("playlist", itemId);
                 requestAction("Playlist", itemId);
             }
-            event.target.value = "";
         });
         document.getElementById("radio").addEventListener("change", (event) => {
             const itemId = Number(event.target.value);
             if (Number.isInteger(itemId) && itemId > 0) {
+                beginPendingSelection("radio", itemId);
                 requestAction("Radio", itemId);
             }
-            event.target.value = "";
         });
 
         const themeObserver = new MutationObserver(detectSymconTheme);

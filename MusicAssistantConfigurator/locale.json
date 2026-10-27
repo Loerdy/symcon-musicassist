@@ -1,7 +1,20 @@
 {
-  "translations": {
-    "de": {
-      "MusicAssistant Configurator": "Music Assistant Konfigurator"
+    "translations": {
+        "de": {
+            "MusicAssistant Configurator": "Music Assistant Konfigurator",
+            "Load playlists (create/update profile)": "Playlists laden (Profil erstellen/aktualisieren)",
+            "Load radio stations (create/update profile)": "Radios laden (Profil erstellen/aktualisieren)",
+            "Player": "Player",
+            "Name": "Name",
+            "Player ID": "Player ID",
+            "Provider": "Provider",
+            "Available": "Verfügbar",
+            "Status": "Status",
+            "Yes": "Ja",
+            "No": "Nein",
+            "Existing": "Vorhanden",
+            "Not created": "Nicht angelegt",
+            "Please enter the Bearer token in the Music Assistant Connection instance.": "Bitte hinterlegen Sie den Bearer-Token in der Music Assistant Connection-Instanz."
+        }
     }
-  }
 }

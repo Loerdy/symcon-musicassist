@@ -5,12 +5,15 @@ class MusicAssistantPlayer extends IPSModule
 {
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
-    private const REPEAT_PROFILE  = 'MA.RepeatMode';
+    private const REPEAT_MODE_TO_VALUE = ['off' => 0, 'all' => 1, 'one' => 2];
+    private const REPEAT_VALUE_TO_MODE = [0 => 'off', 1 => 'all', 2 => 'one'];
     private const VOLUP_PROFILE   = 'MA.VolumeUp';
     private const VOLDOWN_PROFILE = 'MA.VolumeDown';
     private const FAVORITE_PROFILE = 'MA.Favorite';
     private const COVER_SEMAPHORE_TIMEOUT = 5000;
     private const GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT = 40000;
+    private const GROUP_MEMBER_REMOVAL_CONFIRMATION_DELAY = 1500;
+    private const GROUP_MEMBER_REMOVAL_CONFIRMATION_ATTEMPTS = 3;
     private const FAVORITE_SEMAPHORE_TIMEOUT = 20000;
     private const TILE_COVER_MAX_BYTES = 524288;
 
@@ -38,67 +41,145 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('RegisteredPlayerID', '');
-        $this->SetBuffer('GroupMemberVolumeRefreshRequest', '');
+        $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+        $this->SetBuffer('GroupMemberVolumeRefreshGeneration', '0');
+        $this->SetBuffer('RunningGroupMemberVolumeRefresh', '');
+        $this->SetBuffer('GroupMemberVolumeUpdateGeneration', '0');
+        $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
         $this->SetBuffer('KnownPlayerTypeID', '');
         $this->SetBuffer('KnownPlayerType', '');
         $this->SetBuffer('CurrentFavoriteTrack', '{}');
+        $this->SetBuffer('PendingFavoriteResolution', '{}');
+        $this->SetBuffer('FavoriteResolutionGeneration', '0');
+        $this->SetBuffer('RunningFavoriteResolution', '');
+        $this->SetBuffer('PendingCoverDownload', '{}');
+        $this->SetBuffer('CoverDownloadGeneration', '0');
+        $this->SetBuffer('RunningCoverDownload', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
+        $this->RegisterTimer('ResolveFavorite', 0, 'MASS_ProcessFavoriteResolution($_IPS["TARGET"]);');
+        $this->RegisterTimer('DownloadCover', 0, 'MASS_ProcessCoverDownload($_IPS["TARGET"]);');
+        $this->RegisterTimer('RefreshGroupMemberVolumes', 0, 'MASS_ProcessGroupMemberVolumeRefresh($_IPS["TARGET"]);');
     }
 
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+        $this->SetTimerInterval('ResolveFavorite', 0);
+        try {
+            $this->withFavoriteLock(function (): void {
+                $this->invalidatePendingFavoriteResolutionUnlocked();
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Ausstehende Auflösung konnte nicht verworfen werden: ' . $e->getMessage(), 0);
+        }
+        $this->SetTimerInterval('DownloadCover', 0);
+        try {
+            $this->withCoverLock(function (): void {
+                $this->invalidatePendingCoverDownloadUnlocked();
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Ausstehender Download konnte nicht verworfen werden: ' . $e->getMessage(), 0);
+        }
+        $this->SetTimerInterval('RefreshGroupMemberVolumes', 0);
+        try {
+            $this->withGroupMemberVolumeLock(function (): void {
+                $this->invalidatePendingGroupMemberVolumeRefreshUnlocked();
+                $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Ausstehende Aktualisierung konnte nicht verworfen werden: ' . $e->getMessage(), 0);
+        }
         $this->configureVisualizationType();
         $this->registerParentStatusMessage();
         $this->registerWithParent();
 
         // Auswahl-Variablen
-        if ($this->ensureIntegerSelectorVariable('Playlist', 'Playlist', $this->ReadPropertyString('PlaylistProfile'), 10)) {
+        if ($this->ensureIntegerSelectorVariable('Playlist', $this->Translate('Playlist'), $this->ReadPropertyString('PlaylistProfile'), 10)) {
             $vidPlaylist = @$this->GetIDForIdent('Playlist');
             IPS_SetIcon($vidPlaylist, 'list-music');
         }
-        if ($this->ensureIntegerSelectorVariable('Radio', 'Radio', $this->ReadPropertyString('RadioProfile'), 20)) {
+        if ($this->ensureIntegerSelectorVariable('Radio', $this->Translate('Radio'), $this->ReadPropertyString('RadioProfile'), 20)) {
             $vidRadio = @$this->GetIDForIdent('Radio');
             IPS_SetIcon($vidRadio, 'radio');
         }
+        $this->resetInvalidMediaSelection('Playlist', 'PlaylistMap', 'ResetPlaylist', true);
+        $this->resetInvalidMediaSelection('Radio', 'RadioMap', 'ResetRadio', false);
 
         // Transport
-        $this->MaintainVariable('Transport', 'Wiedergabe', VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
+        $this->MaintainVariable('Transport', $this->Translate('Playback'), VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
         $this->EnableAction('Transport');
 
         // Shuffle
-        $this->MaintainVariable('Shuffle', 'Shuffle', VARIABLETYPE_BOOLEAN, '~Shuffle', 40, true);
+        $this->MaintainVariable('Shuffle', $this->Translate('Shuffle'), VARIABLETYPE_BOOLEAN, '~Shuffle', 40, true);
         $this->EnableAction('Shuffle');
 
         // Repeat
-        $repeatProfileAvailable = $this->ensureRepeatProfile();
         $this->MaintainVariable(
             'Repeat',
-            'Repeat',
-            VARIABLETYPE_STRING,
-            $repeatProfileAvailable ? self::REPEAT_PROFILE : '',
+            $this->Translate('Repeat'),
+            VARIABLETYPE_INTEGER,
+            '~Repeat',
             50,
             true
         );
         $this->EnableAction('Repeat');
 
         // Mute
-        $this->MaintainVariable('Mute', 'Mute', VARIABLETYPE_BOOLEAN, '~Mute', 60, true);
+        $this->MaintainVariable(
+            'Mute',
+            $this->Translate('Mute'),
+            VARIABLETYPE_BOOLEAN,
+            [
+                'PRESENTATION'   => VARIABLE_PRESENTATION_SWITCH,
+                'USE_ICON_FALSE' => true,
+                'ICON_FALSE'     => 'volume',
+                'ICON_TRUE'      => 'volume-xmark',
+                'USAGE_TYPE'     => 1
+            ],
+            60,
+            true
+        );
         $this->EnableAction('Mute');
 
         // Volume
-        $this->MaintainVariable('VolumeLevel', 'Volume', VARIABLETYPE_INTEGER, '~Volume', 70, true);
+        $this->MaintainVariable(
+            'VolumeLevel',
+            $this->Translate('Volume'),
+            VARIABLETYPE_INTEGER,
+            [
+                'PRESENTATION' => VARIABLE_PRESENTATION_SLIDER,
+                'MIN'          => 0,
+                'MAX'          => 100,
+                'STEP_SIZE'    => 1,
+                'USAGE_TYPE'   => 3,
+                'PERCENTAGE'   => true
+            ],
+            70,
+            true
+        );
         $this->EnableAction('VolumeLevel');
 
         // Volume Buttons (Group Up/Down)
         $volumeButtonProfiles = $this->ensureVolumeButtonProfiles();
         $this->MaintainVariable(
             'VolumeUp',
-            'Volume +',
+            $this->Translate('Volume +'),
             VARIABLETYPE_INTEGER,
-            $volumeButtonProfiles[self::VOLUP_PROFILE] ? self::VOLUP_PROFILE : '',
+            [
+                'PRESENTATION' => VARIABLE_PRESENTATION_ENUMERATION,
+                'LAYOUT'       => 1,
+                'DISPLAY'      => 1,
+                'OPTIONS'      => json_encode([
+                    [
+                        'Value'      => 1,
+                        'Caption'    => $this->Translate('Up'),
+                        'IconActive' => true,
+                        'IconValue'  => 'angles-up'
+                    ]
+                ], JSON_THROW_ON_ERROR)
+            ],
             80,
             true
         );
@@ -106,26 +187,44 @@ class MusicAssistantPlayer extends IPSModule
 
         $this->MaintainVariable(
             'VolumeDown',
-            'Volume -',
+            $this->Translate('Volume -'),
             VARIABLETYPE_INTEGER,
-            $volumeButtonProfiles[self::VOLDOWN_PROFILE] ? self::VOLDOWN_PROFILE : '',
+            [
+                'PRESENTATION' => VARIABLE_PRESENTATION_ENUMERATION,
+                'LAYOUT'       => 1,
+                'DISPLAY'      => 1,
+                'OPTIONS'      => json_encode([
+                    [
+                        'Value'      => 1,
+                        'Caption'    => $this->Translate('Down'),
+                        'IconActive' => true,
+                        'IconValue'  => 'angles-down'
+                    ]
+                ], JSON_THROW_ON_ERROR)
+            ],
             90,
             true
         );
-        $volumeDownId = $this->GetIDForIdent('VolumeDown');
-        if (IPS_GetName($volumeDownId) === 'Volume') {
-            IPS_SetName($volumeDownId, 'Volume -');
-        }
         $this->EnableAction('VolumeDown');
 
         // Now Playing
-        $this->MaintainVariable('NowTitle',  'Titel',     VARIABLETYPE_STRING, '~Song',   110, true);
-        $this->MaintainVariable('NowArtist', 'Interpret', VARIABLETYPE_STRING, '~Artist', 120, true);
+        $this->MaintainVariable('NowTitle',  $this->Translate('Title'),  VARIABLETYPE_STRING, '~Song',   110, true);
+        $this->MaintainVariable('NowArtist', $this->Translate('Artist'), VARIABLETYPE_STRING, '~Artist', 120, true);
         $albumId = @$this->GetIDForIdent('NowAlbum');
         $hadAlbumVariable = $albumId > 0
             && IPS_VariableExists($albumId)
             && (IPS_GetVariable($albumId)['VariableType'] ?? -1) === VARIABLETYPE_STRING;
-        $this->MaintainVariable('NowAlbum',  'Album',     VARIABLETYPE_STRING, '',        130, true);
+        $this->MaintainVariable(
+            'NowAlbum',
+            $this->Translate('Album'),
+            VARIABLETYPE_STRING,
+            [
+                'PRESENTATION' => VARIABLE_PRESENTATION_VALUE_PRESENTATION,
+                'ICON'         => 'album'
+            ],
+            130,
+            true
+        );
         $vidAlbum = @$this->GetIDForIdent('NowAlbum');
         $albumCreated = !$hadAlbumVariable
             && $vidAlbum > 0
@@ -152,7 +251,7 @@ class MusicAssistantPlayer extends IPSModule
         } elseif ($showFavorite && $this->ensureFavoriteProfile()) {
             $favoritePresentation = self::FAVORITE_PROFILE;
         }
-        $this->MaintainVariable('Favorite', 'Favorit', VARIABLETYPE_BOOLEAN, $favoritePresentation, 140, $showFavorite);
+        $this->MaintainVariable('Favorite', $this->Translate('Favorite'), VARIABLETYPE_BOOLEAN, $favoritePresentation, 140, $showFavorite);
         if ($showFavorite) {
             $favoriteId = @$this->GetIDForIdent('Favorite');
             $favoriteCreated = !$hadFavoriteVariable
@@ -179,8 +278,9 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         // Repeat Initialwert
-        if (@$this->GetIDForIdent('Repeat') > 0 && (string)@$this->GetValue('Repeat') === '') {
-            $this->SetValue('Repeat', 'off');
+        if (@$this->GetIDForIdent('Repeat') > 0
+            && !array_key_exists((int)@$this->GetValue('Repeat'), self::REPEAT_VALUE_TO_MODE)) {
+            $this->SetValue('Repeat', 0);
         }
 
         // Konfig-Anzeige initial aktualisieren
@@ -206,25 +306,25 @@ class MusicAssistantPlayer extends IPSModule
         $showGroupMemberVolumes = $this->isConfiguredPlayerKnownGroup();
         $form = [
             'elements' => [
-                ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (änderbar)'],
-                ['type' => 'Label', 'caption' => 'Konfiguration (read-only):'],
+                ['type' => 'ValidationTextBox', 'name' => 'PlayerID', 'caption' => 'Player ID (editable)'],
+                ['type' => 'Label', 'caption' => 'Configuration (read-only):'],
                 // Inhalt wird per UpdateFormField("ConfigView","caption", ...) gesetzt
                 ['type' => 'Label', 'name' => 'ConfigView', 'caption' => ''],
-                ['type' => 'Button', 'caption' => 'Konfiguration aktualisieren', 'onClick' => 'IPS_RequestAction($id, "UpdateConfigView", true);'],
+                ['type' => 'Button', 'caption' => 'Update configuration', 'onClick' => 'IPS_RequestAction($id, "UpdateConfigView", true);'],
                 [
                     'type' => 'CheckBox',
                     'name' => 'ShowFavorite',
-                    'caption' => 'Favoritensteuerung für den aktuellen Titel anzeigen'
+                    'caption' => 'Show favorite control for the current track'
                 ],
                 [
                     'type' => 'CheckBox',
                     'name' => 'EnableCustomTile',
-                    'caption' => 'Eigene Player-Kachel in der Tile Visu anzeigen (ab IP-Symcon 7.1)'
+                    'caption' => 'Show custom player tile in the Tile Visualization (IP-Symcon 7.1 or newer)'
                 ],
                 [
                     'type' => 'CheckBox',
                     'name' => 'ShowGroupMemberVolumes',
-                    'caption' => 'Individuelle Lautstärkeregler für aktuelle Gruppenmitglieder anzeigen',
+                    'caption' => 'Show individual volume controls for current group members',
                     'visible' => $showGroupMemberVolumes
                 ]
             ]
@@ -274,7 +374,16 @@ class MusicAssistantPlayer extends IPSModule
                     try {
                         $this->updateFavoriteFromQueueItem($isIdle ? null : $data['current_item']);
                     } catch (Throwable $e) {
-                        $this->clearCurrentFavoriteTrack();
+                        try {
+                            $this->clearCurrentFavoriteTrack();
+                        } catch (Throwable $clearError) {
+                            $this->SendDebug(
+                                'Favorite',
+                                'Favoritenstatus konnte nach einem Fehler nicht zurückgesetzt werden: '
+                                    . $clearError->getMessage(),
+                                0
+                            );
+                        }
                         $this->SendDebug('Favorite', 'Titel konnte nicht aufgelöst werden: ' . $e->getMessage(), 0);
                     }
                 }
@@ -395,10 +504,12 @@ class MusicAssistantPlayer extends IPSModule
                         $this->PlayPlaylist($playlist);
                         $this->SetValue('Playlist', $itemId);
                         $this->SetTimerInterval('ResetPlaylist', 5000);
+                        $this->SetBuffer('PlaylistSelectionRevision', (string)((int)$this->GetBuffer('PlaylistSelectionRevision') + 1));
+                        $this->updateVisualization(true);
                     }
                 } catch (Throwable $e) {
                     $this->SendDebug('Playlist start failed', $e->getMessage(), 0);
-                    $this->LogMessage('Playlist start failed: ' . $e->getMessage(), KL_ERROR);
+                    $this->LogMessage(sprintf($this->Translate('Playlist start failed: %s'), $e->getMessage()), KL_ERROR);
                 }
                 break;
 
@@ -410,31 +521,56 @@ class MusicAssistantPlayer extends IPSModule
                         $this->PlayMediaUri($uri);
                         $this->SetValue('Radio', $itemId);
                         $this->SetTimerInterval('ResetRadio', 5000);
+                        $this->SetBuffer('RadioSelectionRevision', (string)((int)$this->GetBuffer('RadioSelectionRevision') + 1));
+                        $this->updateVisualization(true);
                     }
                 } catch (Throwable $e) {
                     $this->SendDebug('Radio start failed', $e->getMessage(), 0);
-                    $this->LogMessage('Radio start failed: ' . $e->getMessage(), KL_ERROR);
+                    $this->LogMessage(sprintf($this->Translate('Radio start failed: %s'), $e->getMessage()), KL_ERROR);
                 }
                 break;
 
             case 'Transport':
-                $this->ExecuteTransport((int)$Value);
-                $this->SetValue('Transport', (int)$Value);
+                try {
+                    $this->ExecuteTransport((int)$Value);
+                    $this->SetValue('Transport', (int)$Value);
+                } catch (Throwable $e) {
+                    $this->SendDebug('Transport failed', $e->getMessage(), 0);
+                    $this->LogMessage(sprintf($this->Translate('Transport failed: %s'), $e->getMessage()), KL_ERROR);
+                }
                 break;
 
             case 'Shuffle':
                 $enabled = (bool)$Value;
-                $this->SetShuffle($enabled);
-                $this->SetValue('Shuffle', $enabled);
+                try {
+                    $this->SetShuffle($enabled);
+                    $this->SetValue('Shuffle', $enabled);
+                } catch (Throwable $e) {
+                    $this->SendDebug('Shuffle failed', $e->getMessage(), 0);
+                    $this->LogMessage(sprintf($this->Translate('Shuffle failed: %s'), $e->getMessage()), KL_ERROR);
+                }
                 break;
 
             case 'Repeat':
-                $mode = strtolower(trim((string)$Value));
-                if (!in_array($mode, ['off', 'one', 'all'], true)) {
-                    $mode = 'off';
+                try {
+                    $mode = null;
+                    if (is_int($Value)) {
+                        $mode = self::REPEAT_VALUE_TO_MODE[$Value] ?? null;
+                    } elseif (is_string($Value)) {
+                        $normalizedMode = strtolower(trim($Value));
+                        if (array_key_exists($normalizedMode, self::REPEAT_MODE_TO_VALUE)) {
+                            $mode = $normalizedMode;
+                        }
+                    }
+                    if ($mode === null) {
+                        throw new InvalidArgumentException($this->Translate('Invalid repeat mode.'));
+                    }
+                    $this->SetRepeat($mode);
+                    $this->SetValue('Repeat', self::REPEAT_MODE_TO_VALUE[$mode]);
+                } catch (Throwable $e) {
+                    $this->SendDebug('Repeat failed', $e->getMessage(), 0);
+                    $this->LogMessage(sprintf($this->Translate('Repeat failed: %s'), $e->getMessage()), KL_ERROR);
                 }
-                $this->SetRepeat($mode);
-                $this->SetValue('Repeat', $mode);
                 break;
 
             case 'Mute':
@@ -444,7 +580,7 @@ class MusicAssistantPlayer extends IPSModule
                     $this->SetValue('Mute', $muted);
                 } catch (Throwable $e) {
                     $this->SendDebug('Mute failed', $e->getMessage(), 0);
-                    $this->LogMessage('Mute failed: ' . $e->getMessage(), KL_ERROR);
+                    $this->LogMessage(sprintf($this->Translate('Mute failed: %s'), $e->getMessage()), KL_ERROR);
                 }
                 break;
 
@@ -454,7 +590,7 @@ class MusicAssistantPlayer extends IPSModule
                     $this->updateVisualization();
                 } catch (Throwable $e) {
                     $this->SendDebug('Favorite failed', $e->getMessage(), 0);
-                    $this->LogMessage('Favorite failed: ' . $e->getMessage(), KL_ERROR);
+                    $this->LogMessage(sprintf($this->Translate('Favorite failed: %s'), $e->getMessage()), KL_ERROR);
                 }
                 break;
 
@@ -464,7 +600,7 @@ class MusicAssistantPlayer extends IPSModule
                     $this->SetVolumeLevel($level);
                 } catch (Throwable $e) {
                     $this->SendDebug('VolumeSet failed', $e->getMessage(), 0);
-                    $this->LogMessage('VolumeSet failed: ' . $e->getMessage(), KL_ERROR);
+                    $this->LogMessage(sprintf($this->Translate('Setting volume failed: %s'), $e->getMessage()), KL_ERROR);
                 }
                 break;
 
@@ -491,7 +627,7 @@ class MusicAssistantPlayer extends IPSModule
                 break;
 
             default:
-                throw new Exception('Unknown action: ' . $Ident);
+                throw new Exception(sprintf($this->Translate('Unknown action: %s'), $Ident));
         }
     }
 
@@ -500,6 +636,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetTimerInterval('ResetPlaylist', 0);
         if (@$this->GetIDForIdent('Playlist') > 0) {
             $this->SetValue('Playlist', 0);
+            $this->updateVisualization();
         }
     }
 
@@ -508,6 +645,391 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetTimerInterval('ResetRadio', 0);
         if (@$this->GetIDForIdent('Radio') > 0) {
             $this->SetValue('Radio', 0);
+            $this->updateVisualization();
+        }
+    }
+
+    public function ProcessFavoriteResolution(): void
+    {
+        $this->SetTimerInterval('ResolveFavorite', 0);
+
+        try {
+            $job = $this->withFavoriteLock(function (): ?array {
+                if ($this->GetBuffer('RunningFavoriteResolution') !== '') {
+                    return null;
+                }
+                $pending = $this->readPendingFavoriteResolution();
+                if ($pending === null) {
+                    return null;
+                }
+                $this->SetBuffer('RunningFavoriteResolution', (string)$pending['generation']);
+                return $pending;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Auflösungsauftrag konnte nicht gestartet werden: ' . $e->getMessage(), 0);
+            return;
+        }
+        if ($job === null) {
+            return;
+        }
+
+        $updateVisualization = false;
+        try {
+            if ($this->GetStatus() !== IS_ACTIVE
+                || !$this->ReadPropertyBoolean('ShowFavorite')
+                || !$this->HasActiveParent()
+                || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']) {
+                return;
+            }
+
+            $resolvedState = $this->resolveFavoriteLibraryState($job['state']);
+            $updateVisualization = $this->withFavoriteLock(function () use ($job, $resolvedState): bool {
+                $pending = $this->readPendingFavoriteResolution();
+                $currentState = $this->readCurrentFavoriteTrack();
+                if ($pending === null
+                    || $pending['player_id'] !== $job['player_id']
+                    || $pending['generation'] !== $job['generation']
+                    || $this->GetStatus() !== IS_ACTIVE
+                    || !$this->ReadPropertyBoolean('ShowFavorite')
+                    || !$this->HasActiveParent()
+                    || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']
+                    || !$this->favoriteStatesIdentifySameTrack($currentState, $job['state'])) {
+                    return false;
+                }
+                $this->SetBuffer('PendingFavoriteResolution', '{}');
+                $this->writeCurrentFavoriteTrack($resolvedState);
+                $this->updateFavoriteValue($resolvedState['favorite']);
+                return true;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Library-Track konnte nicht aufgelöst werden: ' . $e->getMessage(), 0);
+        } finally {
+            try {
+                $restart = $this->withFavoriteLock(function () use ($job): bool {
+                    $pending = $this->readPendingFavoriteResolution();
+                    if ($pending !== null && $pending['generation'] === $job['generation']) {
+                        $this->SetBuffer('PendingFavoriteResolution', '{}');
+                        $pending = null;
+                    }
+                    if ($this->GetBuffer('RunningFavoriteResolution') === (string)$job['generation']) {
+                        $this->SetBuffer('RunningFavoriteResolution', '');
+                    }
+                    return $pending !== null;
+                });
+                if ($restart) {
+                    $this->SetTimerInterval('ResolveFavorite', 100);
+                }
+            } catch (Throwable $e) {
+                $this->SendDebug('Favorite', 'Auflösungsauftrag konnte nicht abgeschlossen werden: ' . $e->getMessage(), 0);
+            }
+        }
+
+        if ($updateVisualization) {
+            $this->updateVisualization();
+        }
+    }
+
+    public function ProcessCoverDownload(): void
+    {
+        $this->SetTimerInterval('DownloadCover', 0);
+
+        try {
+            $job = $this->withCoverLock(function (): ?array {
+                if ($this->GetBuffer('RunningCoverDownload') !== '') {
+                    return null;
+                }
+                $pending = $this->readPendingCoverDownload();
+                if ($pending === null
+                    || $this->ReadAttributeString('CoverTargetProxyID') !== $pending['proxy_id']) {
+                    return null;
+                }
+                $this->SetBuffer('RunningCoverDownload', (string)$pending['generation']);
+                return $pending;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Cover-Download konnte nicht gestartet werden: ' . $e->getMessage(), 0);
+            return;
+        }
+        if ($job === null) {
+            return;
+        }
+
+        $updateVisualization = false;
+        try {
+            if ($this->GetStatus() !== IS_ACTIVE
+                || !$this->HasActiveParent()
+                || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']) {
+                return;
+            }
+
+            $response = $this->requestArtwork($job['proxy_id']);
+            $content = $response['content'] ?? null;
+            $contentType = $response['content_type'] ?? null;
+            if (($response['proxy_id'] ?? null) !== $job['proxy_id']
+                || !in_array($contentType, ['image/jpeg', 'image/png'], true)
+                || !is_string($content)) {
+                throw new Exception($this->Translate('Artwork response is invalid.'));
+            }
+            $binary = base64_decode($content, true);
+            $validSignature = is_string($binary) && $binary !== '' && ($contentType === 'image/jpeg'
+                ? substr($binary, 0, 3) === "\xFF\xD8\xFF"
+                : substr($binary, 0, 8) === "\x89PNG\r\n\x1A\n");
+            if (!$validSignature) {
+                throw new Exception($this->Translate('Artwork signature does not match the content type.'));
+            }
+
+            $updateVisualization = $this->withCoverLock(function () use ($job, $content, $contentType): bool {
+                $pending = $this->readPendingCoverDownload();
+                if ($pending === null
+                    || $pending['generation'] !== $job['generation']
+                    || $pending['player_id'] !== $job['player_id']
+                    || $pending['proxy_id'] !== $job['proxy_id']
+                    || $this->GetStatus() !== IS_ACTIVE
+                    || !$this->HasActiveParent()
+                    || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']
+                    || $this->ReadAttributeString('CoverTargetProxyID') !== $job['proxy_id']) {
+                    return false;
+                }
+                $mediaId = $this->ensureCoverMedia();
+                if ($mediaId <= 0) {
+                    throw new Exception($this->Translate('Cover media is not available.'));
+                }
+                $this->ensureCoverMediaFormat($mediaId, $contentType);
+                if (!IPS_SetMediaContent($mediaId, $content)) {
+                    throw new Exception($this->Translate('Cover media could not be updated.'));
+                }
+                if (!$this->WriteAttributeString('CoverProxyID', $job['proxy_id'])) {
+                    throw new Exception($this->Translate('Cover cache could not be saved.'));
+                }
+                if (!$this->WriteAttributeBoolean('CoverIsDefault', false)) {
+                    throw new Exception($this->Translate('Cover status could not be saved.'));
+                }
+                $this->updateCoverVisibilityFromQueueState($job['state'], true);
+                $this->SetBuffer('PendingCoverDownload', '{}');
+                return true;
+            });
+            if ($updateVisualization) {
+                $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
+            }
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Cover konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
+        } finally {
+            try {
+                $restart = $this->withCoverLock(function () use ($job): bool {
+                    $pending = $this->readPendingCoverDownload();
+                    if ($pending !== null && $pending['generation'] === $job['generation']) {
+                        $this->SetBuffer('PendingCoverDownload', '{}');
+                        $pending = null;
+                    }
+                    if ($this->GetBuffer('RunningCoverDownload') === (string)$job['generation']) {
+                        $this->SetBuffer('RunningCoverDownload', '');
+                    }
+                    return $pending !== null;
+                });
+                if ($restart) {
+                    $this->SetTimerInterval('DownloadCover', 100);
+                }
+            } catch (Throwable $e) {
+                $this->SendDebug('Artwork', 'Cover-Download konnte nicht abgeschlossen werden: ' . $e->getMessage(), 0);
+            }
+        }
+
+        if ($updateVisualization) {
+            $this->updateVisualization();
+        }
+    }
+
+    public function ProcessGroupMemberVolumeRefresh(): void
+    {
+        $this->SetTimerInterval('RefreshGroupMemberVolumes', 0);
+
+        try {
+            $job = $this->withGroupMemberVolumeLock(function (): ?array {
+                if ($this->GetBuffer('RunningGroupMemberVolumeRefresh') !== '') {
+                    return null;
+                }
+                $pending = $this->readPendingGroupMemberVolumeRefresh();
+                if ($pending === null) {
+                    return null;
+                }
+                $this->SetBuffer('RunningGroupMemberVolumeRefresh', (string)$pending['generation']);
+                return $pending;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Aktualisierung konnte nicht gestartet werden: ' . $e->getMessage(), 0);
+            return;
+        }
+        if ($job === null) {
+            return;
+        }
+
+        $updated = false;
+        $httpSnapshotLoaded = false;
+        try {
+            if ($this->GetStatus() !== IS_ACTIVE
+                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
+                || !$this->HasActiveParent()
+                || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']) {
+                return;
+            }
+
+            $players = $this->sendApiRequest('players/all', [
+                'return_unavailable' => true,
+                'return_disabled' => true
+            ]);
+            if (!is_array($players) || !$this->isList($players)) {
+                throw new UnexpectedValueException($this->Translate('players/all did not return a complete player list.'));
+            }
+            $playersById = [];
+            foreach ($players as $player) {
+                if (!is_array($player) || !is_string($player['player_id'] ?? null)
+                    || trim($player['player_id']) === '') {
+                    continue;
+                }
+                $playersById[$this->groupMemberPlayerKey(trim($player['player_id']))] = $player;
+            }
+            $groupKey = $this->groupMemberPlayerKey($job['player_id']);
+            $snapshotGroup = $playersById[$groupKey] ?? null;
+            $snapshotHasMembers = is_array($snapshotGroup) && array_key_exists('group_members', $snapshotGroup);
+            $snapshotMemberIdsValid = $snapshotHasMembers
+                && $this->validateGroupMemberIds($snapshotGroup['group_members'], $job['player_id']) !== null;
+            $httpSnapshotLoaded = $job['confirmation_member_ids'] === null
+                || (is_array($snapshotGroup)
+                    && is_string($snapshotGroup['type'] ?? null)
+                    && ($snapshotGroup['type'] !== 'group' || $snapshotMemberIdsValid));
+
+            $updated = $this->withGroupMemberVolumeLock(function () use ($job, $playersById): bool {
+                $pending = $this->readPendingGroupMemberVolumeRefresh();
+                if ($pending === null
+                    || $pending['generation'] !== $job['generation']
+                    || $pending['player_id'] !== $job['player_id']
+                    || $pending['member_ids'] !== $job['member_ids']
+                    || $this->GetStatus() !== IS_ACTIVE
+                    || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
+                    || !$this->HasActiveParent()
+                    || trim($this->ReadPropertyString('PlayerID')) !== $job['player_id']) {
+                    return false;
+                }
+
+                if ($job['member_ids'] === null) {
+                    $groupKey = $this->groupMemberPlayerKey($job['player_id']);
+                    if (!isset($playersById[$groupKey])) {
+                        throw new UnexpectedValueException($this->Translate('The configured player is missing from players/all.'));
+                    }
+                    $group = $playersById[$groupKey];
+                    if (!is_string($group['type'] ?? null)) {
+                        throw new UnexpectedValueException($this->Translate('The group snapshot does not contain a valid player type.'));
+                    }
+                    if ($group['type'] !== 'group') {
+                        $changed = $this->removeGroupMemberVolumeVariablesUnlocked();
+                        $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+                        $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
+                        return $changed;
+                    }
+                    if (!array_key_exists('group_members', $group)) {
+                        throw new UnexpectedValueException($this->Translate('The group snapshot does not contain a complete member list.'));
+                    }
+                    $memberIds = $this->validateGroupMemberIds($group['group_members'], $job['player_id']);
+                    if ($memberIds === null) {
+                        throw new UnexpectedValueException($this->Translate('The group snapshot contains invalid member IDs.'));
+                    }
+                } else {
+                    $memberIds = $job['member_ids'];
+                }
+
+                $volumeUpdates = $this->readGroupMemberVolumeUpdates();
+                $members = [];
+                foreach ($memberIds as $memberId) {
+                    $memberKey = $this->groupMemberPlayerKey($memberId);
+                    if (!isset($playersById[$memberKey])) {
+                        throw new UnexpectedValueException($this->Translate('A group member is missing from players/all.'));
+                    }
+                    $member = $playersById[$memberKey];
+                    $name = is_string($member['name'] ?? null) ? trim($member['name']) : '';
+                    $volume = $member['volume_level'] ?? null;
+                    if (isset($volumeUpdates[$memberKey])
+                        && $volumeUpdates[$memberKey]['generation'] > $job['volume_generation']) {
+                        $volume = $volumeUpdates[$memberKey]['volume_level'];
+                    }
+                    if ($name === '' || ($volume !== null && (!is_int($volume) || $volume < 0 || $volume > 100))) {
+                        throw new UnexpectedValueException($this->Translate('A group member contains incomplete player data.'));
+                    }
+                    $members[] = [
+                        'player_id' => $memberId,
+                        'name' => $name,
+                        'volume_level' => $volume
+                    ];
+                }
+                $existingMap = $this->readGroupMemberVolumeMap();
+                $existingMemberIds = is_array($existingMap) ? array_column($existingMap, 'player_id') : [];
+                $desiredMemberIds = array_column($members, 'player_id');
+                $normalizedDesiredMemberIds = $desiredMemberIds;
+                sort($normalizedDesiredMemberIds);
+                $removedMemberIds = array_values(array_diff($existingMemberIds, $desiredMemberIds));
+                if (count($removedMemberIds) > 0
+                    && $job['confirmation_member_ids'] !== $normalizedDesiredMemberIds) {
+                    $this->queueGroupMemberVolumeRefreshUnlocked(null, true, $normalizedDesiredMemberIds, 1);
+                    return false;
+                }
+                $this->reconcileGroupMemberVolumeVariables($members);
+                $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+                $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
+                return true;
+            });
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Aktualisierung fehlgeschlagen: ' . $e->getMessage(), 0);
+            if (!$httpSnapshotLoaded
+                && $job['confirmation_member_ids'] !== null
+                && $job['confirmation_attempt'] < self::GROUP_MEMBER_REMOVAL_CONFIRMATION_ATTEMPTS) {
+                try {
+                    $this->withGroupMemberVolumeLock(function () use ($job): bool {
+                        $pending = $this->readPendingGroupMemberVolumeRefresh();
+                        if ($pending === null || $pending['generation'] !== $job['generation']) {
+                            return false;
+                        }
+                        return $this->queueGroupMemberVolumeRefreshUnlocked(
+                            null,
+                            true,
+                            $job['confirmation_member_ids'],
+                            $job['confirmation_attempt'] + 1
+                        );
+                    });
+                } catch (Throwable $retryError) {
+                    $this->SendDebug(
+                        'Group member volumes',
+                        'Bestätigung konnte nicht erneut geplant werden: ' . $retryError->getMessage(),
+                        0
+                    );
+                }
+            }
+        } finally {
+            try {
+                $restartDelay = $this->withGroupMemberVolumeLock(function () use ($job): int {
+                    $pending = $this->readPendingGroupMemberVolumeRefresh();
+                    if ($pending !== null && $pending['generation'] === $job['generation']) {
+                        $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+                        $pending = null;
+                    }
+                    if ($this->GetBuffer('RunningGroupMemberVolumeRefresh') === (string)$job['generation']) {
+                        $this->SetBuffer('RunningGroupMemberVolumeRefresh', '');
+                    }
+                    if ($pending === null) {
+                        return 0;
+                    }
+                    return $pending['confirmation_member_ids'] === null
+                        ? 100
+                        : self::GROUP_MEMBER_REMOVAL_CONFIRMATION_DELAY;
+                });
+                if ($restartDelay > 0) {
+                    $this->SetTimerInterval('RefreshGroupMemberVolumes', $restartDelay);
+                }
+            } catch (Throwable $e) {
+                $this->SendDebug('Group member volumes', 'Aktualisierung konnte nicht abgeschlossen werden: ' . $e->getMessage(), 0);
+            }
+        }
+
+        if ($updated) {
+            $this->updateVisualization();
         }
     }
 
@@ -524,7 +1046,7 @@ class MusicAssistantPlayer extends IPSModule
 
         // Label Caption ist oft in der Länge begrenzt -> notfalls kürzen
         if (strlen($text) > 1800) {
-            $text = substr($text, 0, 1800) . "\n... (gekürzt)";
+            $text = substr($text, 0, 1800) . "\n" . $this->Translate('... (truncated)');
         }
 
         $this->UpdateFormField('ConfigView', 'caption', $text);
@@ -564,7 +1086,7 @@ class MusicAssistantPlayer extends IPSModule
                 return null;
             }
             if (!is_int($value) || $value < 0 || $value > 100) {
-                throw new InvalidArgumentException('Group member volume must be between 0 and 100.');
+                throw new InvalidArgumentException($this->Translate('Group member volume must be between 0 and 100.'));
             }
             return $map[$ident]['player_id'];
         });
@@ -597,23 +1119,28 @@ class MusicAssistantPlayer extends IPSModule
                 return;
             }
             sort($memberIds);
-            $requestId = bin2hex(random_bytes(16));
-            $refreshRequired = $this->withGroupMemberVolumeLock(function () use (
-                $requestId,
-                $memberIds,
-                $isResync
-            ): bool {
-                $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
+            $schedule = $this->withGroupMemberVolumeLock(function () use ($memberIds, $isResync): bool {
                 $map = $this->readGroupMemberVolumeMap();
                 if ($map === null) {
                     return false;
                 }
                 $knownMemberIds = array_column($map, 'player_id');
                 sort($knownMemberIds);
-                return $isResync || $knownMemberIds !== $memberIds;
+                $pending = $this->readPendingGroupMemberVolumeRefresh();
+                if ($pending !== null && $pending['confirmation_member_ids'] === $memberIds) {
+                    return false;
+                }
+                if (!$isResync && $knownMemberIds === $memberIds) {
+                    if ($pending !== null && ($pending['confirmation_member_ids'] !== null
+                        || ($pending['member_ids'] !== null && $pending['member_ids'] !== $memberIds))) {
+                        $this->invalidatePendingGroupMemberVolumeRefreshUnlocked();
+                    }
+                    return false;
+                }
+                return $this->queueGroupMemberVolumeRefreshUnlocked($memberIds, $isResync);
             });
-            if ($refreshRequired) {
-                $this->refreshGroupMemberVolumes($memberIds, $isResync, $requestId);
+            if ($schedule) {
+                $this->SetTimerInterval('RefreshGroupMemberVolumes', 100);
             }
             return;
         }
@@ -623,19 +1150,29 @@ class MusicAssistantPlayer extends IPSModule
             if ($map === null) {
                 return false;
             }
+            $volume = $data['volume_level'] ?? null;
+            if (!is_int($volume) || $volume < 0 || $volume > 100) {
+                return false;
+            }
+            $pending = $this->readPendingGroupMemberVolumeRefresh();
+            $isPendingMember = $pending !== null
+                && ($pending['member_ids'] === null || in_array($objectId, $pending['member_ids'], true));
             foreach ($map as $ident => $entry) {
                 if ($entry['player_id'] !== $objectId) {
                     continue;
                 }
+                $this->recordGroupMemberVolumeUpdateUnlocked($objectId, $volume);
                 $variableId = @$this->GetIDForIdent($ident);
-                $volume = $data['volume_level'] ?? null;
                 if ($variableId !== $entry['variable_id'] || !IPS_VariableExists($variableId)
                     || (IPS_GetVariable($variableId)['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER
-                    || !is_int($volume) || $volume < 0 || $volume > 100) {
+                ) {
                     return false;
                 }
                 $this->SetValue($ident, $volume);
                 return true;
+            }
+            if ($isPendingMember) {
+                $this->recordGroupMemberVolumeUpdateUnlocked($objectId, $volume);
             }
             return false;
         });
@@ -644,129 +1181,171 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    private function refreshGroupMemberVolumes(
-        ?array $confirmedMemberIds = null,
-        bool $forceRefresh = false,
-        ?string $requestId = null
-    ): void
+    private function refreshGroupMemberVolumes(): void
     {
         $groupPlayerId = trim($this->ReadPropertyString('PlayerID'));
-        if ($groupPlayerId === '' || !$this->HasActiveParent()) {
+        if ($groupPlayerId === '' || $this->GetStatus() !== IS_ACTIVE || !$this->HasActiveParent()) {
             return;
         }
-        if ($requestId === null) {
-            $requestId = bin2hex(random_bytes(16));
-            $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
-        }
-        $proceed = $this->withGroupMemberVolumeLock(function () use (
-            $groupPlayerId,
-            $confirmedMemberIds,
-            $forceRefresh,
-            $requestId
-        ): bool {
-            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
-                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
-                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
-                || !$this->HasActiveParent()) {
+        $schedule = $this->withGroupMemberVolumeLock(function (): bool {
+            if (!$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
                 return false;
             }
-            if ($confirmedMemberIds !== null && !$forceRefresh) {
-                $map = $this->readGroupMemberVolumeMap();
-                if ($map === null) {
-                    return false;
-                }
-                $knownMemberIds = array_column($map, 'player_id');
-                sort($knownMemberIds);
-                $currentMemberIds = $confirmedMemberIds;
-                sort($currentMemberIds);
-                if ($knownMemberIds === $currentMemberIds) {
-                    return false;
-                }
-            }
-            return true;
+            return $this->queueGroupMemberVolumeRefreshUnlocked(null, true);
         });
-        if (!$proceed) {
-            return;
+        if ($schedule) {
+            $this->SetTimerInterval('RefreshGroupMemberVolumes', 100);
+        }
+    }
+
+    private function queueGroupMemberVolumeRefreshUnlocked(
+        ?array $memberIds,
+        bool $forceRefresh,
+        ?array $confirmationMemberIds = null,
+        int $confirmationAttempt = 0
+    ): bool
+    {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if ($playerId === '') {
+            return false;
+        }
+        if ($memberIds !== null) {
+            sort($memberIds);
+        }
+        if ($confirmationMemberIds !== null) {
+            sort($confirmationMemberIds);
+        }
+        $pending = $this->readPendingGroupMemberVolumeRefresh();
+        if ($pending !== null
+            && $pending['player_id'] === $playerId
+            && $pending['member_ids'] === $memberIds
+            && $pending['confirmation_member_ids'] === $confirmationMemberIds
+            && $pending['confirmation_attempt'] === $confirmationAttempt
+            && ($pending['force_refresh'] || !$forceRefresh)) {
+            return $this->GetBuffer('RunningGroupMemberVolumeRefresh') !== (string)$pending['generation'];
         }
 
-        $players = $this->sendApiRequest('players/all', [
-            'return_unavailable' => true,
-            'return_disabled' => true
-        ]);
-        if (!is_array($players) || !$this->isList($players)) {
-            throw new UnexpectedValueException('players/all lieferte keine vollständige Playerliste.');
+        $generation = $this->nextGroupMemberVolumeRefreshGenerationUnlocked();
+        $this->SetBuffer('PendingGroupMemberVolumeRefresh', json_encode([
+            'generation'        => $generation,
+            'player_id'         => $playerId,
+            'member_ids'        => $memberIds,
+            'force_refresh'     => $forceRefresh,
+            'confirmation_member_ids' => $confirmationMemberIds,
+            'confirmation_attempt' => $confirmationAttempt,
+            'volume_generation' => (int)$this->GetBuffer('GroupMemberVolumeUpdateGeneration')
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        return true;
+    }
+
+    private function readPendingGroupMemberVolumeRefresh(): ?array
+    {
+        try {
+            $pending = json_decode(
+                trim($this->GetBuffer('PendingGroupMemberVolumeRefresh')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Aktualisierungsauftrag enthält ungültiges JSON', 0);
+            return null;
         }
-
-        $playersById = [];
-        foreach ($players as $player) {
-            if (!is_array($player) || !is_string($player['player_id'] ?? null)
-                || trim($player['player_id']) === '') {
-                continue;
-            }
-            $playersById[trim($player['player_id'])] = $player;
+        if (!is_array($pending) || count($pending) === 0) {
+            return null;
         }
-
-        $updated = $this->withGroupMemberVolumeLock(function () use (
-            $groupPlayerId,
-            $confirmedMemberIds,
-            $requestId,
-            $playersById
-        ): bool {
-            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
-                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
-                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
-                || !$this->HasActiveParent()) {
-                return false;
-            }
-
-            if ($confirmedMemberIds === null) {
-                if (!isset($playersById[$groupPlayerId])) {
-                    throw new UnexpectedValueException('Der konfigurierte Player fehlt in players/all.');
-                }
-                $group = $playersById[$groupPlayerId];
-                if (($group['type'] ?? null) !== 'group') {
-                    return $this->removeGroupMemberVolumeVariablesUnlocked();
-                }
-                if (!array_key_exists('group_members', $group)) {
-                    throw new UnexpectedValueException('Der Gruppensnapshot enthält keine vollständige Mitgliederliste.');
-                }
-                $memberIds = $this->validateGroupMemberIds($group['group_members'], $groupPlayerId);
-                if ($memberIds === null) {
-                    throw new UnexpectedValueException('Der Gruppensnapshot enthält ungültige Mitglieder-IDs.');
-                }
-            } else {
-                $memberIds = $confirmedMemberIds;
-            }
-
-            $members = [];
-            foreach ($memberIds as $memberId) {
-                if (!isset($playersById[$memberId])) {
-                    throw new UnexpectedValueException('Ein Gruppenmitglied fehlt in players/all.');
-                }
-                $member = $playersById[$memberId];
-                $name = is_string($member['name'] ?? null) ? trim($member['name']) : '';
-                $volume = $member['volume_level'] ?? null;
-                if ($name === '' || ($volume !== null && (!is_int($volume) || $volume < 0 || $volume > 100))) {
-                    throw new UnexpectedValueException('Ein Gruppenmitglied enthält unvollständige Playerdaten.');
-                }
-                $members[] = [
-                    'player_id' => $memberId,
-                    'name' => $name,
-                    'volume_level' => $volume
-                ];
-            }
-            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId
-                || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')
-                || trim($this->ReadPropertyString('PlayerID')) !== $groupPlayerId
-                || !$this->HasActiveParent()) {
-                return false;
-            }
-            $this->reconcileGroupMemberVolumeVariables($members);
-            return true;
-        });
-        if ($updated) {
-            $this->updateVisualization();
+        $memberIds = $pending['member_ids'] ?? null;
+        $confirmationMemberIds = $pending['confirmation_member_ids'] ?? null;
+        $confirmationAttempt = $pending['confirmation_attempt'] ?? 0;
+        if (!is_int($pending['generation'] ?? null)
+            || $pending['generation'] <= 0
+            || !is_string($pending['player_id'] ?? null)
+            || trim($pending['player_id']) === ''
+            || ($memberIds !== null && $this->validateGroupMemberIds($memberIds, $pending['player_id']) === null)
+            || ($confirmationMemberIds !== null
+                && $this->validateGroupMemberIds($confirmationMemberIds, $pending['player_id']) === null)
+            || ($confirmationMemberIds !== null && $memberIds !== null)
+            || !is_int($confirmationAttempt)
+            || ($confirmationMemberIds === null && $confirmationAttempt !== 0)
+            || ($confirmationMemberIds !== null
+                && ($confirmationAttempt < 1
+                    || $confirmationAttempt > self::GROUP_MEMBER_REMOVAL_CONFIRMATION_ATTEMPTS))
+            || !is_bool($pending['force_refresh'] ?? null)
+            || !is_int($pending['volume_generation'] ?? null)
+            || $pending['volume_generation'] < 0) {
+            $this->SendDebug('Group member volumes', 'Aktualisierungsauftrag hat eine ungültige Struktur', 0);
+            return null;
         }
+        if ($memberIds !== null) {
+            sort($memberIds);
+        }
+        if ($confirmationMemberIds !== null) {
+            sort($confirmationMemberIds);
+        }
+        return [
+            'generation'        => $pending['generation'],
+            'player_id'         => trim($pending['player_id']),
+            'member_ids'        => $memberIds,
+            'force_refresh'     => $pending['force_refresh'],
+            'confirmation_member_ids' => $confirmationMemberIds,
+            'confirmation_attempt' => $confirmationAttempt,
+            'volume_generation' => $pending['volume_generation']
+        ];
+    }
+
+    private function nextGroupMemberVolumeRefreshGenerationUnlocked(): int
+    {
+        $generation = (int)$this->GetBuffer('GroupMemberVolumeRefreshGeneration') + 1;
+        $this->SetBuffer('GroupMemberVolumeRefreshGeneration', (string)$generation);
+        return $generation;
+    }
+
+    private function invalidatePendingGroupMemberVolumeRefreshUnlocked(): void
+    {
+        $this->nextGroupMemberVolumeRefreshGenerationUnlocked();
+        $this->SetBuffer('PendingGroupMemberVolumeRefresh', '{}');
+    }
+
+    private function recordGroupMemberVolumeUpdateUnlocked(string $playerId, int $volume): void
+    {
+        $generation = (int)$this->GetBuffer('GroupMemberVolumeUpdateGeneration') + 1;
+        $this->SetBuffer('GroupMemberVolumeUpdateGeneration', (string)$generation);
+        $updates = $this->readGroupMemberVolumeUpdates();
+        $updates[$this->groupMemberPlayerKey($playerId)] = [
+            'player_id'     => $playerId,
+            'generation'   => $generation,
+            'volume_level' => $volume
+        ];
+        $this->SetBuffer('GroupMemberVolumeUpdates', json_encode($updates, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+    }
+
+    private function readGroupMemberVolumeUpdates(): array
+    {
+        try {
+            $updates = json_decode(
+                trim($this->GetBuffer('GroupMemberVolumeUpdates')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Group member volumes', 'Lautstärkeaktualisierungen enthalten ungültiges JSON', 0);
+            return [];
+        }
+        if (!is_array($updates)) {
+            return [];
+        }
+        foreach ($updates as $playerKey => $update) {
+            if (!is_string($playerKey) || !is_array($update)
+                || !is_string($update['player_id'] ?? null) || trim($update['player_id']) === ''
+                || $playerKey !== $this->groupMemberPlayerKey(trim($update['player_id']))
+                || !is_int($update['generation'] ?? null) || $update['generation'] <= 0
+                || !is_int($update['volume_level'] ?? null)
+                || $update['volume_level'] < 0 || $update['volume_level'] > 100) {
+                unset($updates[$playerKey]);
+            }
+        }
+        return $updates;
     }
 
     private function validateGroupMemberIds($value, string $groupPlayerId): ?array
@@ -775,23 +1354,26 @@ class MusicAssistantPlayer extends IPSModule
             return null;
         }
         $memberIds = [];
+        $memberKeys = [];
         foreach ($value as $memberId) {
             if (!is_string($memberId) || trim($memberId) === '') {
                 return null;
             }
             $memberId = trim($memberId);
-            if ($memberId !== $groupPlayerId) {
-                $memberIds[$memberId] = true;
+            $memberKey = $this->groupMemberPlayerKey($memberId);
+            if ($memberId !== $groupPlayerId && !isset($memberKeys[$memberKey])) {
+                $memberIds[] = $memberId;
+                $memberKeys[$memberKey] = true;
             }
         }
-        return array_keys($memberIds);
+        return $memberIds;
     }
 
     private function reconcileGroupMemberVolumeVariables(array $members): void
     {
         $existingMap = $this->readGroupMemberVolumeMap();
         if ($existingMap === null) {
-            throw new UnexpectedValueException('Die Zuordnung der Gruppenlautstärken ist ungültig.');
+            throw new UnexpectedValueException($this->Translate('The group volume mapping is invalid.'));
         }
 
         $desired = [];
@@ -799,15 +1381,15 @@ class MusicAssistantPlayer extends IPSModule
             $ident = $this->groupMemberVolumeIdent($member['player_id']);
             if (isset($desired[$ident])
                 || (isset($existingMap[$ident]) && $existingMap[$ident]['player_id'] !== $member['player_id'])) {
-                throw new UnexpectedValueException('Kollision bei der Variablenzuordnung für Gruppenmitglieder.');
+                throw new UnexpectedValueException($this->Translate('Collision in the variable mapping for group members.'));
             }
             $objectId = @$this->GetIDForIdent($ident);
             if (isset($existingMap[$ident]) && $objectId > 0
                 && $objectId !== $existingMap[$ident]['variable_id']) {
-                throw new UnexpectedValueException('Der Ident eines Gruppenlautstärkereglers wurde anderweitig belegt.');
+                throw new UnexpectedValueException($this->Translate('The ident of a group volume control is used by another object.'));
             }
             if (!isset($existingMap[$ident]) && $objectId > 0) {
-                throw new UnexpectedValueException('Der Ident eines Gruppenlautstärkereglers ist bereits belegt.');
+                throw new UnexpectedValueException($this->Translate('The ident of a group volume control is already in use.'));
             }
             $desired[$ident] = [
                 'player_id' => $member['player_id'],
@@ -833,7 +1415,7 @@ class MusicAssistantPlayer extends IPSModule
             }
             if ($variableId <= 0 || !IPS_VariableExists($variableId)
                 || (IPS_GetVariable($variableId)['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-                throw new UnexpectedValueException('Gruppenlautstärkevariable konnte nicht sicher angelegt werden.');
+                throw new UnexpectedValueException($this->Translate('The group volume variable could not be created safely.'));
             }
 
             if (isset($existingMap[$ident]) && IPS_GetName($variableId) === $existingMap[$ident]['name']
@@ -870,12 +1452,10 @@ class MusicAssistantPlayer extends IPSModule
 
     private function removeGroupMemberVolumeVariables(): void
     {
-        $requestId = bin2hex(random_bytes(16));
-        $this->SetBuffer('GroupMemberVolumeRefreshRequest', $requestId);
-        $updated = $this->withGroupMemberVolumeLock(function () use ($requestId): bool {
-            if ($this->GetBuffer('GroupMemberVolumeRefreshRequest') !== $requestId) {
-                return false;
-            }
+        $this->SetTimerInterval('RefreshGroupMemberVolumes', 0);
+        $updated = $this->withGroupMemberVolumeLock(function (): bool {
+            $this->invalidatePendingGroupMemberVolumeRefreshUnlocked();
+            $this->SetBuffer('GroupMemberVolumeUpdates', '{}');
             return $this->removeGroupMemberVolumeVariablesUnlocked();
         });
         if ($updated) {
@@ -911,7 +1491,7 @@ class MusicAssistantPlayer extends IPSModule
     {
         $semaphore = 'MA_GROUP_MEMBER_VOLUMES_' . (string)$this->InstanceID;
         if (!IPS_SemaphoreEnter($semaphore, self::GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT)) {
-            throw new RuntimeException('Gruppenlautstärke-Semaphore konnte nicht erworben werden.');
+            throw new RuntimeException($this->Translate('The group volume semaphore could not be acquired.'));
         }
         try {
             return $operation();
@@ -923,6 +1503,11 @@ class MusicAssistantPlayer extends IPSModule
     private function groupMemberVolumeIdent(string $playerId): string
     {
         return 'MemberVolume_' . hash('sha256', $playerId);
+    }
+
+    private function groupMemberPlayerKey(string $playerId): string
+    {
+        return 'PlayerID:' . $playerId;
     }
 
     private function readGroupMemberVolumeMap(): ?array
@@ -949,7 +1534,8 @@ class MusicAssistantPlayer extends IPSModule
                 return null;
             }
             $playerId = trim($entry['player_id']);
-            if ($ident !== $this->groupMemberVolumeIdent($playerId) || isset($playerIds[$playerId])) {
+            $playerKey = $this->groupMemberPlayerKey($playerId);
+            if ($ident !== $this->groupMemberVolumeIdent($playerId) || isset($playerIds[$playerKey])) {
                 $this->SendDebug('Group member volumes', 'Gespeicherte Zuordnung ist nicht eindeutig', 0);
                 return null;
             }
@@ -958,7 +1544,7 @@ class MusicAssistantPlayer extends IPSModule
                 'name' => trim($entry['name']),
                 'variable_id' => $entry['variable_id']
             ];
-            $playerIds[$playerId] = true;
+            $playerIds[$playerKey] = true;
         }
         return $map;
     }
@@ -969,7 +1555,7 @@ class MusicAssistantPlayer extends IPSModule
             'GroupMemberVolumeMap',
             json_encode(count($map) === 0 ? new stdClass() : $map, JSON_THROW_ON_ERROR)
         )) {
-            throw new RuntimeException('Die Zuordnung der Gruppenlautstärken konnte nicht gespeichert werden.');
+            throw new RuntimeException($this->Translate('The group volume mapping could not be saved.'));
         }
     }
 
@@ -1010,14 +1596,15 @@ class MusicAssistantPlayer extends IPSModule
     private function updateRepeatMode($value): bool
     {
         $mode = is_string($value) ? strtolower(trim($value)) : '';
-        if (!in_array($mode, ['off', 'one', 'all'], true)) {
+        if (!array_key_exists($mode, self::REPEAT_MODE_TO_VALUE)) {
             $this->SendDebug('Repeat', 'Unbekannter Repeat-Modus: ' . $mode, 0);
             return false;
         }
-        if (@$this->GetIDForIdent('Repeat') <= 0 || (string)$this->GetValue('Repeat') === $mode) {
+        $repeatValue = self::REPEAT_MODE_TO_VALUE[$mode];
+        if (@$this->GetIDForIdent('Repeat') <= 0 || (int)$this->GetValue('Repeat') === $repeatValue) {
             return false;
         }
-        $this->SetValue('Repeat', $mode);
+        $this->SetValue('Repeat', $repeatValue);
         $captions = ['off' => 'Off', 'one' => 'One', 'all' => 'All'];
         $this->SendDebug('Repeat', 'Queue-State ' . $mode . ' -> ' . $captions[$mode], 0);
         return true;
@@ -1045,22 +1632,22 @@ class MusicAssistantPlayer extends IPSModule
 
     private function updateFavoriteFromQueueItem($currentItem): void
     {
-        $this->withFavoriteLock(function () use ($currentItem): void {
+        $schedule = $this->withFavoriteLock(function () use ($currentItem): bool {
             if ($currentItem === null) {
                 $this->clearCurrentFavoriteTrackUnlocked();
-                return;
+                return false;
             }
             if (!is_array($currentItem)
                 || !is_string($currentItem['queue_item_id'] ?? null)
                 || trim($currentItem['queue_item_id']) === '') {
                 $this->clearCurrentFavoriteTrackUnlocked();
-                return;
+                return false;
             }
 
             $queueItemId = trim($currentItem['queue_item_id']);
             $currentState = $this->readCurrentFavoriteTrack();
             if ($currentState !== null && $currentState['queue_item_id'] === $queueItemId) {
-                return;
+                return !$currentState['resolved'] && $this->queueFavoriteResolutionUnlocked($currentState);
             }
 
             $mediaItem = $currentItem['media_item'] ?? null;
@@ -1073,7 +1660,7 @@ class MusicAssistantPlayer extends IPSModule
                 || !is_string($mediaItem['uri'] ?? null)
                 || trim($mediaItem['uri']) === '') {
                 $this->clearCurrentFavoriteTrackUnlocked();
-                return;
+                return false;
             }
 
             $state = [
@@ -1091,19 +1678,19 @@ class MusicAssistantPlayer extends IPSModule
                 $state['library_uri'] = $state['source_uri'];
                 $state['favorite'] = $mediaItem['favorite'];
                 $state['resolved'] = true;
+                $this->invalidatePendingFavoriteResolutionUnlocked();
             } else {
-                try {
-                    $state = $this->resolveFavoriteLibraryState($state);
-                } catch (Throwable $e) {
-                    $this->writeCurrentFavoriteTrack($state);
-                    $this->updateFavoriteValue(false);
-                    $this->SendDebug('Favorite', 'Library-Track konnte nicht aufgelöst werden: ' . $e->getMessage(), 0);
-                    return;
-                }
+                $this->writeCurrentFavoriteTrack($state);
+                $this->updateFavoriteValue(false);
+                return $this->queueFavoriteResolutionUnlocked($state);
             }
             $this->writeCurrentFavoriteTrack($state);
             $this->updateFavoriteValue($state['favorite']);
+            return false;
         });
+        if ($schedule) {
+            $this->SetTimerInterval('ResolveFavorite', 100);
+        }
     }
 
     private function processFavoriteMediaItemUpdate(array $packet): void
@@ -1111,10 +1698,10 @@ class MusicAssistantPlayer extends IPSModule
         if (!is_string($packet['ObjectID'] ?? null) || !is_array($packet['Data'] ?? null)) {
             return;
         }
-        $this->withFavoriteLock(function () use ($packet): void {
+        $schedule = $this->withFavoriteLock(function () use ($packet): bool {
             $state = $this->readCurrentFavoriteTrack();
             if ($state === null) {
-                return;
+                return false;
             }
             $objectId = trim($packet['ObjectID']);
             $data = $packet['Data'];
@@ -1129,7 +1716,7 @@ class MusicAssistantPlayer extends IPSModule
                 || ($state['library_item_id'] !== '' && $eventItemId === $state['library_item_id'])
                 || $this->favoriteEventHasSourceMapping($data, $state);
             if (!$matches || (($data['media_type'] ?? 'track') !== 'track')) {
-                return;
+                return false;
             }
 
             if (is_bool($data['favorite'] ?? null)
@@ -1143,12 +1730,17 @@ class MusicAssistantPlayer extends IPSModule
                 }
                 $state['favorite'] = $data['favorite'];
                 $state['resolved'] = true;
+                $this->invalidatePendingFavoriteResolutionUnlocked();
             } else {
-                $state = $this->resolveFavoriteLibraryState($state);
+                return $this->queueFavoriteResolutionUnlocked($state);
             }
             $this->writeCurrentFavoriteTrack($state);
             $this->updateFavoriteValue($state['favorite']);
+            return false;
         });
+        if ($schedule) {
+            $this->SetTimerInterval('ResolveFavorite', 100);
+        }
     }
 
     private function favoriteEventHasSourceMapping(array $mediaItem, array $state): bool
@@ -1170,34 +1762,51 @@ class MusicAssistantPlayer extends IPSModule
     private function setCurrentTrackFavorite(bool $favorite): void
     {
         if (!$this->ReadPropertyBoolean('ShowFavorite')) {
-            throw new Exception('Favoritensteuerung ist deaktiviert.');
+            throw new Exception($this->Translate('Favorite control is disabled.'));
         }
-        $this->withFavoriteLock(function () use ($favorite): void {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        $snapshot = $this->withFavoriteLock(function () use ($favorite): array {
             $state = $this->readCurrentFavoriteTrack();
             if ($state === null || !$state['resolved'] || $state['source_uri'] === '') {
-                throw new Exception('Der aktuelle Titel konnte nicht eindeutig ermittelt werden.');
+                throw new Exception($this->Translate('The current track could not be identified unambiguously.'));
             }
             if ($favorite === $state['favorite']) {
                 $this->updateFavoriteValue($state['favorite']);
-                return;
+                return [];
             }
+            return [
+                'generation' => (int)$this->GetBuffer('FavoriteResolutionGeneration'),
+                'state'      => $state
+            ];
+        });
+        if ($snapshot === []) {
+            return;
+        }
+        $state = $snapshot['state'];
 
-            if ($favorite) {
-                $this->sendApiRequest('music/favorites/add_item', ['item' => $state['source_uri']]);
-            } else {
-                if ($state['library_item_id'] === '') {
-                    throw new Exception('Die Library-ID des aktuellen Titels ist nicht verfügbar.');
-                }
-                $this->sendApiRequest('music/favorites/remove_item', [
-                    'media_type'     => 'track',
-                    'library_item_id' => $state['library_item_id']
-                ]);
+        if ($favorite) {
+            $this->sendApiRequest('music/favorites/add_item', ['item' => $state['source_uri']]);
+        } else {
+            if ($state['library_item_id'] === '') {
+                throw new Exception($this->Translate('The library ID of the current track is not available.'));
             }
+            $this->sendApiRequest('music/favorites/remove_item', [
+                'media_type'     => 'track',
+                'library_item_id' => $state['library_item_id']
+            ]);
+        }
 
-            $updatedState = $this->resolveFavoriteLibraryState($state);
-            if ($updatedState['favorite'] !== $favorite) {
-                throw new Exception('Der geänderte Favoritenstatus konnte nicht bestätigt werden.');
+        $updatedState = $this->resolveFavoriteLibraryState($state);
+        if ($updatedState['favorite'] !== $favorite) {
+            throw new Exception($this->Translate('The changed favorite status could not be confirmed.'));
+        }
+        $this->withFavoriteLock(function () use ($playerId, $snapshot, $state, $updatedState): void {
+            if (trim($this->ReadPropertyString('PlayerID')) !== $playerId
+                || (int)$this->GetBuffer('FavoriteResolutionGeneration') !== $snapshot['generation']
+                || !$this->favoriteStatesIdentifySameTrack($this->readCurrentFavoriteTrack(), $state)) {
+                throw new Exception($this->Translate('The current track changed while updating the favorite status.'));
             }
+            $this->invalidatePendingFavoriteResolutionUnlocked();
             $this->writeCurrentFavoriteTrack($updatedState);
             $this->updateFavoriteValue($updatedState['favorite']);
         });
@@ -1222,7 +1831,7 @@ class MusicAssistantPlayer extends IPSModule
             || !is_string($libraryItem['item_id'] ?? null)
             || trim($libraryItem['item_id']) === ''
             || !is_bool($libraryItem['favorite'] ?? null)) {
-            throw new Exception('Music Assistant lieferte keinen vollständigen Library-Track.');
+            throw new Exception($this->Translate('Music Assistant did not return a complete library track.'));
         }
         $state['library_item_id'] = trim($libraryItem['item_id']);
         $state['library_uri'] = is_string($libraryItem['uri'] ?? null)
@@ -1231,6 +1840,87 @@ class MusicAssistantPlayer extends IPSModule
         $state['favorite'] = $libraryItem['favorite'];
         $state['resolved'] = true;
         return $state;
+    }
+
+    private function queueFavoriteResolutionUnlocked(array $state): bool
+    {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if ($playerId === '') {
+            return false;
+        }
+        $pending = $this->readPendingFavoriteResolution();
+        if ($pending !== null
+            && $pending['player_id'] === $playerId
+            && $this->favoriteStatesIdentifySameTrack($pending['state'], $state)) {
+            if ($this->GetBuffer('RunningFavoriteResolution') !== (string)$pending['generation']) {
+                return true;
+            }
+        }
+
+        $generation = $this->nextFavoriteResolutionGenerationUnlocked();
+        $this->SetBuffer('PendingFavoriteResolution', json_encode([
+            'generation' => $generation,
+            'player_id'  => $playerId,
+            'state'      => $state
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        return true;
+    }
+
+    private function readPendingFavoriteResolution(): ?array
+    {
+        try {
+            $pending = json_decode(
+                trim($this->GetBuffer('PendingFavoriteResolution')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Favorite', 'Auflösungsauftrag enthält ungültiges JSON', 0);
+            return null;
+        }
+        if (!is_array($pending) || count($pending) === 0) {
+            return null;
+        }
+        if (!is_int($pending['generation'] ?? null)
+            || $pending['generation'] <= 0
+            || !is_string($pending['player_id'] ?? null)
+            || trim($pending['player_id']) === ''
+            || !is_array($pending['state'] ?? null)
+            || !$this->favoriteStatesIdentifySameTrack($pending['state'], $pending['state'])) {
+            $this->SendDebug('Favorite', 'Auflösungsauftrag hat eine ungültige Struktur', 0);
+            return null;
+        }
+        return $pending;
+    }
+
+    private function favoriteStatesIdentifySameTrack(?array $left, array $right): bool
+    {
+        if ($left === null) {
+            return false;
+        }
+        foreach (['queue_item_id', 'source_uri', 'source_item_id', 'source_provider'] as $key) {
+            if (!is_string($left[$key] ?? null)
+                || !is_string($right[$key] ?? null)
+                || $left[$key] === ''
+                || $left[$key] !== $right[$key]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function nextFavoriteResolutionGenerationUnlocked(): int
+    {
+        $generation = (int)$this->GetBuffer('FavoriteResolutionGeneration') + 1;
+        $this->SetBuffer('FavoriteResolutionGeneration', (string)$generation);
+        return $generation;
+    }
+
+    private function invalidatePendingFavoriteResolutionUnlocked(): void
+    {
+        $this->nextFavoriteResolutionGenerationUnlocked();
+        $this->SetBuffer('PendingFavoriteResolution', '{}');
     }
 
     private function readCurrentFavoriteTrack(): ?array
@@ -1276,6 +1966,7 @@ class MusicAssistantPlayer extends IPSModule
 
     private function clearCurrentFavoriteTrackUnlocked(): void
     {
+        $this->invalidatePendingFavoriteResolutionUnlocked();
         $this->SetBuffer('CurrentFavoriteTrack', '{}');
         $this->updateFavoriteValue(false);
     }
@@ -1294,7 +1985,7 @@ class MusicAssistantPlayer extends IPSModule
     {
         $semaphore = 'MA_FAVORITE_' . (string)$this->InstanceID;
         if (!IPS_SemaphoreEnter($semaphore, self::FAVORITE_SEMAPHORE_TIMEOUT)) {
-            throw new RuntimeException('Favoriten-Semaphore konnte nicht erworben werden.');
+            throw new RuntimeException($this->Translate('The favorite semaphore could not be acquired.'));
         }
         try {
             return $operation();
@@ -1347,7 +2038,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetVisualizationType($visualizationType);
     }
 
-    private function updateVisualization(): void
+    private function updateVisualization(bool $force = false): void
     {
         if (!$this->ReadPropertyBoolean('EnableCustomTile')
             || !method_exists($this, 'UpdateVisualizationValue')) {
@@ -1357,7 +2048,7 @@ class MusicAssistantPlayer extends IPSModule
         try {
             $stateJson = json_encode($this->buildVisualizationState(), JSON_THROW_ON_ERROR);
             $stateHash = hash('sha256', $stateJson);
-            if ($this->GetBuffer('VisualizationStateHash') === $stateHash) {
+            if (!$force && $this->GetBuffer('VisualizationStateHash') === $stateHash) {
                 return;
             }
             $transmitted = $this->UpdateVisualizationValue($stateJson);
@@ -1388,16 +2079,16 @@ class MusicAssistantPlayer extends IPSModule
         $shuffle = @$this->GetIDForIdent('Shuffle') > 0
             ? (bool)$this->GetValue('Shuffle')
             : false;
-        $repeat = @$this->GetIDForIdent('Repeat') > 0
-            ? strtolower(trim((string)$this->GetValue('Repeat')))
-            : 'off';
-        if (!in_array($repeat, ['off', 'one', 'all'], true)) {
-            $repeat = 'off';
-        }
+        $repeatValue = @$this->GetIDForIdent('Repeat') > 0
+            ? (int)$this->GetValue('Repeat')
+            : 0;
+        $repeat = self::REPEAT_VALUE_TO_MODE[$repeatValue] ?? 'off';
         $showFavorite = $this->ReadPropertyBoolean('ShowFavorite');
         $favorite = $showFavorite && @$this->GetIDForIdent('Favorite') > 0
             ? (bool)$this->GetValue('Favorite')
             : false;
+        $playlistSelection = $this->readVisualizationSelection('Playlist');
+        $radioSelection = $this->readVisualizationSelection('Radio');
         $playlists = $this->buildVisualizationSelectionOptions('Playlist', 'PlaylistMap', 'PlaylistProfile');
         $radios = $this->buildVisualizationSelectionOptions('Radio', 'RadioMap', 'RadioProfile');
         $groupMembers = $this->buildVisualizationGroupMembers();
@@ -1413,10 +2104,27 @@ class MusicAssistantPlayer extends IPSModule
             'repeat'      => $repeat,
             'showFavorite' => $showFavorite,
             'favorite'    => $favorite,
+            'playlistSelection' => $playlistSelection,
+            'radioSelection' => $radioSelection,
+            'playlistSelectionRevision' => (int)$this->GetBuffer('PlaylistSelectionRevision'),
+            'radioSelectionRevision' => (int)$this->GetBuffer('RadioSelectionRevision'),
             'playlists'   => $playlists,
             'radios'      => $radios,
             'groupMembers' => $groupMembers
         ];
+    }
+
+    private function readVisualizationSelection(string $ident): int
+    {
+        $variableId = @$this->GetIDForIdent($ident);
+        if ($variableId <= 0 || !IPS_VariableExists($variableId)) {
+            return 0;
+        }
+        $variable = IPS_GetVariable($variableId);
+        if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            return 0;
+        }
+        return max(0, (int)$this->GetValue($ident));
     }
 
     private function buildVisualizationGroupMembers(): array
@@ -1575,71 +2283,46 @@ class MusicAssistantPlayer extends IPSModule
                 $proxyId = $candidate;
             }
         }
+        if ($proxyId === '') {
+            $this->withCoverLock(function (): void {
+                $this->invalidatePendingCoverDownloadUnlocked();
+                if ($this->ReadAttributeString('CoverTargetProxyID') !== ''
+                    && !$this->WriteAttributeString('CoverTargetProxyID', '')) {
+                    throw new Exception($this->Translate('Cover target could not be reset.'));
+                }
+            });
+        }
         $mediaId = $this->ensureCoverMedia();
         if ($mediaId <= 0) {
-            throw new Exception('Cover-Medium ist nicht verfügbar.');
+            throw new Exception($this->Translate('Cover media is not available.'));
         }
         if ($proxyId === '') {
             $this->showDefaultCover($mediaId, '', $state);
             return;
         }
 
-        $needsDownload = $this->withCoverLock(function () use ($mediaId, $proxyId, $state): bool {
+        $schedule = $this->withCoverLock(function () use ($mediaId, $proxyId, $state): bool {
             if ($this->ReadAttributeString('CoverTargetProxyID') !== $proxyId) {
+                $this->invalidatePendingCoverDownloadUnlocked();
                 if (!$this->WriteAttributeString('CoverTargetProxyID', $proxyId)) {
-                    throw new Exception('Cover-Ziel konnte nicht gespeichert werden.');
+                    throw new Exception($this->Translate('Cover target could not be saved.'));
                 }
                 $this->setDefaultCover($mediaId, $state);
             }
             if ($this->ReadAttributeString('CoverProxyID') === $proxyId
                 && !$this->ReadAttributeBoolean('CoverIsDefault')
                 && $this->coverMediaHasContent($mediaId)) {
+                $this->invalidatePendingCoverDownloadUnlocked();
                 $this->updateCoverVisibilityFromQueueState($state, true);
                 return false;
             }
             if ($this->ReadAttributeBoolean('CoverIsDefault') || !$this->coverMediaHasContent($mediaId)) {
                 $this->setDefaultCover($mediaId, $state);
             }
-            return true;
+            return $this->queueCoverDownloadUnlocked($proxyId, $state);
         });
-        if (!$needsDownload) {
-            return;
-        }
-
-        $response = $this->requestArtwork($proxyId);
-        $content = $response['content'] ?? null;
-        $contentType = $response['content_type'] ?? null;
-        if (($response['proxy_id'] ?? null) !== $proxyId
-            || !in_array($contentType, ['image/jpeg', 'image/png'], true)
-            || !is_string($content)) {
-            throw new Exception('Artwork-Antwort ist ungültig.');
-        }
-        $binary = base64_decode($content, true);
-        $validSignature = is_string($binary) && $binary !== '' && ($contentType === 'image/jpeg'
-            ? substr($binary, 0, 3) === "\xFF\xD8\xFF"
-            : substr($binary, 0, 8) === "\x89PNG\r\n\x1A\n");
-        if (!$validSignature) {
-            throw new Exception('Artwork-Signatur passt nicht zum Content-Type.');
-        }
-        $updated = $this->withCoverLock(function () use ($mediaId, $proxyId, $content, $contentType, $state): bool {
-            if ($this->ReadAttributeString('CoverTargetProxyID') !== $proxyId) {
-                return false;
-            }
-            $this->ensureCoverMediaFormat($mediaId, $contentType);
-            if (!IPS_SetMediaContent($mediaId, $content)) {
-                throw new Exception('Cover-Medium konnte nicht aktualisiert werden.');
-            }
-            if (!$this->WriteAttributeString('CoverProxyID', $proxyId)) {
-                throw new Exception('Cover-Cache konnte nicht gespeichert werden.');
-            }
-            if (!$this->WriteAttributeBoolean('CoverIsDefault', false)) {
-                throw new Exception('Cover-Status konnte nicht gespeichert werden.');
-            }
-            $this->updateCoverVisibilityFromQueueState($state, true);
-            return true;
-        });
-        if ($updated) {
-            $this->SendDebug('Artwork', 'Cover aktualisiert', 0);
+        if ($schedule) {
+            $this->SetTimerInterval('DownloadCover', 100);
         }
     }
 
@@ -1648,7 +2331,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->withCoverLock(function () use ($mediaId, $targetProxyId, $state): void {
             if ($this->ReadAttributeString('CoverTargetProxyID') !== $targetProxyId
                 && !$this->WriteAttributeString('CoverTargetProxyID', $targetProxyId)) {
-                throw new Exception('Cover-Ziel konnte nicht gespeichert werden.');
+                throw new Exception($this->Translate('Cover target could not be saved.'));
             }
             $this->setDefaultCover($mediaId, $state);
         });
@@ -1662,11 +2345,11 @@ class MusicAssistantPlayer extends IPSModule
             ? IPS_GetMediaContent($mediaId)
             : '';
         if ($currentContent !== $content && !IPS_SetMediaContent($mediaId, $content)) {
-            throw new Exception('Standard-Cover konnte nicht gesetzt werden.');
+            throw new Exception($this->Translate('Default cover could not be set.'));
         }
         if (!$this->ReadAttributeBoolean('CoverIsDefault')
             && !$this->WriteAttributeBoolean('CoverIsDefault', true)) {
-            throw new Exception('Cover-Status konnte nicht gespeichert werden.');
+            throw new Exception($this->Translate('Cover status could not be saved.'));
         }
         $this->updateCoverVisibilityFromQueueState($state, true);
     }
@@ -1675,7 +2358,7 @@ class MusicAssistantPlayer extends IPSModule
     {
         $file = __DIR__ . '/default-cover.png';
         if (!is_file($file) || !is_readable($file)) {
-            throw new Exception('Standard-Cover-Datei ist nicht verfügbar.');
+            throw new Exception($this->Translate('Default cover file is not available.'));
         }
 
         $binary = @file_get_contents($file);
@@ -1686,10 +2369,10 @@ class MusicAssistantPlayer extends IPSModule
             || substr($binary, 0, 8) !== "\x89PNG\r\n\x1A\n"
             || !is_array($imageInfo)
             || ($imageInfo['mime'] ?? '') !== 'image/png') {
-            throw new Exception('Standard-Cover-Datei ist keine gültige PNG-Datei.');
+            throw new Exception($this->Translate('Default cover file is not a valid PNG file.'));
         }
         if (strlen($binary) > self::TILE_COVER_MAX_BYTES) {
-            throw new Exception('Standard-Cover-Datei ist für die HTML-Kachel zu groß.');
+            throw new Exception($this->Translate('Default cover file is too large for the HTML tile.'));
         }
 
         return base64_encode($binary);
@@ -1707,7 +2390,7 @@ class MusicAssistantPlayer extends IPSModule
             return;
         }
         if (!IPS_SetMediaFile($mediaId, $mediaFile, false)) {
-            throw new Exception('Cover-Dateiformat konnte nicht aktualisiert werden.');
+            throw new Exception($this->Translate('Cover file format could not be updated.'));
         }
     }
 
@@ -1724,7 +2407,7 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ($normalizedState === 'idle') {
             if (!IPS_SetHidden($mediaId, true)) {
-                throw new Exception('Cover-Medium konnte nicht ausgeblendet werden.');
+                throw new Exception($this->Translate('Cover media could not be hidden.'));
             }
             return;
         }
@@ -1734,8 +2417,73 @@ class MusicAssistantPlayer extends IPSModule
         if ($this->ReadAttributeString('CoverProxyID') !== ''
             && $this->coverMediaHasContent($mediaId)
             && !IPS_SetHidden($mediaId, false)) {
-            throw new Exception('Cover-Medium konnte nicht eingeblendet werden.');
+            throw new Exception($this->Translate('Cover media could not be shown.'));
         }
+    }
+
+    private function queueCoverDownloadUnlocked(string $proxyId, $state): bool
+    {
+        $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if ($playerId === '') {
+            return false;
+        }
+        $pending = $this->readPendingCoverDownload();
+        if ($pending !== null
+            && $pending['player_id'] === $playerId
+            && $pending['proxy_id'] === $proxyId) {
+            return $this->GetBuffer('RunningCoverDownload') !== (string)$pending['generation'];
+        }
+
+        $generation = $this->nextCoverDownloadGenerationUnlocked();
+        $this->SetBuffer('PendingCoverDownload', json_encode([
+            'generation' => $generation,
+            'player_id'  => $playerId,
+            'proxy_id'   => $proxyId,
+            'state'      => $state
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+        return true;
+    }
+
+    private function readPendingCoverDownload(): ?array
+    {
+        try {
+            $pending = json_decode(
+                trim($this->GetBuffer('PendingCoverDownload')),
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Throwable $e) {
+            $this->SendDebug('Artwork', 'Download-Auftrag enthält ungültiges JSON', 0);
+            return null;
+        }
+        if (!is_array($pending) || count($pending) === 0) {
+            return null;
+        }
+        if (!is_int($pending['generation'] ?? null)
+            || $pending['generation'] <= 0
+            || !is_string($pending['player_id'] ?? null)
+            || trim($pending['player_id']) === ''
+            || !is_string($pending['proxy_id'] ?? null)
+            || preg_match('/^[a-f0-9]{64}$/D', $pending['proxy_id']) !== 1
+            || !array_key_exists('state', $pending)) {
+            $this->SendDebug('Artwork', 'Download-Auftrag hat eine ungültige Struktur', 0);
+            return null;
+        }
+        return $pending;
+    }
+
+    private function nextCoverDownloadGenerationUnlocked(): int
+    {
+        $generation = (int)$this->GetBuffer('CoverDownloadGeneration') + 1;
+        $this->SetBuffer('CoverDownloadGeneration', (string)$generation);
+        return $generation;
+    }
+
+    private function invalidatePendingCoverDownloadUnlocked(): void
+    {
+        $this->nextCoverDownloadGenerationUnlocked();
+        $this->SetBuffer('PendingCoverDownload', '{}');
     }
 
     private function requestArtwork(string $proxyId): array
@@ -1746,11 +2494,11 @@ class MusicAssistantPlayer extends IPSModule
             'ProxyID' => $proxyId
         ], JSON_THROW_ON_ERROR));
         if (!is_string($response) || trim($response) === '') {
-            throw new Exception('ArtworkRequest lieferte keine gültige Antwort.');
+            throw new Exception($this->Translate('ArtworkRequest did not return a valid response.'));
         }
         $result = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($result) || ($result['success'] ?? false) !== true) {
-            throw new Exception('ArtworkRequest ist fehlgeschlagen.');
+            throw new Exception($this->Translate('ArtworkRequest failed.'));
         }
         return $result;
     }
@@ -1796,23 +2544,27 @@ class MusicAssistantPlayer extends IPSModule
     {
         $mediaId = $this->ensureCoverMedia();
         if ($mediaId <= 0) {
+            $this->withCoverLock(function (): void {
+                $this->invalidatePendingCoverDownloadUnlocked();
+            });
             return;
         }
         $this->withCoverLock(function () use ($mediaId): void {
+            $this->invalidatePendingCoverDownloadUnlocked();
             $hadContent = $this->coverMediaHasContent($mediaId);
             $hadProxyId = $this->ReadAttributeString('CoverProxyID') !== '';
             if ($hadContent && !IPS_SetMediaContent($mediaId, '')) {
-                throw new Exception('Cover-Medium konnte nicht geleert werden.');
+                throw new Exception($this->Translate('Cover media could not be cleared.'));
             }
             if (!IPS_SetHidden($mediaId, true)) {
-                throw new Exception('Cover-Medium konnte nicht ausgeblendet werden.');
+                throw new Exception($this->Translate('Cover media could not be hidden.'));
             }
             if ($hadProxyId && !$this->WriteAttributeString('CoverProxyID', '')) {
-                throw new Exception('Cover-Cache konnte nicht zurückgesetzt werden.');
+                throw new Exception($this->Translate('Cover cache could not be reset.'));
             }
             if (!$this->WriteAttributeString('CoverTargetProxyID', '')
                 || !$this->WriteAttributeBoolean('CoverIsDefault', false)) {
-                throw new Exception('Cover-Status konnte nicht zurückgesetzt werden.');
+                throw new Exception($this->Translate('Cover status could not be reset.'));
             }
             if ($hadContent || $hadProxyId) {
                 $this->SendDebug('Artwork', 'Cover geleert', 0);
@@ -1824,7 +2576,7 @@ class MusicAssistantPlayer extends IPSModule
     {
         $semaphore = 'MA_COVER_' . (string)$this->InstanceID;
         if (!IPS_SemaphoreEnter($semaphore, self::COVER_SEMAPHORE_TIMEOUT)) {
-            throw new Exception('Cover-Semaphore konnte nicht erworben werden.');
+            throw new Exception($this->Translate('The cover semaphore could not be acquired.'));
         }
         try {
             return $operation();
@@ -1921,20 +2673,20 @@ class MusicAssistantPlayer extends IPSModule
                 'Params' => (object)$params
             ], JSON_THROW_ON_ERROR));
         } catch (Throwable $e) {
-            throw new Exception('ApiRequest konnte nicht erzeugt oder gesendet werden.');
+            throw new Exception($this->Translate('ApiRequest could not be created or sent.'));
         }
 
         if (!is_string($response) || trim($response) === '') {
-            throw new Exception('ApiRequest lieferte keine gültige Antwort.');
+            throw new Exception($this->Translate('ApiRequest did not return a valid response.'));
         }
 
         try {
             $result = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
         } catch (Throwable $e) {
-            throw new Exception('ApiRequest lieferte ungültiges JSON.');
+            throw new Exception($this->Translate('ApiRequest returned invalid JSON.'));
         }
         if (!is_array($result)) {
-            throw new Exception('ApiRequest-Antwort ist kein JSON-Objekt.');
+            throw new Exception($this->Translate('ApiRequest response is not a JSON object.'));
         }
         if (($result['success'] ?? false) !== true) {
             $error = is_array($result['error'] ?? null) ? $result['error'] : [];
@@ -1960,20 +2712,20 @@ class MusicAssistantPlayer extends IPSModule
                 'Provider' => $provider
             ], JSON_THROW_ON_ERROR));
         } catch (Throwable $e) {
-            throw new Exception('PlayRefreshedPlaylist konnte nicht erzeugt oder gesendet werden.');
+            throw new Exception($this->Translate('PlayRefreshedPlaylist could not be created or sent.'));
         }
 
         if (!is_string($response) || trim($response) === '') {
-            throw new Exception('PlayRefreshedPlaylist lieferte keine gültige Antwort.');
+            throw new Exception($this->Translate('PlayRefreshedPlaylist did not return a valid response.'));
         }
 
         try {
             $result = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
         } catch (Throwable $e) {
-            throw new Exception('PlayRefreshedPlaylist lieferte ungültiges JSON.');
+            throw new Exception($this->Translate('PlayRefreshedPlaylist returned invalid JSON.'));
         }
         if (!is_array($result)) {
-            throw new Exception('PlayRefreshedPlaylist-Antwort ist kein JSON-Objekt.');
+            throw new Exception($this->Translate('PlayRefreshedPlaylist response is not a JSON object.'));
         }
         if (($result['success'] ?? false) !== true) {
             $error = is_array($result['error'] ?? null) ? $result['error'] : [];
@@ -1999,7 +2751,7 @@ class MusicAssistantPlayer extends IPSModule
     {
         $mode = strtolower(trim($mode));
         if (!in_array($mode, ['off', 'one', 'all'], true)) {
-            throw new InvalidArgumentException('Invalid repeat mode.');
+            throw new InvalidArgumentException($this->Translate('Invalid repeat mode.'));
         }
 
         $queueId = $this->getQueueIdForPlayer();
@@ -2035,7 +2787,7 @@ class MusicAssistantPlayer extends IPSModule
     public function SetVolumeLevel(int $level): void
     {
         if ($level < 0 || $level > 100) {
-            throw new InvalidArgumentException('Volume level must be between 0 and 100.');
+            throw new InvalidArgumentException($this->Translate('Volume level must be between 0 and 100.'));
         }
 
         $this->sendApiRequest('players/cmd/volume_set', ['player_id' => $this->playerId(), 'volume_level' => $level]);
@@ -2053,89 +2805,76 @@ class MusicAssistantPlayer extends IPSModule
 
     // --------- intern ---------
 
-    private function ensureRepeatProfile(): bool
-    {
-        if (!IPS_VariableProfileExists(self::REPEAT_PROFILE)) {
-            IPS_CreateVariableProfile(self::REPEAT_PROFILE, VARIABLETYPE_STRING);
-        }
-        if (!IPS_VariableProfileExists(self::REPEAT_PROFILE)) {
-            $this->LogMessage('Variablenprofil ' . self::REPEAT_PROFILE . ' konnte nicht erstellt werden.', KL_ERROR);
-            return false;
-        }
-
-        $profileData = IPS_GetVariableProfile(self::REPEAT_PROFILE);
-        if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_STRING) {
-            $this->LogMessage(
-                'Variablenprofil ' . self::REPEAT_PROFILE . ' hat nicht den erwarteten Typ String und wird nicht verändert.',
-                KL_ERROR
-            );
-            return false;
-        }
-
-        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'off', 'Off', 'ban', -1);
-        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'one', 'One', 'arrows-repeat-1', -1);
-        IPS_SetVariableProfileAssociation(self::REPEAT_PROFILE, 'all', 'All', 'arrows-repeat', -1);
-        return true;
-    }
-
     private function ensureVolumeButtonProfiles(): array
     {
         return [
-            self::VOLUP_PROFILE   => $this->ensureIntButtonProfile(self::VOLUP_PROFILE, 'Up', 'volume-up'),
-            self::VOLDOWN_PROFILE => $this->ensureIntButtonProfile(self::VOLDOWN_PROFILE, 'Down', 'volume-down')
+            self::VOLUP_PROFILE   => $this->ensureIntButtonProfile(self::VOLUP_PROFILE, $this->Translate('Up'), 'volume-up'),
+            self::VOLDOWN_PROFILE => $this->ensureIntButtonProfile(self::VOLDOWN_PROFILE, $this->Translate('Down'), 'volume-down')
         ];
     }
 
     private function ensureFavoriteProfile(): bool
     {
-        if (!IPS_VariableProfileExists(self::FAVORITE_PROFILE)) {
+        $profileCreated = !IPS_VariableProfileExists(self::FAVORITE_PROFILE);
+        if ($profileCreated) {
             IPS_CreateVariableProfile(self::FAVORITE_PROFILE, VARIABLETYPE_BOOLEAN);
         }
         if (!IPS_VariableProfileExists(self::FAVORITE_PROFILE)) {
-            $this->LogMessage('Variablenprofil ' . self::FAVORITE_PROFILE . ' konnte nicht erstellt werden.', KL_ERROR);
+            $this->LogMessage(
+                sprintf($this->Translate('Variable profile %s could not be created.'), self::FAVORITE_PROFILE),
+                KL_ERROR
+            );
             return false;
         }
 
         $profileData = IPS_GetVariableProfile(self::FAVORITE_PROFILE);
         if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_BOOLEAN) {
             $this->LogMessage(
-                'Variablenprofil ' . self::FAVORITE_PROFILE . ' hat nicht den erwarteten Typ Boolean und wird nicht verändert.',
+                sprintf(
+                    $this->Translate('Variable profile %s does not have the expected type Boolean and will not be changed.'),
+                    self::FAVORITE_PROFILE
+                ),
                 KL_ERROR
             );
             return false;
         }
 
-        IPS_SetVariableProfileAssociation(self::FAVORITE_PROFILE, false, 'Favorit', 'Heart', 0x555555);
-        IPS_SetVariableProfileAssociation(self::FAVORITE_PROFILE, true, 'Favorit', 'Heart', 0xE53935);
+        if ($profileCreated) {
+            IPS_SetVariableProfileAssociation(self::FAVORITE_PROFILE, false, $this->Translate('Favorite'), 'Heart', 0x555555);
+            IPS_SetVariableProfileAssociation(self::FAVORITE_PROFILE, true, $this->Translate('Favorite'), 'Heart', 0xE53935);
+        }
         return true;
     }
 
     private function ensureIntButtonProfile(string $profile, string $caption, string $icon): bool
     {
-        if (!IPS_VariableProfileExists($profile)) {
+        $profileCreated = !IPS_VariableProfileExists($profile);
+        if ($profileCreated) {
             IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
         }
         if (!IPS_VariableProfileExists($profile)) {
-            $this->LogMessage('Variablenprofil ' . $profile . ' konnte nicht erstellt werden.', KL_ERROR);
+            $this->LogMessage(
+                sprintf($this->Translate('Variable profile %s could not be created.'), $profile),
+                KL_ERROR
+            );
             return false;
         }
 
         $profileData = IPS_GetVariableProfile($profile);
         if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
             $this->LogMessage(
-                'Variablenprofil ' . $profile . ' hat nicht den erwarteten Typ Integer und wird nicht verändert.',
+                sprintf(
+                    $this->Translate('Variable profile %s does not have the expected type Integer and will not be changed.'),
+                    $profile
+                ),
                 KL_ERROR
             );
             return false;
         }
-        foreach (($profileData['Associations'] ?? []) as $association) {
-            if (isset($association['Value']) && (float)$association['Value'] === 0.0) {
-                IPS_SetVariableProfileAssociation($profile, 0, '', '', -1);
-                break;
-            }
-        }
 
-        IPS_SetVariableProfileAssociation($profile, 1, $caption, $icon, -1);
+        if ($profileCreated) {
+            IPS_SetVariableProfileAssociation($profile, 1, $caption, $icon, -1);
+        }
         return true;
     }
 
@@ -2171,7 +2910,7 @@ class MusicAssistantPlayer extends IPSModule
             : '';
 
         if ($queueId === '') {
-            throw new Exception('No valid active queue found for PlayerID=' . $playerId);
+            throw new Exception(sprintf($this->Translate('No valid active queue found for PlayerID=%s'), $playerId));
         }
 
         return $result;
@@ -2209,10 +2948,67 @@ class MusicAssistantPlayer extends IPSModule
             && ($existingId <= 0 || $variableId !== $existingId);
     }
 
+    private function resetInvalidMediaSelection(
+        string $ident,
+        string $mapProperty,
+        string $resetTimer,
+        bool $playlist
+    ): void
+    {
+        $variableId = @$this->GetIDForIdent($ident);
+        if ($variableId <= 0 || !IPS_VariableExists($variableId)) {
+            return;
+        }
+        $variable = IPS_GetVariable($variableId);
+        if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            return;
+        }
+
+        $selectedItemId = (int)$this->GetValue($ident);
+        if ($selectedItemId <= 0) {
+            return;
+        }
+        if ($this->GetTimerInterval($resetTimer) > 0) {
+            return;
+        }
+
+        try {
+            $mapJson = trim($this->ReadPropertyString($mapProperty));
+            $mapObject = json_decode($mapJson, false, 512, JSON_THROW_ON_ERROR);
+            $map = json_decode($mapJson, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $e) {
+            $this->SendDebug($ident, $mapProperty . ' enthält ungültiges JSON; Auswahlwert wurde beibehalten.', 0);
+            return;
+        }
+        if (!is_object($mapObject) || !is_array($map)) {
+            $this->SendDebug($ident, $mapProperty . ' ist kein JSON-Objekt; Auswahlwert wurde beibehalten.', 0);
+            return;
+        }
+
+        foreach ($map as $itemId => $entry) {
+            $itemId = (string)$itemId;
+            $validItemId = (int)$itemId > 0 && (string)(int)$itemId === $itemId;
+            $validEntry = $playlist
+                ? $this->normalizePlaylistMapEntry($entry) !== null
+                : is_string($entry) && trim($entry) !== '';
+            if (!$validItemId || !$validEntry) {
+                $this->SendDebug($ident, $mapProperty . ' enthält einen ungültigen Eintrag; Auswahlwert wurde beibehalten.', 0);
+                return;
+            }
+        }
+
+        if (array_key_exists((string)$selectedItemId, $map)) {
+            return;
+        }
+
+        $this->SetTimerInterval($resetTimer, 0);
+        $this->SetValue($ident, 0);
+    }
+
     private function resolveUriFromMap(int $itemId, string $mapProperty, string $refreshCommand): string
     {
         if ($itemId <= 0) {
-            throw new Exception('Invalid item_id');
+            throw new Exception($this->Translate('Invalid item_id'));
         }
 
         $mapRaw = trim($this->ReadPropertyString($mapProperty));
@@ -2242,13 +3038,13 @@ class MusicAssistantPlayer extends IPSModule
             }
         }
 
-        throw new Exception('URI not found for item_id=' . $itemId);
+        throw new Exception(sprintf($this->Translate('URI not found for item_id=%s'), $itemId));
     }
 
     private function PlayMediaUri(string $uri): void
     {
         if ($uri === '') {
-            throw new Exception('Media URI is empty');
+            throw new Exception($this->Translate('Media URI is empty'));
         }
 
         $queueId = $this->getQueueIdForPlayer();
@@ -2262,7 +3058,7 @@ class MusicAssistantPlayer extends IPSModule
     private function resolvePlaylistFromMap(int $itemId): array
     {
         if ($itemId <= 0) {
-            throw new Exception('Invalid item_id');
+            throw new Exception($this->Translate('Invalid item_id'));
         }
 
         $map = json_decode(trim($this->ReadPropertyString('PlaylistMap')), true);
@@ -2310,7 +3106,7 @@ class MusicAssistantPlayer extends IPSModule
             return $legacyEntry;
         }
 
-        throw new Exception('URI not found for item_id=' . $itemId);
+        throw new Exception(sprintf($this->Translate('URI not found for item_id=%s'), $itemId));
     }
 
     private function normalizePlaylistMapEntry($entry): ?array
@@ -2363,7 +3159,7 @@ class MusicAssistantPlayer extends IPSModule
     {
         $id = trim($this->ReadPropertyString('PlayerID'));
         if ($id === '') {
-            throw new Exception('PlayerID not configured');
+            throw new Exception($this->Translate('PlayerID not configured'));
         }
         return $id;
     }

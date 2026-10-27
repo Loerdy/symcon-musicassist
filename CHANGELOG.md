@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+## v2.1.2 — 2026-10-27
+
+- Kurzzeitige Verkleinerungen von Playergruppen werden vor dem Entfernen ihrer Lautstärkeregler durch einen verzögerten zweiten Snapshot bestätigt.
+- Fehler bei Transport-, Shuffle- und Repeat-Aktionen werden kontrolliert protokolliert, ohne den bisherigen Variablenwert zu verändern.
+- Die WebSocket-Datenkonvertierung verwendet keine unter PHP 8.2 veraltete Funktion mehr.
+- Ungeklammerte IPv6-Adressen werden auch für HTTP-API-Aufrufe korrekt als URL-Host formatiert.
+- Playlist- und Radio-Auswahl schließen sich in der HTML-Player-Kachel bereits während des Wiedergabestarts gegenseitig aus.
+- Playlist- und Radio-Auswahlen bleiben in der HTML-Player-Kachel bereits während des Wiedergabestarts sichtbar und werden gegen ausbleibende Bestätigungen abgesichert.
+- Die HTML-Player-Kachel zeigt eine erfolgreich gestartete Playlist- oder Radio-Auswahl bis zur bestehenden zeitgesteuerten Rücksetzung an.
+- Ungültige Playlist- und Radio-Auswahlwerte werden nach Konfigurationsänderungen auf den Neutralwert zurückgesetzt, ohne die Wiedergabe zu beeinflussen.
+- Playlist- und Radio-Synchronisierungen prüfen Profiländerungen, verhindern parallele Läufe und aktualisieren weitere Player auch dann, wenn einzelne Player fehlschlagen.
+- Neue Player werden über die native Configurator-Erstellung direkt in der dort ausgewählten Zielkategorie angelegt; die separate Zielkategorie und nachträgliche Platzierung entfallen.
+- `CreatePlayer()` erstellt ohne explizite Kategorie in der Wurzel und unterstützt optional weiterhin eine validierte konkrete Kategorie-ID.
+- Rein numerische Music-Assistant-Player-IDs bleiben in der Gruppenlautstärkeverarbeitung einschließlich Update-Puffer als Strings erhalten.
+- Playlist- und Radio-Zuordnungen des Configurators werden persistent gespeichert und bei bestehenden Installationen konfliktgeprüft aus verbundenen Playern übernommen.
+- Der Configurator bricht die Playlist- oder Radio-Synchronisierung bei einem gleichnamigen Variablenprofil mit falschem Datentyp ab, ohne das vorhandene Profil zu löschen oder zu verändern.
+- Die Favoritenauflösung des aktuellen Titels erfolgt ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und verwirft veraltete Ergebnisse nach Titel- oder Konfigurationswechseln.
+- Cover-Downloads erfolgen ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung und übernehmen keine veralteten Ergebnisse nach Titel- oder Konfigurationswechseln.
+- Gruppen-Snapshots für dynamische Lautstärkeregler werden ereignisgesteuert außerhalb der WebSocket-Ereignisverarbeitung geladen; neuere Lautstärkeereignisse bleiben dabei erhalten.
+
 ## v2.1.1 — 2026-10-23
 
 - Die Mindestversion wurde aufgrund der Verwendung moderner Variablenpräsentationen auf IP-Symcon 8.0 angehoben.

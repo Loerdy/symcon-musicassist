@@ -4,9 +4,9 @@
   "name": "Music Assistant",
   "url": "https://www.music-assistant.io/api/",
   "compatibility": {
-    "version": "8.0"
+    "version": "8.2"
   },
   "version": "2.1",
-  "build": 1,
-  "date": 20261023
+  "build": 2,
+  "date": 1793059200
 }

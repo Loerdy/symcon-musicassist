@@ -6,7 +6,7 @@ Diese IP-Symcon-Library bindet einen [Music-Assistant](https://www.music-assista
 
 ## Voraussetzungen
 
-- IP-Symcon ab Version 8.0
+- IP-Symcon ab Version 8.2
 - ein erreichbarer Music-Assistant-Server
 - Hostname oder IP-Adresse, Port und Zugriffstoken des Music-Assistant-Servers
 - Netzwerkzugriff des IP-Symcon-Systems auf die HTTP-API und den WebSocket von Music Assistant
@@ -101,7 +101,7 @@ Neu angelegte Player werden direkt mit der Connection des Configurators verbunde
 | `Radio` | Radio | Integer | ja | Auswahl eines synchronisierten Radiosenders |
 | `Transport` | Wiedergabe | Integer | ja | Previous, Stop, Play, Pause und Next |
 | `Shuffle` | Shuffle | Boolean | ja | Zufallswiedergabe ein- oder ausschalten |
-| `Repeat` | Repeat | String | ja | Wiederholmodus `off`, `one` oder `all` |
+| `Repeat` | Repeat | Integer | ja | Standardprofil `~Repeat` |
 | `Mute` | Mute | Boolean | ja | Stummschaltung |
 | `VolumeLevel` | Volume | Integer | ja | Lautstärke 0 bis 100 |
 | `VolumeUp` | Volume + | Integer | ja | Gruppenlautstärke erhöhen |
@@ -111,6 +111,12 @@ Neu angelegte Player werden direkt mit der Connection des Configurators verbunde
 | `NowAlbum` | Album | String | nein | Album des aktuellen Queue-Eintrags |
 
 Zusätzlich legt der Player ein Bild-Medienobjekt mit dem Ident `Cover` an.
+
+### Profilkompatibilität der Player-Variablen
+
+Einige Player-Variablen verwenden bewusst weiterhin klassische IP-Symcon-Standardprofile. Die native Media-Player-Kachel erkennt `Transport` über `~PlaybackPreviousNext`, `Shuffle` über `~Shuffle`, `NowTitle` über `~Song` und `NowArtist` über `~Artist` und ordnet ihnen damit die jeweilige Funktion zu. Ein Wechsel dieser Variablen auf direkte Präsentationen kann die Erkennung und Integration in die native Kachel beeinträchtigen.
+
+`Playlist` und `Radio` verwenden weiterhin dynamisch erzeugte Profile, da deren Assoziationen von der bestehenden Modullogik und der eigenen HTML-Kachel für die synchronisierte Medienauswahl benötigt werden. Die Verwendung dieser klassischen und dynamischen Profile ist daher eine bewusste Kompatibilitätsentscheidung und kein Fehler.
 
 ## Syncgroups
 
@@ -208,7 +214,7 @@ This IP-Symcon library integrates a [Music Assistant](https://www.music-assistan
 
 ## Requirements
 
-- IP-Symcon version 8.0 or later
+- IP-Symcon version 8.2 or later
 - an accessible Music Assistant server
 - the hostname or IP address, port, and access token of the Music Assistant server
 - network access from the IP-Symcon system to the Music Assistant HTTP API and WebSocket
@@ -303,7 +309,7 @@ New player instances are connected directly to the configurator's connection.
 | `Radio` | Radio | Integer | yes | Select a synchronized radio station |
 | `Transport` | Wiedergabe | Integer | yes | Previous, Stop, Play, Pause, and Next |
 | `Shuffle` | Shuffle | Boolean | yes | Enable or disable shuffle |
-| `Repeat` | Repeat | String | yes | Repeat mode `off`, `one`, or `all` |
+| `Repeat` | Repeat | Integer | yes | Standard profile `~Repeat` |
 | `Mute` | Mute | Boolean | yes | Mute control |
 | `VolumeLevel` | Volume | Integer | yes | Volume from 0 to 100 |
 | `VolumeUp` | Volume + | Integer | yes | Increase group volume |
@@ -313,6 +319,12 @@ New player instances are connected directly to the configurator's connection.
 | `NowAlbum` | Album | String | no | Album of the current queue item |
 
 The player also creates an image media object with the ident `Cover`.
+
+### Player Variable Profile Compatibility
+
+Some player variables deliberately continue to use classic IP-Symcon standard profiles. The native Media Player tile recognizes `Transport` through `~PlaybackPreviousNext`, `Shuffle` through `~Shuffle`, `NowTitle` through `~Song`, and `NowArtist` through `~Artist`, allowing it to assign the corresponding function to each variable. Replacing these profiles with direct presentations can impair detection and integration in the native tile.
+
+`Playlist` and `Radio` continue to use dynamically generated profiles because their associations are required by the existing module logic and the custom HTML tile for synchronized media selection. Using these classic and dynamic profiles is therefore a deliberate compatibility decision, not an error.
 
 ## Sync Groups
 

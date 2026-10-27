@@ -58,6 +58,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthAttempts', '0');
         $this->SetBuffer('AuthRetryAt', '0');
         $this->SetBuffer('AuthRetryGeneration', '');
+        $this->SetBuffer('AuthTokenFingerprint', hash('sha256', trim($this->ReadPropertyString('Token'))));
         $this->SetBuffer('ConnectionGeneration', '0');
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('ParentReconnectPending', '0');
@@ -76,6 +77,15 @@ class MusicAssistantConnection extends IPSModule
         parent::ApplyChanges();
         $this->registerParentStatusMessage();
         $this->RegisterMessage($this->InstanceID, FM_CHILDREMOVED);
+        $currentTokenFingerprint = hash('sha256', trim($this->ReadPropertyString('Token')));
+        $authenticatedTokenFingerprint = $this->GetBuffer('AuthTokenFingerprint');
+        $hasEstablishedSession = $this->GetBuffer('GreetingUrl') !== ''
+            && (int)$this->GetBuffer('ConnectionGeneration') > 0;
+        $hasCurrentSession = $hasEstablishedSession
+            && $this->GetBuffer('GreetingUrl') === $this->webSocketUrl();
+        $tokenChanged = $hasEstablishedSession
+            && ($authenticatedTokenFingerprint === ''
+                || !hash_equals($authenticatedTokenFingerprint, $currentTokenFingerprint));
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
@@ -89,17 +99,27 @@ class MusicAssistantConnection extends IPSModule
                 $this->LogMessage('ApplyChanges: ' . $e->getMessage(), KL_ERROR);
                 throw $e;
             }
-            if ($this->isConfigured() && $this->HasActiveParent()) {
+            if ($tokenChanged) {
+                $this->SetBuffer('ParentReconnectAttempted', '0');
+                $this->SetBuffer('ParentReconnectPending', '1');
+                $this->SetTimerInterval('CheckConnection', 5000);
+            } elseif ($this->isConfigured() && $this->HasActiveParent()) {
                 $this->SetBuffer('ParentReconnectPending', '1');
             }
             $this->SendDebug('State', 'ApplyChanges konnte den Connection-State nicht invalidieren', 0);
             return;
         }
 
-        // Eine bekannte, unveränderte Sitzung kann z. B. nach einem Tokenwechsel weiterverwendet werden.
+        if ($tokenChanged) {
+            $this->SetBuffer('ParentReconnectAttempted', '0');
+            $this->SetBuffer('ParentReconnectPending', '1');
+            $this->SetTimerInterval('CheckConnection', 5000);
+            return;
+        }
+
+        // Eine bekannte Sitzung kann bei unverändertem Token weiterverwendet werden.
         if ($this->isConfigured() && $this->HasActiveParent()
-            && $this->GetBuffer('GreetingUrl') === $this->webSocketUrl()
-            && (int)$this->GetBuffer('ConnectionGeneration') > 0
+            && $hasCurrentSession
             && $this->GetBuffer('AuthMessageId') === '' && $this->GetStatus() !== 102) {
             $this->authenticate();
         } elseif ($this->isConfigured() && $this->HasActiveParent()
@@ -150,14 +170,14 @@ class MusicAssistantConnection extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
                 ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
                 ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
-                ['type' => 'Label', 'caption' => 'WebSocket-Anmeldung und Echtzeitaktualisierung von Player-Lautstärke und Mute.']
+                ['type' => 'Label', 'caption' => 'WebSocket login and real-time updates of player volume and mute.']
             ],
             'status' => [
-                ['code' => 102, 'icon' => 'active', 'caption' => 'Authentifiziert'],
-                ['code' => 104, 'icon' => 'inactive', 'caption' => 'Warte auf Verbindung / Server-Begrüßung'],
-                ['code' => 201, 'icon' => 'error', 'caption' => 'Nicht konfiguriert: Host, Port und Token prüfen'],
-                ['code' => 202, 'icon' => 'error', 'caption' => 'Authentifizierung fehlgeschlagen'],
-                ['code' => 203, 'icon' => 'error', 'caption' => 'Authentifizierung: Senden fehlgeschlagen oder Zeitüberschreitung']
+                ['code' => 102, 'icon' => 'active', 'caption' => 'Authenticated'],
+                ['code' => 104, 'icon' => 'inactive', 'caption' => 'Waiting for connection / server greeting'],
+                ['code' => 201, 'icon' => 'error', 'caption' => 'Not configured: Check host, port and token'],
+                ['code' => 202, 'icon' => 'error', 'caption' => 'Authentication failed'],
+                ['code' => 203, 'icon' => 'error', 'caption' => 'Authentication: Sending failed or timed out']
             ]
         ]);
     }
@@ -169,7 +189,7 @@ class MusicAssistantConnection extends IPSModule
             || !is_string($packet['Buffer'] ?? null)) {
             return '';
         }
-        $payload = utf8_decode($packet['Buffer']);
+        $payload = mb_convert_encoding($packet['Buffer'], 'ISO-8859-1', 'UTF-8');
         $message = json_decode($payload, true);
         if (!is_array($message)) {
             $this->SendDebug('WebSocket', 'Ungültige JSON-Nachricht', 0);
@@ -294,6 +314,12 @@ class MusicAssistantConnection extends IPSModule
         }
 
         $command = $request['Command'] ?? null;
+        if (in_array($command, ['ApiRequest', 'PlayRefreshedPlaylist'], true) && !$this->isConfigured()) {
+            return $this->apiErrorResponse(
+                'NOT_CONFIGURED',
+                'Music Assistant ist nicht konfiguriert.'
+            );
+        }
         if ($command === 'ApiRequest') {
             return $this->handleApiRequest($request);
         }
@@ -536,17 +562,14 @@ class MusicAssistantConnection extends IPSModule
             $headers[] = 'Authorization: Bearer ' . trim($this->ReadPropertyString('Token'));
         }
 
-        if (!IPS_SemaphoreEnter($this->maSemaphoreName(), 15000)) {
-            throw new Exception('Timeout beim Erwerb des HTTP-Semaphors');
+        $body = '';
+        $sizeExceeded = false;
+        $maxArtworkSize = self::MAX_ARTWORK_SIZE;
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new Exception('Imageproxy konnte nicht initialisiert werden.');
         }
         try {
-            $body = '';
-            $sizeExceeded = false;
-            $maxArtworkSize = self::MAX_ARTWORK_SIZE;
-            $ch = curl_init($url);
-            if ($ch === false) {
-                throw new Exception('Imageproxy konnte nicht initialisiert werden.');
-            }
             curl_setopt_array($ch, [
                 CURLOPT_HTTPGET           => true,
                 CURLOPT_HTTPHEADER        => $headers,
@@ -572,9 +595,9 @@ class MusicAssistantConnection extends IPSModule
             $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $contentType = strtolower(trim((string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE)));
             $curlErrorNumber = curl_errno($ch);
-            curl_close($ch);
         } finally {
-            IPS_SemaphoreLeave($this->maSemaphoreName());
+            curl_close($ch);
+            unset($ch);
         }
 
         if ($sizeExceeded || $curlErrorNumber === CURLE_FILESIZE_EXCEEDED) {
@@ -604,12 +627,12 @@ class MusicAssistantConnection extends IPSModule
 
     public function CheckConnection(): void
     {
-        if (!$this->isConfigured() || !$this->HasActiveParent()) {
-            $this->handleConnectionLost();
-            return;
-        }
         if ($this->GetBuffer('ParentReconnectPending') === '1') {
             $this->reconnectParent();
+            return;
+        }
+        if (!$this->isConfigured() || !$this->HasActiveParent()) {
+            $this->handleConnectionLost();
             return;
         }
         $started = (int)$this->GetBuffer('AuthStarted');
@@ -645,6 +668,8 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthStarted', '0');
         $this->invalidateQueueState();
         if (!$this->isConfigured()) {
+            $this->SetBuffer('AuthTokenFingerprint', hash('sha256', trim($this->ReadPropertyString('Token'))));
+            $this->SetTimerInterval('CheckConnection', 0);
             $this->SetStatus(201);
             return;
         }
@@ -662,6 +687,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthAttempts', (string)($attempts + 1));
         $this->SetBuffer('AuthRetryAt', '0');
         $this->SetStatus(104);
+        $token = trim($this->ReadPropertyString('Token'));
         try {
             $id = 'auth-' . bin2hex(random_bytes(16));
             $this->SetBuffer('AuthMessageId', $id);
@@ -671,7 +697,7 @@ class MusicAssistantConnection extends IPSModule
             $payload = json_encode([
                 'message_id' => $id,
                 'command' => 'auth',
-                'args' => ['token' => trim($this->ReadPropertyString('Token'))]
+                'args' => ['token' => $token]
             ], JSON_THROW_ON_ERROR);
             $result = @$this->SendDataToParent(json_encode([
                 'DataID' => self::WEBSOCKET_TX,
@@ -680,6 +706,7 @@ class MusicAssistantConnection extends IPSModule
             if ($result === false) {
                 throw new Exception('Send failed');
             }
+            $this->SetBuffer('AuthTokenFingerprint', hash('sha256', $token));
         } catch (Throwable $e) {
             $this->SetBuffer('AuthMessageId', '');
             $this->SetBuffer('AuthGeneration', '');
