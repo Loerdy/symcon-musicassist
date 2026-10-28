@@ -1,0 +1,12 @@
+{
+    "id": "{D68FD31F-0E90-7019-F16C-1949BD3079EF}",
+    "name": "WebSocket Client",
+    "type": 1,
+    "vendor": "Symcon GmbH",
+    "aliases": [],
+    "url": "https://www.symcon.de/de/service/dokumentation/modulreferenz/io/websocketclient/",
+    "parentRequirements": [],
+    "childRequirements": ["{018EF6B5-AB94-40C6-AA53-46943E824ACF}"],
+    "implemented": ["{79827379-F36E-4ADA-8A95-5F8D1DC92FA9}"],
+    "prefix": "WSC"
+}
