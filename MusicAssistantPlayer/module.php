@@ -34,6 +34,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterAttributeString('CoverProxyID', '');
         $this->RegisterAttributeString('CoverTargetProxyID', '');
         $this->RegisterAttributeBoolean('CoverIsDefault', false);
+        $this->RegisterAttributeBoolean('CoverVisibilityMigrated', false);
         $this->RegisterAttributeString('GroupMemberVolumeMap', '{}');
 
         $this->SetBuffer('ParentInstanceId', '0');
@@ -52,6 +53,9 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetBuffer('PendingCoverDownload', '{}');
         $this->SetBuffer('CoverDownloadGeneration', '0');
         $this->SetBuffer('RunningCoverDownload', '');
+        // Abweichende Revisionen sorgen dafür, dass die erste Kachelaktualisierung nach dem Laden das Cover enthält.
+        $this->SetBuffer('CoverRevision', '1');
+        $this->SetBuffer('VisualizationCoverRevision', '');
 
         $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
         $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
@@ -101,8 +105,8 @@ class MusicAssistantPlayer extends IPSModule
             $vidRadio = @$this->GetIDForIdent('Radio');
             IPS_SetIcon($vidRadio, 'radio');
         }
-        $this->resetInvalidMediaSelection('Playlist', 'PlaylistMap', 'ResetPlaylist', true);
-        $this->resetInvalidMediaSelection('Radio', 'RadioMap', 'ResetRadio', false);
+        $this->resetInvalidMediaSelection('Playlist', 'PlaylistProfile', 'ResetPlaylist');
+        $this->resetInvalidMediaSelection('Radio', 'RadioProfile', 'ResetRadio');
 
         // Transport
         $this->MaintainVariable('Transport', $this->Translate('Playback'), VARIABLETYPE_INTEGER, '~PlaybackPreviousNext', 30, true);
@@ -250,13 +254,14 @@ class MusicAssistantPlayer extends IPSModule
                 && IPS_VariableExists($favoriteId)
                 && (IPS_GetVariable($favoriteId)['VariableType'] ?? -1) === VARIABLETYPE_BOOLEAN;
             if ($favoriteCreated) {
-                IPS_SetIcon($favoriteId, 'Heart');
+                IPS_SetIcon($favoriteId, 'heart');
             }
             $this->EnableAction('Favorite');
         } else {
             $this->clearCurrentFavoriteTrack();
         }
         $this->ensureCoverMedia();
+        $this->migrateCoverVisibility();
 
         if ($this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
             try {
@@ -332,6 +337,13 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         $playerId = trim($this->ReadPropertyString('PlayerID'));
+        if (($packet['Event'] ?? null) === 'profiles_updated') {
+            // Der Configurator hat Playlist- oder Radio-Profile neu geladen; Auswahl und Kachel folgen dem Profil.
+            $this->resetInvalidMediaSelection('Playlist', 'PlaylistProfile', 'ResetPlaylist');
+            $this->resetInvalidMediaSelection('Radio', 'RadioProfile', 'ResetRadio');
+            $this->updateVisualization(true);
+            return '';
+        }
         if (($packet['Event'] ?? null) === 'media_item_updated') {
             if ($this->ReadPropertyBoolean('ShowFavorite')) {
                 try {
@@ -386,8 +398,6 @@ class MusicAssistantPlayer extends IPSModule
                         $this->clearCover();
                     } elseif ($hasCurrentItem) {
                         $this->updateCoverFromQueueItem($data['current_item'], $data['state'] ?? null);
-                    } elseif (array_key_exists('state', $data)) {
-                        $this->updateCoverVisibilityFromQueueState($data['state']);
                     }
                 } catch (Throwable $e) {
                     $this->SendDebug('Artwork', 'Cover konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
@@ -491,6 +501,7 @@ class MusicAssistantPlayer extends IPSModule
                 try {
                     $itemId = (int)$Value;
                     if ($itemId > 0) {
+                        $this->assertIntegerVariable('Playlist');
                         $playlist = $this->resolvePlaylistFromMap($itemId);
                         $this->PlayPlaylist($playlist);
                         $this->SetValue('Playlist', $itemId);
@@ -508,6 +519,7 @@ class MusicAssistantPlayer extends IPSModule
                 try {
                     $itemId = (int)$Value;
                     if ($itemId > 0) {
+                        $this->assertIntegerVariable('Radio');
                         $uri = $this->resolveUriFromMap($itemId, 'RadioMap', 'music/radios/library_items');
                         $this->PlayMediaUri($uri);
                         $this->SetValue('Radio', $itemId);
@@ -601,6 +613,7 @@ class MusicAssistantPlayer extends IPSModule
                         $this->GroupVolumeUp();
                     } catch (Throwable $e) {
                         $this->SendDebug('VolumeUp failed', $e->getMessage(), 0);
+                        $this->LogMessage(sprintf($this->Translate('Volume up failed: %s'), $e->getMessage()), KL_ERROR);
                     }
                 }
                 $this->SetValue('VolumeUp', 0);
@@ -612,6 +625,7 @@ class MusicAssistantPlayer extends IPSModule
                         $this->GroupVolumeDown();
                     } catch (Throwable $e) {
                         $this->SendDebug('VolumeDown failed', $e->getMessage(), 0);
+                        $this->LogMessage(sprintf($this->Translate('Volume down failed: %s'), $e->getMessage()), KL_ERROR);
                     }
                 }
                 $this->SetValue('VolumeDown', 0);
@@ -789,13 +803,13 @@ class MusicAssistantPlayer extends IPSModule
                 if (!IPS_SetMediaContent($mediaId, $content)) {
                     throw new Exception($this->Translate('Cover media could not be updated.'));
                 }
+                $this->markCoverChanged();
                 if (!$this->WriteAttributeString('CoverProxyID', $job['proxy_id'])) {
                     throw new Exception($this->Translate('Cover cache could not be saved.'));
                 }
                 if (!$this->WriteAttributeBoolean('CoverIsDefault', false)) {
                     throw new Exception($this->Translate('Cover status could not be saved.'));
                 }
-                $this->updateCoverVisibilityFromQueueState($job['state'], true);
                 $this->SetBuffer('PendingCoverDownload', '{}');
                 return true;
             });
@@ -1063,6 +1077,10 @@ class MusicAssistantPlayer extends IPSModule
 
     private function requestGroupMemberVolumeAction(string $ident, $value): bool
     {
+        // Andere Bedienbefehle sollen nicht auf die Gruppenlautstärke-Sperre warten.
+        if (!str_starts_with($ident, 'MemberVolume_') || !$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
+            return false;
+        }
         $playerId = $this->withGroupMemberVolumeLock(function () use ($ident, $value): ?string {
             if (!$this->ReadPropertyBoolean('ShowGroupMemberVolumes')) {
                 return null;
@@ -1409,10 +1427,8 @@ class MusicAssistantPlayer extends IPSModule
                 throw new UnexpectedValueException($this->Translate('The group volume variable could not be created safely.'));
             }
 
-            if (isset($existingMap[$ident]) && IPS_GetName($variableId) === $existingMap[$ident]['name']
-                && $existingMap[$ident]['name'] !== $member['name']) {
-                IPS_SetName($variableId, $member['name']);
-            }
+            // Der Variablenname wird nur beim Anlegen gesetzt (Store-Reviewrichtlinie Punkt 11); die Kachel
+            // verwendet weiterhin den aktuellen Namen aus Music Assistant aus der Zuordnung.
             $this->EnableAction($ident);
             if (is_int($member['volume_level'])) {
                 $this->SetValue($ident, $member['volume_level']);
@@ -2028,12 +2044,19 @@ class MusicAssistantPlayer extends IPSModule
         }
 
         try {
-            $stateJson = json_encode($this->buildVisualizationState(), JSON_THROW_ON_ERROR);
-            $stateHash = hash('sha256', $stateJson);
-            if (!$force && $this->GetBuffer('VisualizationStateHash') === $stateHash) {
+            // Das Cover (bis zu 512 KB) wird nur nach einer Änderung übertragen; neu geöffnete Kacheln erhalten es
+            // über GetVisualizationTile im vollständigen Initialzustand.
+            $coverRevision = $this->GetBuffer('CoverRevision');
+            $includeCover = $this->GetBuffer('VisualizationCoverRevision') !== $coverRevision;
+            $state = $this->buildVisualizationState(false);
+            $stateHash = hash('sha256', json_encode($state, JSON_THROW_ON_ERROR));
+            if (!$force && !$includeCover && $this->GetBuffer('VisualizationStateHash') === $stateHash) {
                 return;
             }
-            $transmitted = $this->UpdateVisualizationValue($stateJson);
+            if ($includeCover) {
+                $state['cover'] = $this->readVisualizationCover();
+            }
+            $transmitted = $this->UpdateVisualizationValue(json_encode($state, JSON_THROW_ON_ERROR));
             if ($transmitted !== true) {
                 if ($transmitted === false) {
                     $this->SendDebug('Visualization', 'Kachelzustand konnte nicht übertragen werden', 0);
@@ -2041,12 +2064,15 @@ class MusicAssistantPlayer extends IPSModule
                 return;
             }
             $this->SetBuffer('VisualizationStateHash', $stateHash);
+            if ($includeCover) {
+                $this->SetBuffer('VisualizationCoverRevision', $coverRevision);
+            }
         } catch (Throwable $e) {
             $this->SendDebug('Visualization', 'Kachel konnte nicht aktualisiert werden: ' . $e->getMessage(), 0);
         }
     }
 
-    private function buildVisualizationState(): array
+    private function buildVisualizationState(bool $includeCover = true): array
     {
         $transport = @$this->GetIDForIdent('Transport') > 0
             ? (int)$this->GetValue('Transport')
@@ -2071,12 +2097,11 @@ class MusicAssistantPlayer extends IPSModule
             : false;
         $playlistSelection = $this->readVisualizationSelection('Playlist');
         $radioSelection = $this->readVisualizationSelection('Radio');
-        $playlists = $this->buildVisualizationSelectionOptions('Playlist', 'PlaylistMap', 'PlaylistProfile');
-        $radios = $this->buildVisualizationSelectionOptions('Radio', 'RadioMap', 'RadioProfile');
+        $playlists = $this->buildVisualizationSelectionOptions('Playlist', 'PlaylistProfile');
+        $radios = $this->buildVisualizationSelectionOptions('Radio', 'RadioProfile');
         $groupMembers = $this->buildVisualizationGroupMembers();
 
-        return [
-            'cover'       => $this->readVisualizationCover(),
+        $state = [
             'title'       => $this->readVisualizationString('NowTitle'),
             'artist'      => $this->readVisualizationString('NowArtist'),
             'status'      => $states[$transport] ?? 'unknown',
@@ -2094,6 +2119,10 @@ class MusicAssistantPlayer extends IPSModule
             'radios'      => $radios,
             'groupMembers' => $groupMembers
         ];
+        if ($includeCover) {
+            $state['cover'] = $this->readVisualizationCover();
+        }
+        return $state;
     }
 
     private function readVisualizationSelection(string $ident): int
@@ -2144,19 +2173,22 @@ class MusicAssistantPlayer extends IPSModule
         });
     }
 
-    private function buildVisualizationSelectionOptions(
-        string $ident,
-        string $mapProperty,
-        string $profileProperty
-    ): array
+    private function buildVisualizationSelectionOptions(string $ident, string $profileProperty): array
+    {
+        return $this->readSelectionOptions($ident, $profileProperty) ?? [];
+    }
+
+    // Die Auswahl beruht allein auf dem Variablenprofil; Playlist- und Radio-Adressen ermittelt der Player beim
+    // Abspielen selbst. Der Configurator schreibt keine Zuordnungen mehr in die Player (Store-Reviewrichtlinie Punkt 13).
+    private function readSelectionOptions(string $ident, string $profileProperty): ?array
     {
         $variableId = @$this->GetIDForIdent($ident);
         if ($variableId <= 0 || !IPS_VariableExists($variableId)) {
-            return [];
+            return null;
         }
         $variable = IPS_GetVariable($variableId);
         if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-            return [];
+            return null;
         }
 
         $profile = is_string($variable['VariableCustomProfile'] ?? null)
@@ -2168,20 +2200,11 @@ class MusicAssistantPlayer extends IPSModule
                 : trim($this->ReadPropertyString($profileProperty));
         }
         if ($profile === '' || !IPS_VariableProfileExists($profile)) {
-            return [];
+            return null;
         }
         $profileData = IPS_GetVariableProfile($profile);
         if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-            return [];
-        }
-
-        try {
-            $map = json_decode(trim($this->ReadPropertyString($mapProperty)), true, 512, JSON_THROW_ON_ERROR);
-        } catch (Throwable $e) {
-            return [];
-        }
-        if (!is_array($map)) {
-            return [];
+            return null;
         }
 
         $options = [];
@@ -2192,11 +2215,7 @@ class MusicAssistantPlayer extends IPSModule
                 continue;
             }
             $itemId = (int)$value;
-            $key = (string)$itemId;
-            $validMapEntry = $mapProperty === 'PlaylistMap'
-                ? isset($map[$key]) && $this->normalizePlaylistMapEntry($map[$key]) !== null
-                : isset($map[$key]) && is_string($map[$key]) && trim($map[$key]) !== '';
-            if ($itemId <= 0 || (float)$itemId !== (float)$value || trim($name) === '' || !$validMapEntry) {
+            if ($itemId <= 0 || (float)$itemId !== (float)$value || trim($name) === '') {
                 continue;
             }
             $options[] = ['value' => $itemId, 'label' => trim($name)];
@@ -2279,7 +2298,7 @@ class MusicAssistantPlayer extends IPSModule
             throw new Exception($this->Translate('Cover media is not available.'));
         }
         if ($proxyId === '') {
-            $this->showDefaultCover($mediaId, '', $state);
+            $this->showDefaultCover($mediaId, '');
             return;
         }
 
@@ -2289,17 +2308,16 @@ class MusicAssistantPlayer extends IPSModule
                 if (!$this->WriteAttributeString('CoverTargetProxyID', $proxyId)) {
                     throw new Exception($this->Translate('Cover target could not be saved.'));
                 }
-                $this->setDefaultCover($mediaId, $state);
+                $this->setDefaultCover($mediaId);
             }
             if ($this->ReadAttributeString('CoverProxyID') === $proxyId
                 && !$this->ReadAttributeBoolean('CoverIsDefault')
                 && $this->coverMediaHasContent($mediaId)) {
                 $this->invalidatePendingCoverDownloadUnlocked();
-                $this->updateCoverVisibilityFromQueueState($state, true);
                 return false;
             }
             if ($this->ReadAttributeBoolean('CoverIsDefault') || !$this->coverMediaHasContent($mediaId)) {
-                $this->setDefaultCover($mediaId, $state);
+                $this->setDefaultCover($mediaId);
             }
             return $this->queueCoverDownloadUnlocked($proxyId, $state);
         });
@@ -2308,32 +2326,34 @@ class MusicAssistantPlayer extends IPSModule
         }
     }
 
-    private function showDefaultCover(int $mediaId, string $targetProxyId, $state): void
+    private function showDefaultCover(int $mediaId, string $targetProxyId): void
     {
-        $this->withCoverLock(function () use ($mediaId, $targetProxyId, $state): void {
+        $this->withCoverLock(function () use ($mediaId, $targetProxyId): void {
             if ($this->ReadAttributeString('CoverTargetProxyID') !== $targetProxyId
                 && !$this->WriteAttributeString('CoverTargetProxyID', $targetProxyId)) {
                 throw new Exception($this->Translate('Cover target could not be saved.'));
             }
-            $this->setDefaultCover($mediaId, $state);
+            $this->setDefaultCover($mediaId);
         });
     }
 
-    private function setDefaultCover(int $mediaId, $state): void
+    private function setDefaultCover(int $mediaId): void
     {
         $content = $this->loadDefaultCoverContent();
         $this->ensureCoverMediaFormat($mediaId, 'image/png');
         $currentContent = $this->coverMediaHasContent($mediaId)
             ? IPS_GetMediaContent($mediaId)
             : '';
-        if ($currentContent !== $content && !IPS_SetMediaContent($mediaId, $content)) {
-            throw new Exception($this->Translate('Default cover could not be set.'));
+        if ($currentContent !== $content) {
+            if (!IPS_SetMediaContent($mediaId, $content)) {
+                throw new Exception($this->Translate('Default cover could not be set.'));
+            }
+            $this->markCoverChanged();
         }
         if (!$this->ReadAttributeBoolean('CoverIsDefault')
             && !$this->WriteAttributeBoolean('CoverIsDefault', true)) {
             throw new Exception($this->Translate('Cover status could not be saved.'));
         }
-        $this->updateCoverVisibilityFromQueueState($state, true);
     }
 
     private function loadDefaultCoverContent(): string
@@ -2373,33 +2393,6 @@ class MusicAssistantPlayer extends IPSModule
         }
         if (!IPS_SetMediaFile($mediaId, $mediaFile, false)) {
             throw new Exception($this->Translate('Cover file format could not be updated.'));
-        }
-    }
-
-    private function updateCoverVisibilityFromQueueState($state, bool $hasCurrentItem = false): void
-    {
-        $normalizedState = is_string($state) ? strtolower(trim($state)) : '';
-        if (!in_array($normalizedState, ['idle', 'playing', 'paused'], true)) {
-            return;
-        }
-
-        $mediaId = $this->ensureCoverMedia();
-        if ($mediaId <= 0) {
-            return;
-        }
-        if ($normalizedState === 'idle') {
-            if (!IPS_SetHidden($mediaId, true)) {
-                throw new Exception($this->Translate('Cover media could not be hidden.'));
-            }
-            return;
-        }
-        if (!$hasCurrentItem) {
-            return;
-        }
-        if ($this->ReadAttributeString('CoverProxyID') !== ''
-            && $this->coverMediaHasContent($mediaId)
-            && !IPS_SetHidden($mediaId, false)) {
-            throw new Exception($this->Translate('Cover media could not be shown.'));
         }
     }
 
@@ -2511,7 +2504,8 @@ class MusicAssistantPlayer extends IPSModule
             'media/MusicAssistantCover_' . $this->InstanceID . '.jpg',
             false
         ) && $configured;
-        $configured = IPS_SetHidden($mediaId, true) && $configured;
+        // Die Sichtbarkeit wird nur beim Anlegen vorgegeben und danach nicht mehr verändert (Store-Reviewrichtlinie Punkt 11).
+        $configured = IPS_SetHidden($mediaId, false) && $configured;
         if (!$configured) {
             $this->SendDebug('Artwork', 'Cover-Medium konnte nicht vollständig konfiguriert werden', 0);
             if (!IPS_DeleteMedia($mediaId, true)) {
@@ -2519,7 +2513,33 @@ class MusicAssistantPlayer extends IPSModule
             }
             return 0;
         }
+        // Ein neu angelegtes (leeres) Medium ersetzt ein eventuell gelöschtes; die Kachel muss das erfahren.
+        $this->markCoverChanged();
         return $mediaId;
+    }
+
+    // Abweichung nach Store-Reviewrichtlinie Punkt 7: Bis v2.1.2 hat das Modul das Cover-Medium selbst ein- und
+    // ausgeblendet. Ein dabei ausgeblendetes Medium wird nach dem Update genau einmal wieder eingeblendet; danach
+    // bestimmt allein der Benutzer über die Sichtbarkeit.
+    private function migrateCoverVisibility(): void
+    {
+        if ($this->ReadAttributeBoolean('CoverVisibilityMigrated')) {
+            return;
+        }
+        $mediaId = @$this->GetIDForIdent('Cover');
+        if ($mediaId <= 0 || !IPS_MediaExists($mediaId)) {
+            return;
+        }
+        if ((IPS_GetObject($mediaId)['ObjectIsHidden'] ?? false) === true && !IPS_SetHidden($mediaId, false)) {
+            $this->SendDebug('Artwork', 'Cover-Medium konnte nicht einmalig eingeblendet werden', 0);
+            return;
+        }
+        $this->WriteAttributeBoolean('CoverVisibilityMigrated', true);
+    }
+
+    private function markCoverChanged(): void
+    {
+        $this->SetBuffer('CoverRevision', (string)((int)$this->GetBuffer('CoverRevision') + 1));
     }
 
     private function clearCover(): void
@@ -2533,19 +2553,25 @@ class MusicAssistantPlayer extends IPSModule
         }
         $this->withCoverLock(function () use ($mediaId): void {
             $this->invalidatePendingCoverDownloadUnlocked();
-            $hadContent = $this->coverMediaHasContent($mediaId);
             $hadProxyId = $this->ReadAttributeString('CoverProxyID') !== '';
-            if ($hadContent && !IPS_SetMediaContent($mediaId, '')) {
-                throw new Exception($this->Translate('Cover media could not be cleared.'));
-            }
-            if (!IPS_SetHidden($mediaId, true)) {
-                throw new Exception($this->Translate('Cover media could not be hidden.'));
-            }
             if ($hadProxyId && !$this->WriteAttributeString('CoverProxyID', '')) {
                 throw new Exception($this->Translate('Cover cache could not be reset.'));
             }
-            if (!$this->WriteAttributeString('CoverTargetProxyID', '')
-                || !$this->WriteAttributeBoolean('CoverIsDefault', false)) {
+            if ($this->ReadAttributeString('CoverTargetProxyID') !== ''
+                && !$this->WriteAttributeString('CoverTargetProxyID', '')) {
+                throw new Exception($this->Translate('Cover status could not be reset.'));
+            }
+            // Ohne Wiedergabe wird nur der Inhalt geleert; die Sichtbarkeit bleibt beim Benutzer (Store-Reviewrichtlinie
+            // Punkt 11). Die Mediaplayer-Kachel bleibt damit leer, die Player-Kachel zeigt ihren Platzhalter.
+            $hadContent = $this->coverMediaHasContent($mediaId);
+            if ($hadContent) {
+                if (!IPS_SetMediaContent($mediaId, '')) {
+                    throw new Exception($this->Translate('Cover media could not be cleared.'));
+                }
+                $this->markCoverChanged();
+            }
+            if ($this->ReadAttributeBoolean('CoverIsDefault')
+                && !$this->WriteAttributeBoolean('CoverIsDefault', false)) {
                 throw new Exception($this->Translate('Cover status could not be reset.'));
             }
             if ($hadContent || $hadProxyId) {
@@ -2677,7 +2703,7 @@ class MusicAssistantPlayer extends IPSModule
                 : 'UNKNOWN_ERROR';
             $message = is_string($error['message'] ?? null) && trim($error['message']) !== ''
                 ? trim($error['message'])
-                : 'ApiRequest ist fehlgeschlagen.';
+                : $this->Translate('ApiRequest failed.');
             throw new Exception($code . ': ' . $message);
         }
         return $result['result'] ?? null;
@@ -2716,7 +2742,7 @@ class MusicAssistantPlayer extends IPSModule
                 : 'UNKNOWN_ERROR';
             $message = is_string($error['message'] ?? null) && trim($error['message']) !== ''
                 ? trim($error['message'])
-                : 'PlayRefreshedPlaylist ist fehlgeschlagen.';
+                : $this->Translate('PlayRefreshedPlaylist failed.');
             throw new Exception($code . ': ' . $message);
         }
     }
@@ -2725,8 +2751,7 @@ class MusicAssistantPlayer extends IPSModule
 
     public function SetShuffle(bool $enabled): void
     {
-        $queueId = $this->getQueueIdForPlayer();
-        $this->sendApiRequest('player_queues/shuffle', ['queue_id' => $queueId, 'shuffle_enabled' => $enabled]);
+        $this->sendApiRequest('players/cmd/shuffle', ['player_id' => $this->playerId(), 'shuffle_enabled' => $enabled]);
     }
 
     public function SetRepeat(string $mode): void
@@ -2736,8 +2761,7 @@ class MusicAssistantPlayer extends IPSModule
             throw new InvalidArgumentException($this->Translate('Invalid repeat mode.'));
         }
 
-        $queueId = $this->getQueueIdForPlayer();
-        $this->sendApiRequest('player_queues/repeat', ['queue_id' => $queueId, 'repeat_mode' => $mode]);
+        $this->sendApiRequest('players/cmd/repeat', ['player_id' => $this->playerId(), 'repeat_mode' => $mode]);
     }
 
     public function SetMute(bool $muted): void
@@ -2748,18 +2772,11 @@ class MusicAssistantPlayer extends IPSModule
             $this->sendApiRequest('players/cmd/volume_mute', ['player_id' => $playerId, 'muted' => $muted]);
             return;
         } catch (Throwable $e) {
-            if (str_starts_with($playerId, 'syncgroup_')) {
-                $members = $this->getSyncGroupMembers($playerId);
-                if (count($members) === 0) {
-                    throw $e;
-                }
-                foreach ($members as $mid) {
-                    try {
-                        $this->sendApiRequest('players/cmd/volume_mute', ['player_id' => $mid, 'muted' => $muted]);
-                    } catch (Throwable $inner) {
-                        $this->SendDebug('Mute member failed', $mid . ': ' . $inner->getMessage(), 0);
-                    }
-                }
+            // group_volume_mute leitet synchronisierte Mitglieder an ihren Leader weiter und ist daher nur
+            // als Ersatz für Gruppen-Player geeignet, nicht als allgemeiner Mute-Befehl.
+            if ($this->isConfiguredPlayerKnownGroup() || str_starts_with($playerId, 'syncgroup_')) {
+                $this->SendDebug('Mute', 'volume_mute fehlgeschlagen; Gruppen-Mute wird verwendet', 0);
+                $this->sendApiRequest('players/cmd/group_volume_mute', ['player_id' => $playerId, 'muted' => $muted]);
                 return;
             }
             throw $e;
@@ -2830,10 +2847,26 @@ class MusicAssistantPlayer extends IPSModule
         $existingId = @$this->GetIDForIdent($ident);
         $hadIntegerVariable = false;
         if ($existingId > 0) {
-            $v = IPS_GetVariable($existingId);
-            $hadIntegerVariable = ($v['VariableType'] ?? -1) === VARIABLETYPE_INTEGER;
-            if (!$hadIntegerVariable) {
-                IPS_DeleteVariable($existingId);
+            $existingType = IPS_VariableExists($existingId)
+                ? (IPS_GetVariable($existingId)['VariableType'] ?? -1)
+                : -1;
+            $hadIntegerVariable = $existingType === VARIABLETYPE_INTEGER;
+            // Bis alpha 0.4 war Playlist eine String-Variable des Moduls; nur diese wird migriert.
+            $isLegacyPlaylist = $ident === 'Playlist' && $existingType === VARIABLETYPE_STRING;
+            if (!$hadIntegerVariable && !$isLegacyPlaylist) {
+                $message = sprintf(
+                    $this->Translate('The ident %s is used by an incompatible object. The selection variable was not created.'),
+                    $ident
+                );
+                $this->SendDebug($ident, $message, 0);
+                $this->LogMessage($message, KL_WARNING);
+                return false;
+            }
+            if ($isLegacyPlaylist && !IPS_DeleteVariable($existingId)) {
+                $message = sprintf($this->Translate('The legacy variable %s could not be replaced.'), $ident);
+                $this->SendDebug($ident, $message, 0);
+                $this->LogMessage($message, KL_ERROR);
+                return false;
             }
         }
 
@@ -2857,56 +2890,30 @@ class MusicAssistantPlayer extends IPSModule
             && ($existingId <= 0 || $variableId !== $existingId);
     }
 
-    private function resetInvalidMediaSelection(
-        string $ident,
-        string $mapProperty,
-        string $resetTimer,
-        bool $playlist
-    ): void
+    private function assertIntegerVariable(string $ident): void
     {
         $variableId = @$this->GetIDForIdent($ident);
-        if ($variableId <= 0 || !IPS_VariableExists($variableId)) {
-            return;
+        if ($variableId <= 0
+            || !IPS_VariableExists($variableId)
+            || (IPS_GetVariable($variableId)['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
+            throw new Exception(sprintf(
+                $this->Translate('The selection variable %s is not available.'),
+                $ident
+            ));
         }
-        $variable = IPS_GetVariable($variableId);
-        if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-            return;
-        }
+    }
 
-        $selectedItemId = (int)$this->GetValue($ident);
-        if ($selectedItemId <= 0) {
-            return;
-        }
+    private function resetInvalidMediaSelection(string $ident, string $profileProperty, string $resetTimer): void
+    {
         if ($this->GetTimerInterval($resetTimer) > 0) {
             return;
         }
-
-        try {
-            $mapJson = trim($this->ReadPropertyString($mapProperty));
-            $mapObject = json_decode($mapJson, false, 512, JSON_THROW_ON_ERROR);
-            $map = json_decode($mapJson, true, 512, JSON_THROW_ON_ERROR);
-        } catch (Throwable $e) {
-            $this->SendDebug($ident, $mapProperty . ' enthält ungültiges JSON; Auswahlwert wurde beibehalten.', 0);
+        $options = $this->readSelectionOptions($ident, $profileProperty);
+        if ($options === null) {
             return;
         }
-        if (!is_object($mapObject) || !is_array($map)) {
-            $this->SendDebug($ident, $mapProperty . ' ist kein JSON-Objekt; Auswahlwert wurde beibehalten.', 0);
-            return;
-        }
-
-        foreach ($map as $itemId => $entry) {
-            $itemId = (string)$itemId;
-            $validItemId = (int)$itemId > 0 && (string)(int)$itemId === $itemId;
-            $validEntry = $playlist
-                ? $this->normalizePlaylistMapEntry($entry) !== null
-                : is_string($entry) && trim($entry) !== '';
-            if (!$validItemId || !$validEntry) {
-                $this->SendDebug($ident, $mapProperty . ' enthält einen ungültigen Eintrag; Auswahlwert wurde beibehalten.', 0);
-                return;
-            }
-        }
-
-        if (array_key_exists((string)$selectedItemId, $map)) {
+        $selectedItemId = (int)$this->GetValue($ident);
+        if ($selectedItemId <= 0 || in_array($selectedItemId, array_column($options, 'value'), true)) {
             return;
         }
 
@@ -3076,53 +3083,5 @@ class MusicAssistantPlayer extends IPSModule
     private function isList(array $arr): bool
     {
         return array_keys($arr) === range(0, count($arr) - 1);
-    }
-
-    private function getSyncGroupMembers(string $syncGroupId): array
-    {
-        $result = $this->sendApiRequest('players/all');
-
-        if (!is_array($result) || !$this->isList($result)) {
-            return [];
-        }
-
-        foreach ($result as $p) {
-            $pid = (string)($p['player_id'] ?? $p['id'] ?? '');
-            if ($pid !== $syncGroupId) {
-                continue;
-            }
-
-            $candidates = [
-                $p['group_members'] ?? null,
-                $p['members'] ?? null,
-                $p['players'] ?? null,
-                $p['child_player_ids'] ?? null,
-                $p['group_childs'] ?? null
-            ];
-
-            foreach ($candidates as $cand) {
-                if (!is_array($cand)) {
-                    continue;
-                }
-
-                $out = [];
-                foreach ($cand as $x) {
-                    if (is_string($x) && $x !== '') {
-                        $out[] = $x;
-                    } elseif (is_array($x)) {
-                        $id = (string)($x['player_id'] ?? $x['id'] ?? '');
-                        if ($id !== '') {
-                            $out[] = $id;
-                        }
-                    }
-                }
-
-                return array_values(array_unique($out));
-            }
-
-            return [];
-        }
-
-        return [];
     }
 }

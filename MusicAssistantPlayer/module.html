@@ -952,10 +952,6 @@
             const status = Object.prototype.hasOwnProperty.call(statusLabels, data.status)
                 ? data.status
                 : "unknown";
-            const cover = typeof data.cover === "string"
-                && /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(data.cover)
-                ? data.cover
-                : "";
             const volume = typeof data.volume === "number" && Number.isFinite(data.volume)
                 ? Math.max(0, Math.min(100, Math.round(data.volume)))
                 : 0;
@@ -1038,6 +1034,14 @@
             renderOptions("radio", data.radios, "Radio", radioSelection, radioSelectionRevision);
             renderGroupMembers(data.groupMembers);
 
+            // Das Modul sendet das Cover nur bei Änderungen; ohne "cover" bleibt das aktuelle Bild erhalten.
+            if (!Object.prototype.hasOwnProperty.call(data, "cover")) {
+                return;
+            }
+            const cover = typeof data.cover === "string"
+                && /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(data.cover)
+                ? data.cover
+                : "";
             const coverElement = document.getElementById("cover");
             const coverPlaceholder = document.getElementById("cover-placeholder");
             const coverUnavailable = cover === "" || cover === failedCover;

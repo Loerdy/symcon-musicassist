@@ -71,6 +71,9 @@ trait MusicAssistantApi
         );
 
         $ch = curl_init($this->maApiUrl());
+        if ($ch === false) {
+            throw new Exception('HTTP request could not be initialized');
+        }
         try {
             curl_setopt_array($ch, [
                 CURLOPT_RETURNTRANSFER     => true,
@@ -86,10 +89,8 @@ trait MusicAssistantApi
             $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $err      = (string)curl_error($ch);
         } finally {
-            if ($ch !== false) {
-                curl_close($ch);
-                unset($ch);
-            }
+            // curl_close() ist seit PHP 8.0 wirkungslos und ab PHP 8.5 veraltet; das Handle wird mit unset freigegeben.
+            unset($ch);
         }
 
         if ($respBody === false || $respBody === null) {

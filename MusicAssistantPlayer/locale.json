@@ -35,6 +35,8 @@
             "Mute failed: %s": "Stummschaltung fehlgeschlagen: %s",
             "Favorite failed: %s": "Favoritenänderung fehlgeschlagen: %s",
             "Setting volume failed: %s": "Lautstärkeeinstellung fehlgeschlagen: %s",
+            "Volume up failed: %s": "Lautstärke erhöhen fehlgeschlagen: %s",
+            "Volume down failed: %s": "Lautstärke verringern fehlgeschlagen: %s",
             "Unknown action: %s": "Unbekannte Aktion: %s",
             "Artwork response is invalid.": "Artwork-Antwort ist ungültig.",
             "Artwork signature does not match the content type.": "Artwork-Signatur passt nicht zum Content-Type.",
@@ -71,8 +73,6 @@
             "Default cover file is not a valid PNG file.": "Standard-Cover-Datei ist keine gültige PNG-Datei.",
             "Default cover file is too large for the HTML tile.": "Standard-Cover-Datei ist für die HTML-Kachel zu groß.",
             "Cover file format could not be updated.": "Cover-Dateiformat konnte nicht aktualisiert werden.",
-            "Cover media could not be hidden.": "Cover-Medium konnte nicht ausgeblendet werden.",
-            "Cover media could not be shown.": "Cover-Medium konnte nicht eingeblendet werden.",
             "ArtworkRequest did not return a valid response.": "ArtworkRequest lieferte keine gültige Antwort.",
             "ArtworkRequest failed.": "ArtworkRequest ist fehlgeschlagen.",
             "Cover media could not be cleared.": "Cover-Medium konnte nicht geleert werden.",
@@ -114,7 +114,12 @@
             "Unmute": "Ton einschalten",
             "Repeat off": "Repeat aus",
             "Repeat one": "Titel wiederholen",
-            "Repeat all": "Alle wiederholen"
+            "Repeat all": "Alle wiederholen",
+            "The ident %s is used by an incompatible object. The selection variable was not created.": "Der Ident %s wird von einem inkompatiblen Objekt verwendet. Die Auswahlvariable wurde nicht angelegt.",
+            "The legacy variable %s could not be replaced.": "Die veraltete Variable %s konnte nicht ersetzt werden.",
+            "The selection variable %s is not available.": "Die Auswahlvariable %s ist nicht verfügbar.",
+            "ApiRequest failed.": "ApiRequest ist fehlgeschlagen.",
+            "PlayRefreshedPlaylist failed.": "PlayRefreshedPlaylist ist fehlgeschlagen."
         }
     }
 }

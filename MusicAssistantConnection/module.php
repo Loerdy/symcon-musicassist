@@ -31,6 +31,9 @@ class MusicAssistantConnection extends IPSModule
         'players/cmd/group_volume_up',
         'players/cmd/group_volume_down',
         'players/cmd/volume_mute',
+        'players/cmd/group_volume_mute',
+        'players/cmd/shuffle',
+        'players/cmd/repeat',
         'players/all',
         'player_queues/get_active_queue',
         'player_queues/shuffle',
@@ -63,6 +66,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('ParentInstanceId', '0');
         $this->SetBuffer('ParentReconnectPending', '0');
         $this->SetBuffer('ParentReconnectAttempted', '0');
+        $this->SetBuffer('ParentInactiveReported', '0');
         $this->withStateLock(function (): void {
             $this->invalidateQueueStateFromState();
             $this->SetBuffer('ResyncPlayers', '{}');
@@ -86,11 +90,14 @@ class MusicAssistantConnection extends IPSModule
         $tokenChanged = $hasEstablishedSession
             && ($authenticatedTokenFingerprint === ''
                 || !hash_equals($authenticatedTokenFingerprint, $currentTokenFingerprint));
+        if ($this->parentNeedsConfirmation()) {
+            $this->SendDebug('WebSocket', 'WebSocket-Client muss die Konfiguration übernehmen bzw. aktiviert werden', 0);
+        }
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
         $this->resetAuthRetryState();
-        $this->SetStatus($this->isConfigured() ? 104 : 201);
+        $this->SetStatus($this->disconnectedStatus());
         $this->SetTimerInterval('CheckConnection', $this->isConfigured() ? 5000 : 0);
         try {
             $this->invalidateQueueState();
@@ -163,6 +170,55 @@ class MusicAssistantConnection extends IPSModule
         return json_encode(['URL' => $this->webSocketUrl()]);
     }
 
+    public function RequestAction($Ident, $Value): void
+    {
+        switch ($Ident) {
+            case 'ConfigureParent':
+                $this->configureParentOnUserRequest();
+                break;
+
+            default:
+                throw new Exception(sprintf($this->Translate('Unknown action: %s'), $Ident));
+        }
+    }
+
+    // Abweichung nach Store-Reviewrichtlinie Punkt 7: Der WebSocket-Client wird nur nach ausdrücklichem Klick des
+    // Benutzers auf die von GetConfigurationForParent vorgegebenen Werte gesetzt und aktiviert.
+    private function configureParentOnUserRequest(): void
+    {
+        $parentId = (int)$this->GetBuffer('ParentInstanceId');
+        if ($parentId <= 0 || !IPS_InstanceExists($parentId)
+            || (IPS_GetInstance($parentId)['ModuleInfo']['ModuleID'] ?? null) !== self::WEBSOCKET_MODULE) {
+            throw new Exception($this->Translate('No WebSocket Client is connected.'));
+        }
+        if (!$this->isConfigured()) {
+            throw new Exception($this->Translate('Not configured: Check host, port and token'));
+        }
+        $configuration = json_decode($this->GetConfigurationForParent(), true);
+        if (!is_array($configuration)) {
+            throw new Exception($this->Translate('The WebSocket Client could not be set up.'));
+        }
+        $configuration['Active'] = true;
+        foreach ($configuration as $property => $value) {
+            if (IPS_GetProperty($parentId, $property) !== $value
+                && !IPS_SetProperty($parentId, $property, $value)) {
+                throw new Exception($this->Translate('The WebSocket Client could not be set up.'));
+            }
+        }
+        if (!IPS_ApplyChanges($parentId)) {
+            throw new Exception($this->Translate('The WebSocket Client could not be set up.'));
+        }
+        $this->SendDebug('WebSocket', 'WebSocket-Client auf Anforderung des Benutzers eingerichtet und aktiviert', 0);
+
+        $this->SetBuffer('ParentReconnectAttempted', '0');
+        if ($this->GetStatus() === 204) {
+            $this->SetStatus($this->disconnectedStatus());
+        }
+        $needsConfirmation = $this->parentNeedsConfirmation();
+        $this->UpdateFormField('ParentHint', 'visible', $needsConfirmation);
+        $this->UpdateFormField('ConfigureParentButton', 'visible', $needsConfirmation);
+    }
+
     public function GetConfigurationForm(): string
     {
         return json_encode([
@@ -170,14 +226,28 @@ class MusicAssistantConnection extends IPSModule
                 ['type' => 'ValidationTextBox', 'name' => 'Host', 'caption' => 'Server'],
                 ['type' => 'NumberSpinner', 'name' => 'Port', 'caption' => 'Port'],
                 ['type' => 'PasswordTextBox', 'name' => 'Token', 'caption' => 'Token'],
-                ['type' => 'Label', 'caption' => 'WebSocket login and real-time updates of player volume and mute.']
+                ['type' => 'Label', 'caption' => 'WebSocket login and real-time updates of player volume and mute.'],
+                [
+                    'type'    => 'Label',
+                    'name'    => 'ParentHint',
+                    'caption' => 'The parent WebSocket Client must apply the pending configuration and be active. Use the button below or confirm it in the WebSocket Client.',
+                    'visible' => $this->parentNeedsConfirmation()
+                ],
+                [
+                    'type'    => 'Button',
+                    'name'    => 'ConfigureParentButton',
+                    'caption' => 'Set up and activate WebSocket Client',
+                    'onClick' => 'IPS_RequestAction($id, "ConfigureParent", true);',
+                    'visible' => $this->parentNeedsConfirmation()
+                ]
             ],
             'status' => [
                 ['code' => 102, 'icon' => 'active', 'caption' => 'Authenticated'],
                 ['code' => 104, 'icon' => 'inactive', 'caption' => 'Waiting for connection / server greeting'],
                 ['code' => 201, 'icon' => 'error', 'caption' => 'Not configured: Check host, port and token'],
                 ['code' => 202, 'icon' => 'error', 'caption' => 'Authentication failed'],
-                ['code' => 203, 'icon' => 'error', 'caption' => 'Authentication: Sending failed or timed out']
+                ['code' => 203, 'icon' => 'error', 'caption' => 'Authentication: Sending failed or timed out'],
+                ['code' => 204, 'icon' => 'error', 'caption' => 'WebSocket Client: Apply configuration and activate']
             ]
         ]);
     }
@@ -317,7 +387,7 @@ class MusicAssistantConnection extends IPSModule
         if (in_array($command, ['ApiRequest', 'PlayRefreshedPlaylist'], true) && !$this->isConfigured()) {
             return $this->apiErrorResponse(
                 'NOT_CONFIGURED',
-                'Music Assistant ist nicht konfiguriert.'
+                'Music Assistant is not configured.'
             );
         }
         if ($command === 'ApiRequest') {
@@ -328,6 +398,16 @@ class MusicAssistantConnection extends IPSModule
         }
         if ($command === 'ArtworkRequest') {
             return $this->handleArtworkRequest($request);
+        }
+        if ($command === 'ProfilesUpdated') {
+            // Der Configurator meldet neu geladene Playlist-/Radio-Profile über den Datenfluss an die Player,
+            // statt deren Eigenschaften zu ändern (Store-Reviewrichtlinien Punkt 4 und 13).
+            $this->SendDataToChildren(json_encode([
+                'DataID' => self::CONNECTION_EVENT,
+                'Event'  => 'profiles_updated'
+            ], JSON_THROW_ON_ERROR));
+            $this->SendDebug('Profiles', 'Profilaktualisierung an Player weitergeleitet', 0);
+            return json_encode(['success' => true]);
         }
         if (!in_array($command, ['RegisterPlayer', 'UnregisterPlayer'], true)
             || !is_string($request['PlayerID'] ?? null)
@@ -363,18 +443,18 @@ class MusicAssistantConnection extends IPSModule
         if (count(array_diff(array_keys($request), $allowedFields)) > 0
             || !is_string($request['ApiCommand'] ?? null)
             || trim($request['ApiCommand']) === '') {
-            return $this->apiErrorResponse('INVALID_REQUEST', 'Ungültige API-Anfrage.');
+            return $this->apiErrorResponse('INVALID_REQUEST', 'Invalid API request.');
         }
 
         $apiCommand = trim($request['ApiCommand']);
         if (!in_array($apiCommand, self::API_COMMANDS, true)) {
-            return $this->apiErrorResponse('COMMAND_NOT_ALLOWED', 'API-Command ist nicht freigegeben.');
+            return $this->apiErrorResponse('COMMAND_NOT_ALLOWED', 'API command is not allowed.');
         }
 
         $params = $request['Params'] ?? [];
         if (!is_array($params)
             || (count($params) > 0 && array_keys($params) === range(0, count($params) - 1))) {
-            return $this->apiErrorResponse('INVALID_REQUEST', 'Params muss ein JSON-Objekt sein.');
+            return $this->apiErrorResponse('INVALID_REQUEST', 'Params must be a JSON object.');
         }
 
         try {
@@ -386,7 +466,7 @@ class MusicAssistantConnection extends IPSModule
             $response = $this->maCall($apiCommand, $params, 20000, false);
             if (($response['success'] ?? false) !== true) {
                 $this->SendDebug('ApiRequest', 'Music-Assistant-Fehler für Command: ' . $apiCommand, 0);
-                return $this->apiErrorResponse('API_ERROR', 'Music-Assistant-Anfrage fehlgeschlagen.');
+                return $this->apiErrorResponse('API_ERROR', 'Music Assistant request failed.');
             }
             return json_encode([
                 'success'   => true,
@@ -395,7 +475,7 @@ class MusicAssistantConnection extends IPSModule
             ], JSON_UNESCAPED_SLASHES);
         } catch (Throwable $e) {
             $this->SendDebug('ApiRequest', 'HTTP-Anfrage fehlgeschlagen für Command: ' . $apiCommand, 0);
-            return $this->apiErrorResponse('API_ERROR', 'Music-Assistant-Anfrage fehlgeschlagen.');
+            return $this->apiErrorResponse('API_ERROR', 'Music Assistant request failed.');
         }
     }
 
@@ -411,7 +491,7 @@ class MusicAssistantConnection extends IPSModule
             || preg_match('/[\x00-\x1F\x7F]/', $queueId)
             || !in_array($itemId, ['random_tracks', 'random_album', 'random_artist'], true)
             || $provider !== 'builtin') {
-            return $this->apiErrorResponse('INVALID_REQUEST', 'Ungültige Anfrage für die aktualisierte Playlist-Wiedergabe.');
+            return $this->apiErrorResponse('INVALID_REQUEST', 'Invalid request for refreshed playlist playback.');
         }
 
         try {
@@ -425,7 +505,7 @@ class MusicAssistantConnection extends IPSModule
                 || !is_array($tracks)
                 || count($tracks) === 0
                 || array_keys($tracks) !== range(0, count($tracks) - 1)) {
-                return $this->apiErrorResponse('PLAYLIST_REFRESH_FAILED', 'Die Zufallsplaylist konnte nicht vollständig aktualisiert werden.');
+                return $this->apiErrorResponse('PLAYLIST_REFRESH_FAILED', 'The random playlist could not be refreshed completely.');
             }
 
             $trackUris = [];
@@ -433,7 +513,7 @@ class MusicAssistantConnection extends IPSModule
                 if (!is_array($track)
                     || !is_string($track['uri'] ?? null)
                     || trim($track['uri']) === '') {
-                    return $this->apiErrorResponse('PLAYLIST_REFRESH_FAILED', 'Die Zufallsplaylist enthält einen ungültigen Titel.');
+                    return $this->apiErrorResponse('PLAYLIST_REFRESH_FAILED', 'The random playlist contains an invalid track.');
                 }
                 $trackUris[] = trim($track['uri']);
             }
@@ -444,14 +524,14 @@ class MusicAssistantConnection extends IPSModule
                 'option'   => 'replace'
             ], 20000, false);
             if (($playResponse['success'] ?? false) !== true) {
-                return $this->apiErrorResponse('PLAY_MEDIA_FAILED', 'Die aktualisierte Zufallsplaylist konnte nicht gestartet werden.');
+                return $this->apiErrorResponse('PLAY_MEDIA_FAILED', 'The refreshed random playlist could not be started.');
             }
 
             $this->SendDebug('PlayRefreshedPlaylist', 'Titel an Queue übergeben: ' . count($trackUris), 0);
             return json_encode(['success' => true], JSON_UNESCAPED_SLASHES);
         } catch (Throwable $e) {
             $this->SendDebug('PlayRefreshedPlaylist', 'Aktualisierung oder Wiedergabe fehlgeschlagen', 0);
-            return $this->apiErrorResponse('PLAY_REFRESHED_PLAYLIST_FAILED', 'Die Zufallsplaylist konnte nicht aktualisiert und gestartet werden.');
+            return $this->apiErrorResponse('PLAY_REFRESHED_PLAYLIST_FAILED', 'The random playlist could not be refreshed and started.');
         }
     }
 
@@ -461,10 +541,10 @@ class MusicAssistantConnection extends IPSModule
         if (count(array_diff(array_keys($request), $allowedFields)) > 0
             || !is_string($request['ProxyID'] ?? null)
             || preg_match('/^[a-f0-9]{64}$/D', $request['ProxyID']) !== 1) {
-            return $this->apiErrorResponse('INVALID_REQUEST', 'Ungültige Artwork-Anfrage.');
+            return $this->apiErrorResponse('INVALID_REQUEST', 'Invalid artwork request.');
         }
         if (!$this->isConfigured()) {
-            return $this->apiErrorResponse('NOT_CONFIGURED', 'Music Assistant ist nicht konfiguriert.');
+            return $this->apiErrorResponse('NOT_CONFIGURED', 'Music Assistant is not configured.');
         }
 
         $authenticatedRetry = false;
@@ -482,7 +562,7 @@ class MusicAssistantConnection extends IPSModule
                     $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
                 }
                 $this->SendDebug('Artwork', $message, 0);
-                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover could not be loaded.');
             }
             if (!in_array($response['content_type'], ['image/jpeg', 'image/png'], true)) {
                 $message = 'Imageproxy lieferte unerwarteten Content-Type: '
@@ -491,7 +571,7 @@ class MusicAssistantConnection extends IPSModule
                     $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
                 }
                 $this->SendDebug('Artwork', $message, 0);
-                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover could not be loaded.');
             }
             if ($response['body'] === '') {
                 $message = 'Imageproxy lieferte leere Bilddaten';
@@ -499,7 +579,7 @@ class MusicAssistantConnection extends IPSModule
                     $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
                 }
                 $this->SendDebug('Artwork', $message, 0);
-                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover could not be loaded.');
             }
             if (strlen($response['body']) > self::MAX_ARTWORK_SIZE) {
                 $message = 'Imageproxy überschritt die maximale Bildgröße';
@@ -507,7 +587,7 @@ class MusicAssistantConnection extends IPSModule
                     $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
                 }
                 $this->SendDebug('Artwork', $message, 0);
-                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover could not be loaded.');
             }
             $validSignature = $response['content_type'] === 'image/jpeg'
                 ? substr($response['body'], 0, 3) === "\xFF\xD8\xFF"
@@ -518,7 +598,7 @@ class MusicAssistantConnection extends IPSModule
                     $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
                 }
                 $this->SendDebug('Artwork', $message, 0);
-                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+                return $this->apiErrorResponse('IMAGE_ERROR', 'Cover could not be loaded.');
             }
 
             $this->SendDebug('Artwork', 'Cover über Imageproxy geladen', 0);
@@ -541,7 +621,7 @@ class MusicAssistantConnection extends IPSModule
                 $message = 'Authentifizierter Wiederholungsversuch fehlgeschlagen; ' . $message;
             }
             $this->SendDebug('Artwork', $message, 0);
-            return $this->apiErrorResponse('IMAGE_ERROR', 'Cover konnte nicht geladen werden.');
+            return $this->apiErrorResponse('IMAGE_ERROR', 'Cover could not be loaded.');
         }
     }
 
@@ -596,7 +676,7 @@ class MusicAssistantConnection extends IPSModule
             $contentType = strtolower(trim((string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE)));
             $curlErrorNumber = curl_errno($ch);
         } finally {
-            curl_close($ch);
+            // curl_close() ist seit PHP 8.0 wirkungslos und ab PHP 8.5 veraltet; das Handle wird mit unset freigegeben.
             unset($ch);
         }
 
@@ -620,7 +700,7 @@ class MusicAssistantConnection extends IPSModule
             'success' => false,
             'error' => [
                 'code' => $code,
-                'message' => $message
+                'message' => $this->Translate($message)
             ]
         ], JSON_UNESCAPED_SLASHES);
     }
@@ -632,9 +712,16 @@ class MusicAssistantConnection extends IPSModule
             return;
         }
         if (!$this->isConfigured() || !$this->HasActiveParent()) {
-            $this->handleConnectionLost();
+            if ($this->isConfigured() && $this->GetBuffer('ParentInactiveReported') !== '1') {
+                $this->SetBuffer('ParentInactiveReported', '1');
+                $this->SendDebug('WebSocket', 'Übergeordnete Instanz ist nicht aktiv oder nicht verbunden', 0);
+            }
+            $this->tryStateOperation('Connection loss', function (): void {
+                $this->handleConnectionLost();
+            });
             return;
         }
+        $this->SetBuffer('ParentInactiveReported', '0');
         $started = (int)$this->GetBuffer('AuthStarted');
         $now = time();
         if ($started > 0 && $now - $started >= 15) {
@@ -650,11 +737,31 @@ class MusicAssistantConnection extends IPSModule
         if ($retryAt > 0 && $now >= $retryAt
             && $this->GetBuffer('AuthMessageId') === ''
             && $this->GetBuffer('AuthRetryGeneration') === $this->GetBuffer('ConnectionGeneration')) {
-            $this->authenticate();
+            $this->tryStateOperation('Authentication', function (): void {
+                $this->authenticate();
+            });
         }
-        $this->expireQueueRequests();
+        // Jeder Schritt wird einzeln abgesichert, damit ein gesperrter Zustand die übrigen nicht verhindert.
+        $this->tryStateOperation('Timeouts', function (): void {
+            $this->expireQueueRequests();
+        });
         $this->recoverStaleResyncProcessing();
-        $this->retryPendingResyncs();
+        $this->tryStateOperation('Resync retry', function (): void {
+            $this->retryPendingResyncs();
+        });
+    }
+
+    private function tryStateOperation(string $context, callable $operation): void
+    {
+        try {
+            $operation();
+        } catch (Throwable $e) {
+            if (!$this->isStateSemaphoreTimeout($e)) {
+                $this->LogMessage($this->Translate($context) . ': ' . $e->getMessage(), KL_ERROR);
+                throw $e;
+            }
+            $this->SendDebug('State', $context . ' wegen gesperrtem Zustand übersprungen; nächster Versuch im nächsten Timerlauf', 0);
+        }
     }
 
     private function authenticate(): void
@@ -754,8 +861,33 @@ class MusicAssistantConnection extends IPSModule
         if ($previousParentId !== $parentId) {
             $this->SetBuffer('GreetingUrl', '');
             $this->SetBuffer('ParentReconnectAttempted', '0');
+            $this->SetBuffer('ParentInactiveReported', '0');
         }
         $this->SetBuffer('ParentInstanceId', (string)$parentId);
+    }
+
+    // Die Konsole überträgt GetConfigurationForParent nur beim Anlegen oder Verbinden. Nach den Store-Reviewrichtlinien
+    // (Punkt 13) bestätigt der Benutzer geänderte Werte im WebSocket-Client selbst; das Modul zeigt dies nur an.
+    private function parentNeedsConfirmation(): bool
+    {
+        $parentId = (int)$this->GetBuffer('ParentInstanceId');
+        if (!$this->isConfigured() || $parentId <= 0 || !IPS_InstanceExists($parentId)) {
+            return false;
+        }
+        $parent = IPS_GetInstance($parentId);
+        if (($parent['ModuleInfo']['ModuleID'] ?? null) !== self::WEBSOCKET_MODULE) {
+            return false;
+        }
+        return (string)IPS_GetProperty($parentId, 'URL') !== $this->webSocketUrl()
+            || IPS_GetProperty($parentId, 'Active') !== true;
+    }
+
+    private function disconnectedStatus(): int
+    {
+        if (!$this->isConfigured()) {
+            return 201;
+        }
+        return $this->parentNeedsConfirmation() ? 204 : 104;
     }
 
     private function handleConnectionLost(): void
@@ -763,6 +895,12 @@ class MusicAssistantConnection extends IPSModule
         $wasConnected = $this->GetBuffer('GreetingUrl') !== ''
             || $this->GetBuffer('AuthMessageId') !== ''
             || $this->GetStatus() === 102;
+        $targetStatus = $this->disconnectedStatus();
+        // Ein bereits zurückgesetzter Zustand wird nicht bei jedem Timerlauf erneut geschrieben; eine neue
+        // Sitzung beginnt ohnehin erst mit der Server-Begrüßung, die den Zustand selbst invalidiert.
+        if (!$wasConnected && $this->GetStatus() === $targetStatus) {
+            return;
+        }
 
         $this->SetBuffer('GreetingUrl', '');
         $this->SetBuffer('AuthMessageId', '');
@@ -770,7 +908,7 @@ class MusicAssistantConnection extends IPSModule
         $this->SetBuffer('AuthStarted', '0');
         $this->resetAuthRetryState();
         $this->invalidateQueueState();
-        $this->SetStatus($this->isConfigured() ? 104 : 201);
+        $this->SetStatus($targetStatus);
 
         if ($wasConnected) {
             $this->SendDebug('WebSocket', 'Verbindung verloren; Sitzung invalidiert', 0);
@@ -782,8 +920,12 @@ class MusicAssistantConnection extends IPSModule
         $parentId = (int)$this->GetBuffer('ParentInstanceId');
         $this->SetBuffer('ParentReconnectPending', '0');
         $this->SetBuffer('ParentReconnectAttempted', '1');
-        $this->handleConnectionLost();
+        $this->tryStateOperation('Reconnect', function (): void {
+            $this->handleConnectionLost();
+        });
 
+        // Abweichung nach Store-Reviewrichtlinie Punkt 7: IPS_ApplyChanges ändert hier keine Eigenschaften, sondern
+        // baut die WebSocket-Sitzung nach einem Token-Wechsel oder einer Modulinitialisierung kontrolliert neu auf.
         if ($parentId <= 0 || !IPS_ApplyChanges($parentId)) {
             $this->SetStatus(203);
             $this->SendDebug('WebSocket', 'Kontrollierter Reconnect konnte nicht gestartet werden', 0);
@@ -798,7 +940,8 @@ class MusicAssistantConnection extends IPSModule
             return $this->readJsonBuffer('RegisteredPlayers');
         });
         foreach (array_keys($registeredPlayers) as $playerId) {
-            if (is_string($playerId) && $playerId !== '') {
+            $playerId = (string)$playerId;
+            if ($playerId !== '') {
                 $this->startPlayerResync($playerId);
             }
         }
@@ -1563,7 +1706,7 @@ class MusicAssistantConnection extends IPSModule
             }
         } catch (Throwable $e) {
             if (!$this->isStateSemaphoreTimeout($e)) {
-                $this->LogMessage('Resync-Wiederherstellung: ' . $e->getMessage(), KL_ERROR);
+                $this->LogMessage($this->Translate('Resync recovery') . ': ' . $e->getMessage(), KL_ERROR);
                 throw $e;
             }
             $this->SendDebug('Resync', 'Verwaiste Verarbeitung konnte noch nicht wiederhergestellt werden', 0);
@@ -1684,7 +1827,7 @@ class MusicAssistantConnection extends IPSModule
             });
         } catch (Throwable $e) {
             if (!$this->isStateSemaphoreTimeout($e)) {
-                $this->LogMessage('Resync-Reservierung: ' . $e->getMessage(), KL_ERROR);
+                $this->LogMessage($this->Translate('Resync reservation') . ': ' . $e->getMessage(), KL_ERROR);
                 throw $e;
             }
             $this->SendDebug('Resync', 'Resync-Reservierung konnte nicht freigegeben werden: ' . $playerId, 0);
@@ -1697,7 +1840,7 @@ class MusicAssistantConnection extends IPSModule
             $this->removePendingRequest($messageId);
         } catch (Throwable $e) {
             if (!$this->isStateSemaphoreTimeout($e)) {
-                $this->LogMessage('Pending-Request-Bereinigung: ' . $e->getMessage(), KL_ERROR);
+                $this->LogMessage($this->Translate('Pending request cleanup') . ': ' . $e->getMessage(), KL_ERROR);
                 throw $e;
             }
             $this->SendDebug('State', 'Pending Request konnte nicht bereinigt werden', 0);
@@ -1710,7 +1853,7 @@ class MusicAssistantConnection extends IPSModule
             $this->removeQueueMapping($playerId, $generation);
         } catch (Throwable $e) {
             if (!$this->isStateSemaphoreTimeout($e)) {
-                $this->LogMessage('Queue-Mapping-Bereinigung: ' . $e->getMessage(), KL_ERROR);
+                $this->LogMessage($this->Translate('Queue mapping cleanup') . ': ' . $e->getMessage(), KL_ERROR);
                 throw $e;
             }
             $this->SendDebug('State', 'Queue-Zuordnung konnte nicht bereinigt werden: ' . $playerId, 0);
@@ -1739,7 +1882,7 @@ class MusicAssistantConnection extends IPSModule
             );
         } catch (Throwable $e) {
             if (!$this->isStateSemaphoreTimeout($e)) {
-                $this->LogMessage('Resync-Status: ' . $e->getMessage(), KL_ERROR);
+                $this->LogMessage($this->Translate('Resync status') . ': ' . $e->getMessage(), KL_ERROR);
                 throw $e;
             }
             $this->SendDebug('Resync', $step . '-Schritt konnte nicht gespeichert werden: ' . $playerId, 0);
@@ -1755,7 +1898,7 @@ class MusicAssistantConnection extends IPSModule
             });
         } catch (Throwable $e) {
             if (!$this->isStateSemaphoreTimeout($e)) {
-                $this->LogMessage('Generationsprüfung: ' . $e->getMessage(), KL_ERROR);
+                $this->LogMessage($this->Translate('Generation check') . ': ' . $e->getMessage(), KL_ERROR);
                 throw $e;
             }
             $this->SendDebug('State', 'Generation konnte vor Weiterleitung nicht geprüft werden', 0);
@@ -1811,7 +1954,7 @@ class MusicAssistantConnection extends IPSModule
         if (!IPS_SemaphoreEnter($this->stateSemaphoreName(), self::STATE_SEMAPHORE_TIMEOUT)) {
             $this->SendDebug('State', 'Semaphore konnte nicht innerhalb des Zeitlimits erworben werden', 0);
             throw new RuntimeException(
-                'Connection-State ist vorübergehend gesperrt.',
+                $this->Translate('The connection state is temporarily locked.'),
                 self::STATE_SEMAPHORE_ERROR
             );
         }
@@ -1827,7 +1970,7 @@ class MusicAssistantConnection extends IPSModule
         $rawValue = trim($this->GetBuffer($name));
         if ($rawValue === '') {
             $this->SendDebug('State', 'JSON-Buffer ' . $name . ': Inhalt ist leer', 0);
-            throw new UnexpectedValueException('JSON-Buffer ' . $name . ' ist nicht initialisiert.');
+            throw new UnexpectedValueException(sprintf($this->Translate('JSON buffer %s is not initialized.'), $name));
         }
 
         try {
@@ -1837,7 +1980,7 @@ class MusicAssistantConnection extends IPSModule
             }
         } catch (JsonException $e) {
             $this->SendDebug('State', 'JSON-Buffer ' . $name . ': ungültiges JSON', 0);
-            throw new UnexpectedValueException('JSON-Buffer ' . $name . ' enthält ungültiges JSON.', 0, $e);
+            throw new UnexpectedValueException(sprintf($this->Translate('JSON buffer %s contains invalid JSON.'), $name), 0, $e);
         }
 
         if (is_array($rootValue) && count($rootValue) === 0) {
@@ -1846,12 +1989,13 @@ class MusicAssistantConnection extends IPSModule
 
         $errorType = is_array($rootValue) ? 'nichtleeres JSON-Array' : 'skalarer JSON-Wert';
         $this->SendDebug('State', 'JSON-Buffer ' . $name . ': ' . $errorType, 0);
-        throw new UnexpectedValueException('JSON-Buffer ' . $name . ' enthält einen unerwarteten Wurzeltyp.');
+        throw new UnexpectedValueException(sprintf($this->Translate('JSON buffer %s contains an unexpected root type.'), $name));
     }
 
     private function writeJsonBuffer(string $name, array $value): void
     {
-        $this->SetBuffer($name, json_encode(count($value) === 0 ? new stdClass() : $value, JSON_THROW_ON_ERROR));
+        // Nur die oberste Ebene als Objekt erzwingen: numerische Player-IDs als Schlüssel ergeben sonst eine JSON-Liste.
+        $this->SetBuffer($name, json_encode((object)$value, JSON_THROW_ON_ERROR));
     }
 
     private function isConfigured(): bool

@@ -44,7 +44,7 @@ Der native IP-Symcon-Configurator unterstützt:
 
 Beim Löschen wird nur die IP-Symcon-Instanz entfernt. Der Player in Music Assistant bleibt bestehen und kann anschließend erneut angelegt werden.
 
-Über die Formularbuttons können außerdem Playlist- und Radio-Profile aus der Music-Assistant-Bibliothek erstellt beziehungsweise aktualisiert werden. Die verwendeten Profilnamen werden persistent verwaltet und an neu erzeugte Player weitergegeben.
+Über die Formularbuttons können außerdem Playlist- und Radio-Profile aus der Music-Assistant-Bibliothek erstellt beziehungsweise aktualisiert werden. Die verwendeten Profilnamen werden persistent verwaltet und an neu erzeugte Player weitergegeben. Bestehende Player werden dabei nicht verändert: Sie übernehmen neue Einträge direkt aus dem Profil, ermitteln die zugehörige Playlist bzw. den Sender beim Abspielen selbst aus Music Assistant und aktualisieren ihre Kachel nach dem Laden automatisch.
 
 ### MusicAssistant Player
 
@@ -86,12 +86,12 @@ https://github.com/Loerdy/symcon-musicassist.git
 
 1. Eine Instanz **Music Assistant Connection** anlegen.
 2. In deren Konfiguration die Felder **Server**, **Port** und **Token** ausfüllen und übernehmen. Der Standardport ist `8095`.
-3. Eine Instanz **Music Assistant Konfigurator** anlegen und mit derselben `MusicAssistant Connection` verbinden.
-4. Optional unter **Zielordner für neue Player** eine Kategorie auswählen.
-5. In der Playerliste die von Music Assistant erkannten Player prüfen und die gewünschten Instanzen über die nativen Funktionen **Erstellen** oder **Alle erstellen** anlegen.
+3. Den WebSocket-Client einrichten: In der Connection auf **WebSocket-Client einrichten und aktivieren** klicken. Alternativ den übergeordneten **WebSocket-Client** öffnen, die von der Connection vorgegebene Konfiguration über **Änderungen übernehmen** bestätigen und den Client aktivieren. Solange das aussteht, zeigt die Connection den Status **WebSocket-Client: Konfiguration übernehmen und aktivieren**. Dieser Schritt ist auch nach jeder Änderung von Server oder Port nötig.
+4. Eine Instanz **Music Assistant Konfigurator** anlegen und mit derselben `MusicAssistant Connection` verbinden.
+5. In der Playerliste die von Music Assistant erkannten Player prüfen und die gewünschten Instanzen über die nativen Funktionen **Erstellen** oder **Alle erstellen** anlegen. Die Zielkategorie wird dabei im Erstellungsdialog von IP-Symcon ausgewählt.
 6. Bei Bedarf **Playlists laden (Profil erstellen/aktualisieren)** und **Radios laden (Profil erstellen/aktualisieren)** ausführen.
 
-Neu angelegte Player werden direkt mit der Connection des Configurators verbunden.
+Neu angelegte Player werden direkt mit der Connection des Configurators verbunden. Player-Instanzen dieser Connection, die Music Assistant nicht (mehr) meldet, erscheinen ebenfalls in der Liste und können dort geöffnet oder gelöscht werden.
 
 ## Player-Variablen
 
@@ -181,9 +181,9 @@ Nach jedem erfolgreichen Verbindungsaufbau werden der aktuelle Playerzustand und
 
 Das Cover des aktuellen Titels wird von Music Assistant im JPEG- oder PNG-Format geladen und als IP-Symcon-Medienobjekt bereitgestellt.
 
-- Bei Wiedergabe und Pause bleibt das Cover sichtbar.
 - Solange kein aktuelles Cover verfügbar ist, wird ein Standard-Cover angezeigt, sodass kein veraltetes Bild sichtbar bleibt.
-- Im Zustand `idle` wird das Cover geleert und ausgeblendet; nicht mehr aktuelle Wiedergabemetadaten werden entfernt.
+- Im Zustand `idle` wird das Medienobjekt geleert, sodass die Mediaplayer-Kachel leer bleibt und die Player-Kachel ihren Platzhalter zeigt; nicht mehr aktuelle Wiedergabemetadaten werden entfernt.
+- Ob das Medienobjekt angezeigt wird, bestimmt der Benutzer über **Objekt anzeigen**. Das Modul legt es eingeblendet an und ändert die Sichtbarkeit danach nicht mehr.
 
 ## Player-Lifecycle
 
@@ -252,7 +252,7 @@ The native IP-Symcon configurator supports:
 
 Deleting an instance removes only the IP-Symcon instance. The player remains in Music Assistant and can be created again afterward.
 
-The form buttons can also create or update playlist and radio profiles from the Music Assistant library. The profile names are stored persistently and passed to newly created players.
+The form buttons can also create or update playlist and radio profiles from the Music Assistant library. The profile names are stored persistently and passed to newly created players. Existing players are not modified: they pick up new entries directly from the profile, resolve the matching playlist or station from Music Assistant when playing, and refresh their tile automatically after loading.
 
 ### MusicAssistant Player
 
@@ -294,12 +294,12 @@ https://github.com/Loerdy/symcon-musicassist.git
 
 1. Create a **Music Assistant Connection** instance.
 2. Enter **Server**, **Port**, and **Token** in its configuration and apply the changes. The default port is `8095`.
-3. Create a **MusicAssistant Configurator** instance and connect it to the same `MusicAssistant Connection`.
-4. Optionally select a category under **Target folder for new players** (`Zielordner für neue Player`).
-5. Review the players discovered by Music Assistant and use the native **Create** or **Create all** functions to create the desired instances.
+3. Set up the WebSocket Client: click **Set up and activate WebSocket Client** in the connection. Alternatively open the parent **WebSocket Client**, confirm the configuration provided by the connection with **Apply changes** and activate the client. Until this is done, the connection shows the status **WebSocket Client: Apply configuration and activate**. This step is also required after every change of server or port.
+4. Create a **MusicAssistant Configurator** instance and connect it to the same `MusicAssistant Connection`.
+5. Review the players discovered by Music Assistant and use the native **Create** or **Create all** functions to create the desired instances. The target category is selected in the IP-Symcon creation dialog.
 6. If required, run **Load playlists (create/update profile)** and **Load radio stations (create/update profile)**.
 
-New player instances are connected directly to the configurator's connection.
+New player instances are connected directly to the configurator's connection. Player instances of this connection that Music Assistant no longer reports are also listed and can be opened or deleted there.
 
 ## Player Variables
 
@@ -389,9 +389,9 @@ After every successful connection, the current player state and active queue are
 
 The cover artwork for the current track is loaded from Music Assistant in JPEG or PNG format and provided as an IP-Symcon media object.
 
-- The cover remains visible during playback and while paused.
 - A default cover is displayed until current artwork is available, preventing stale artwork from remaining visible.
-- In the `idle` state, the cover is cleared and hidden, and stale playback metadata is removed.
+- In the `idle` state, the media object is cleared, so the media player tile stays empty and the player tile shows its placeholder; stale playback metadata is removed.
+- Whether the media object is displayed is up to the user via **Show object**. The module creates it visible and does not change its visibility afterwards.
 
 ## Player Lifecycle
 

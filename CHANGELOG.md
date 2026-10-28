@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Das Configurator-Formular bleibt bei fehlerhaften Profilnamen oder Playlist-/Radio-Zuordnungen nutzbar; vorhandene Player werden weiter angezeigt, die Neuerstellung ist bis zur Behebung deaktiviert und der Grund wird im Formular angezeigt.
+- Schlägt die Einrichtung eines neu erstellten Players fehl, entfernt der Configurator auch dessen bereits angelegtes Cover-Medium, sodass keine unvollständige Instanz zurückbleibt.
+- Numerische Music-Assistant-Player-IDs werden im internen Zustand der Connection zuverlässig verarbeitet und beschädigen die Registrierung und Resynchronisierung nicht mehr.
+- Muss der WebSocket-Client nach dem Anlegen der Connection oder einer Änderung von Server oder Port die neue Konfiguration noch übernehmen oder ist er nicht aktiv, zeigt die Connection dies mit einem eigenen Status und einem Hinweis im Formular an, statt dauerhaft „Warte auf Verbindung“ zu melden. Der Benutzer bestätigt die Änderung mit einem Klick auf „WebSocket-Client einrichten und aktivieren“ in der Connection oder wie bisher im WebSocket-Client.
+- Ist der WebSocket-Client nicht aktiv oder nicht verbunden, meldet die Connection dies einmalig im Debug.
+- Der Configurator listet auch Player-Instanzen seiner Connection, die Music Assistant nicht (mehr) meldet, nicht erreichbar ist oder die doppelt angelegt wurden, damit sie geöffnet oder gelöscht werden können.
+- Das Cover-Medium wird nicht mehr abhängig vom Wiedergabestatus ein- und ausgeblendet; ohne Wiedergabe wird nur sein Inhalt geleert, sodass Mediaplayer-Kachel und Player-Kachel kein Bild zeigen. Über die Sichtbarkeit bestimmt nach dem Anlegen allein der Benutzer. Ein durch frühere Versionen ausgeblendetes Cover wird nach dem Update einmalig wieder eingeblendet.
+- Die Lautstärkeregler der Gruppenmitglieder werden nach dem Anlegen nicht mehr umbenannt, wenn sich der Name in Music Assistant ändert; benutzerdefinierte Namen bleiben damit unangetastet. Die Player-Kachel zeigt weiterhin den aktuellen Namen.
+- Beim Laden von Playlists und Radios ändert der Configurator keine Eigenschaften bestehender Player mehr. Er meldet die Aktualisierung über die Connection; die Player übernehmen neue Einträge aus dem Profil, aktualisieren ihre Kachel und ermitteln die Playlist bzw. den Sender beim Abspielen selbst.
+- Ein Configurator ohne verbundene Connection meldet beim Anlegen keine Fehler mehr; Profilnamen und Zuordnungen werden nach dem Verbinden bei der ersten Verwendung übernommen.
+- Fehler- und Statusmeldungen von Configurator und Connection sind vollständig übersetzbar; bei englischer Oberfläche erscheinen sie auf Englisch, bei deutscher Oberfläche unverändert auf Deutsch.
+- Die Dokumentationslinks der Module verweisen auf die jeweiligen Abschnitte der README; die Einrichtungsanleitung beschreibt den Schritt im WebSocket-Client und die Auswahl der Zielkategorie beim Erstellen.
+- Shuffle und Repeat werden direkt an den Player gesendet und kommen ohne vorherige Queue-Abfrage schneller an; sie wirken damit auf die aktuell laufende Wiedergabe des Players.
+- Kann ein Gruppen-Player nicht direkt stummgeschaltet werden, wird der dokumentierte Gruppen-Mute von Music Assistant verwendet, statt die Mitglieder einzeln anzusprechen.
+- Die HTML-Kachel erhält das Cover nur noch, wenn es sich geändert hat; Lautstärke-, Status- und andere Aktualisierungen übertragen damit deutlich weniger Daten. Neu geöffnete Kacheln zeigen das Cover weiterhin sofort.
+- Bedienbefehle wie Wiedergabe, Lautstärke und Mute warten nicht mehr auf die interne Sperre der Gruppenlautstärken.
+- Ein vorübergehend gesperrter interner Zustand der Connection führt im Verbindungs-Timer nicht mehr zu Skriptfehlern; die betroffene Prüfung wird im nächsten Lauf wiederholt. Bei inaktivem WebSocket-Client wird der Zustand nur noch einmal zurückgesetzt statt alle fünf Sekunden.
+- Fehler beim Erhöhen oder Verringern der Lautstärke werden wie bei den übrigen Aktionen im Meldungsfenster protokolliert.
+- Fehler beim Initialisieren einer HTTP-Anfrage und beim Speichern der Radio-Zuordnung werden kontrolliert gemeldet; die unter PHP 8.5 veraltete Funktion `curl_close()` wird nicht mehr verwendet.
+- Belegt ein inkompatibles Objekt den Ident `Playlist` oder `Radio`, wird es nicht mehr gelöscht; der Player meldet den Konflikt und überspringt die Auswahlvariable. Die Migration der früheren String-Variable `Playlist` bleibt erhalten.
+
 ## v2.1.2 — 2026-10-27
 
 - Kurzzeitige Verkleinerungen von Playergruppen werden vor dem Entfernen ihrer Lautstärkeregler durch einen verzögerten zweiten Snapshot bestätigt.

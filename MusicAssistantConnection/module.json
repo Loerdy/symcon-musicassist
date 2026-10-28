@@ -4,7 +4,7 @@
   "type": 2,
   "vendor": "Music Assistant",
   "aliases": ["Music Assistant Connection"],
-  "url": "",
+  "url": "https://github.com/Loerdy/symcon-musicassist#musicassistant-connection",
   "parentRequirements": ["{79827379-F36E-4ADA-8A95-5F8D1DC92FA9}"],
   "childRequirements": ["{3D0660F0-556B-7070-DA8E-CD7C6D19595C}"],
   "implemented": [
