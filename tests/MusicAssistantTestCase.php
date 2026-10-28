@@ -116,7 +116,7 @@ abstract class MusicAssistantTestCase extends TestCase
         return IPS\InstanceManager::getInstanceInterface($this->webSocketId($connectionId));
     }
 
-    protected function connection(int $connectionId): MusicAssistantConnectionHttpStub
+    protected function connection(int $connectionId): MusicAssistantConnection
     {
         return IPS\InstanceManager::getInstanceInterface($connectionId);
     }

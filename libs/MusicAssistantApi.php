@@ -70,28 +70,10 @@ trait MusicAssistantApi
             0
         );
 
-        $ch = curl_init($this->maApiUrl());
-        if ($ch === false) {
-            throw new Exception('HTTP request could not be initialized');
-        }
-        try {
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER     => true,
-                CURLOPT_POST               => true,
-                CURLOPT_HTTPHEADER         => $headers,
-                CURLOPT_POSTFIELDS         => $reqJson,
-                CURLOPT_TIMEOUT_MS         => $timeoutMs,
-                CURLOPT_CONNECTTIMEOUT_MS  => 5000,
-                CURLOPT_FOLLOWLOCATION     => false
-            ]);
-
-            $respBody = curl_exec($ch);
-            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $err      = (string)curl_error($ch);
-        } finally {
-            // curl_close() ist seit PHP 8.0 wirkungslos und ab PHP 8.5 veraltet; das Handle wird mit unset freigegeben.
-            unset($ch);
-        }
+        $response = $this->maHttpPost($this->maApiUrl(), $headers, $reqJson, $timeoutMs);
+        $respBody = $response['body'];
+        $httpCode = $response['http_code'];
+        $err      = $response['error'];
 
         if ($respBody === false || $respBody === null) {
             throw new Exception('HTTP request failed: ' . $err);
@@ -142,6 +124,43 @@ trait MusicAssistantApi
             'success' => $success,
             'http_code' => $httpCode,
             'body' => $body
+        ];
+    }
+
+    /**
+     * Reiner HTTP-Transport ohne Auswertung; in Tests ersetzbar, damit maCall() ohne Netzwerk prüfbar ist.
+     *
+     * @return array{body:string|false, http_code:int, error:string}
+     */
+    protected function maHttpPost(string $url, array $headers, string|false $postFields, int $timeoutMs): array
+    {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new Exception('HTTP request could not be initialized');
+        }
+        try {
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER     => true,
+                CURLOPT_POST               => true,
+                CURLOPT_HTTPHEADER         => $headers,
+                CURLOPT_POSTFIELDS         => $postFields,
+                CURLOPT_TIMEOUT_MS         => $timeoutMs,
+                CURLOPT_CONNECTTIMEOUT_MS  => 5000,
+                CURLOPT_FOLLOWLOCATION     => false
+            ]);
+
+            $respBody = curl_exec($ch);
+            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $err      = (string)curl_error($ch);
+        } finally {
+            // curl_close() ist seit PHP 8.0 wirkungslos und ab PHP 8.5 veraltet; das Handle wird mit unset freigegeben.
+            unset($ch);
+        }
+
+        return [
+            'body'      => $respBody,
+            'http_code' => $httpCode,
+            'error'     => $err
         ];
     }
 }
