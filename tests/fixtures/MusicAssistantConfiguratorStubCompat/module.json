@@ -1,0 +1,12 @@
+{
+    "id": "{7F10CABF-4C5E-D431-8B4E-2528CEF4AE89}",
+    "name": "MusicAssistantConfigurator StubCompat",
+    "type": 4,
+    "vendor": "Music Assistant",
+    "aliases": [],
+    "url": "https://github.com/Loerdy/symcon-musicassist#musicassistant-configurator",
+    "parentRequirements": ["{246666E8-C78A-0E3D-5857-9AB5F5873E2E}"],
+    "childRequirements": [],
+    "implemented": ["{3D0660F0-556B-7070-DA8E-CD7C6D19595C}"],
+    "prefix": "MASS"
+}

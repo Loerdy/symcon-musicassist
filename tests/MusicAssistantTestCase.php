@@ -21,6 +21,7 @@ abstract class MusicAssistantTestCase extends TestCase
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/WebSocketClient', $library['id']);
         // Gleiche Modul-ID wie die Connection: Instanzen verwenden die Unterklasse mit simuliertem HTTP.
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantConnectionHttpStub', $library['id']);
+        IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantConfiguratorStubCompat', $library['id']);
         MusicAssistantConnectionHttpStub::$responses = [];
         MusicAssistantConnectionHttpStub::$calls = [];
         parent::setUp();
