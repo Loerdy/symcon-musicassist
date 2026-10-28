@@ -19,7 +19,51 @@ abstract class MusicAssistantTestCase extends TestCase
         IPS\ModuleLoader::loadLibrary(__DIR__ . '/../library.json');
         $library = json_decode((string)file_get_contents(__DIR__ . '/../library.json'), true);
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/WebSocketClient', $library['id']);
+        // Gleiche Modul-ID wie die Connection: Instanzen verwenden die Unterklasse mit simuliertem HTTP.
+        IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantConnectionHttpStub', $library['id']);
+        MusicAssistantConnectionHttpStub::$responses = [];
+        MusicAssistantConnectionHttpStub::$calls = [];
         parent::setUp();
+    }
+
+    protected function simulateHttpResult(string $command, $result): void
+    {
+        MusicAssistantConnectionHttpStub::$responses[$command] = [
+            'raw'       => ['result' => $result],
+            'result'    => $result,
+            'success'   => true,
+            'http_code' => 200,
+            'body'      => json_encode(['result' => $result])
+        ];
+    }
+
+    protected function simulateHttpApiError(string $command): void
+    {
+        MusicAssistantConnectionHttpStub::$responses[$command] = [
+            'raw'       => ['error' => 'Player not found'],
+            'result'    => ['error' => 'Player not found'],
+            'success'   => false,
+            'http_code' => 200,
+            'body'      => '{"error":"Player not found"}'
+        ];
+    }
+
+    protected function simulateHttpFailure(string $command): void
+    {
+        MusicAssistantConnectionHttpStub::$responses[$command] = new Exception('HTTP request failed: timeout');
+    }
+
+    /**
+     * @return array<int, array{command: string, args: array}>
+     */
+    protected function httpCalls(): array
+    {
+        return MusicAssistantConnectionHttpStub::$calls;
+    }
+
+    protected function clearHttpCalls(): void
+    {
+        MusicAssistantConnectionHttpStub::$calls = [];
     }
 
     // Legt eine konfigurierte Connection an, deren WebSocket Client die passende URL übernommen hat und aktiv ist.
@@ -72,7 +116,7 @@ abstract class MusicAssistantTestCase extends TestCase
         return IPS\InstanceManager::getInstanceInterface($this->webSocketId($connectionId));
     }
 
-    protected function connection(int $connectionId): MusicAssistantConnection
+    protected function connection(int $connectionId): MusicAssistantConnectionHttpStub
     {
         return IPS\InstanceManager::getInstanceInterface($connectionId);
     }
