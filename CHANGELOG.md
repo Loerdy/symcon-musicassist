@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.2.0 — 2026-10-28
+
 - Das Configurator-Formular bleibt bei fehlerhaften Profilnamen oder Playlist-/Radio-Zuordnungen nutzbar; vorhandene Player werden weiter angezeigt, die Neuerstellung ist bis zur Behebung deaktiviert und der Grund wird im Formular angezeigt.
 - Schlägt die Einrichtung eines neu erstellten Players fehl, entfernt der Configurator auch dessen bereits angelegtes Cover-Medium, sodass keine unvollständige Instanz zurückbleibt.
 - Numerische Music-Assistant-Player-IDs werden im internen Zustand der Connection zuverlässig verarbeitet und beschädigen die Registrierung und Resynchronisierung nicht mehr.
