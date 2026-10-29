@@ -24,6 +24,9 @@ class MusicAssistantConfigurator extends IPSModule
     public function ApplyChanges(): void
     {
         parent::ApplyChanges();
+        // Der Configurator wertet keine Ereignisse der Connection aus. Der Filter passt auf keines davon, damit
+        // ReceiveData() nicht bei jedem Player- oder Queue-Ereignis aufgerufen wird.
+        $this->SetReceiveDataFilter('.*"Event":"configurator_[a-z_]+".*');
         // Store-Reviewrichtlinie Punkt 3: Ohne verbundene Connection ist die Instanz gültig, aber noch nicht
         // einsatzbereit. Profilnamen und Zuordnungen werden bei der ersten Verwendung übernommen.
         try {

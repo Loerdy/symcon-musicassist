@@ -391,6 +391,44 @@ class MusicAssistantConfiguratorTest extends MusicAssistantTestCase
     }
 
     // IPS_IsModuleCompatible ist in den SymconStubs noch nicht implementiert; die Tests laufen automatisch, sobald es verfügbar ist.
+    // Ereignisfilter
+
+    /**
+     * @return array<string, array{0: array<string, mixed>}>
+     */
+    public static function connectionEventProvider(): array
+    {
+        $dataId = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
+        return [
+            'player_updated'        => [['DataID' => $dataId, 'Event' => 'player_updated', 'ObjectID' => 'kitchen', 'Data' => ['volume_level' => 20]]],
+            'player_updated resync' => [['DataID' => $dataId, 'Event' => 'player_updated', 'ObjectID' => 'kitchen', 'Data' => ['type' => 'group'], 'Source' => 'resync']],
+            'queue_updated'         => [['DataID' => $dataId, 'Event' => 'queue_updated', 'ObjectID' => 'kitchen', 'PlayerIDs' => ['kitchen'], 'Data' => ['state' => 'playing']]],
+            'media_item_updated'    => [['DataID' => $dataId, 'Event' => 'media_item_updated', 'ObjectID' => 'library://track/1', 'Data' => ['favorite' => true]]],
+            'profiles_updated'      => [['DataID' => $dataId, 'Event' => 'profiles_updated']]
+        ];
+    }
+
+    /**
+     * @dataProvider connectionEventProvider
+     */
+    public function testConfiguratorDoesNotReceiveConnectionEvents(array $event): void
+    {
+        $configuratorId = $this->createConfigurator($this->createConnection());
+
+        $filter = IPS\InstanceManager::getInstanceInterface($configuratorId)->GetReceiveDataFilter();
+
+        $this->assertNotSame('', $filter);
+        $this->assertSame(0, preg_match('/' . $filter . '/', json_encode($event, JSON_THROW_ON_ERROR)));
+    }
+
+    public function testReceiveDataFilterIsSetWithoutConnection(): void
+    {
+        $configuratorId = IPS_CreateInstance(self::CONFIGURATOR_MODULE_ID);
+        IPS_ApplyChanges($configuratorId);
+
+        $this->assertNotSame('', IPS\InstanceManager::getInstanceInterface($configuratorId)->GetReceiveDataFilter());
+    }
+
     private function requireModuleCompatibilityCheck(): void
     {
         try {

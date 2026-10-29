@@ -4,6 +4,7 @@
 
 - Die HTML-Kachel zeigt das Standardcover jetzt auch dann sofort, wenn auf einen Titel oder Sender mit JPEG-Cover einer ohne Cover folgt; bisher blieb das vorherige Bild bis zum Neuladen der Seite stehen.
 - Den Gruppen-Mute nutzt der Player als Ersatz nur noch, wenn Music Assistant ihn als Gruppe meldet (Player-Typ `group`); die nicht dokumentierte Erkennung am Präfix `syncgroup_` der Player-ID entfällt.
+- Der Configurator wird nicht mehr bei jedem Player- und Queue-Ereignis der Connection aufgerufen, da er diese Ereignisse nicht auswertet; das spart unnötige PHP-Aufrufe.
 
 ## v2.2.0 — 2026-10-28
 
