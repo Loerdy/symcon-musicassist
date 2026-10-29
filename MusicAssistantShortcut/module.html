@@ -96,6 +96,14 @@
             opacity: 0.85;
         }
 
+        .shortcut img {
+            flex: 1 1 auto;
+            width: 100%;
+            min-height: 0;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
         .shortcut span {
             width: 100%;
             overflow: hidden;
@@ -169,8 +177,15 @@
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "shortcut";
-                const template = document.getElementById(entry.type === "playlist" ? "icon-playlist" : "icon-radio");
-                button.append(template.content.cloneNode(true));
+                if (typeof entry.image === "string" && entry.image.startsWith("data:image/")) {
+                    const image = document.createElement("img");
+                    image.alt = "";
+                    image.src = entry.image;
+                    button.append(image);
+                } else {
+                    const template = document.getElementById(entry.type === "playlist" ? "icon-playlist" : "icon-radio");
+                    button.append(template.content.cloneNode(true));
+                }
                 const label = document.createElement("span");
                 label.textContent = entry.available ? String(entry.label) : translate("Not available");
                 button.append(label);

@@ -62,6 +62,9 @@ Eine `MusicAssistant Shortcut`-Instanz (Schnellzugriff) stellt eine Kachel mit e
 - Mit einem Eintrag zeigt die Kachel einen einzelnen Button, mit mehreren Einträgen ein Raster.
 - Gestartet wird über die Auswahl des Players; Auflösung des Senders bzw. der Playlist und Fehlerprotokollierung übernimmt der Player.
 - Wird ein Eintrag aus dem Profil entfernt, zeigt die Kachel ihn als nicht verfügbar an.
+- Jeder Button zeigt ein Bild: ein optional gewähltes eigenes Bild, sonst das Bild des Senders bzw. der Playlist aus der Music-Assistant-Bibliothek, sonst ein neutrales Symbol.
+- Bilder aus Music Assistant werden einmalig geladen und als ausgeblendete Medienobjekte unter der Instanz gespeichert. Die Kachel zeigt sie damit sofort, auch nach einem Neustart oder wenn Music Assistant nicht erreichbar ist. Neu geladen wird nur für neue Einträge oder über „Bilder aus Music Assistant neu laden“; schlägt das fehl, bleibt das bisherige Bild erhalten.
+- Ein eigenes Bild wird zuerst in der Konsole als Medienobjekt angelegt (Objekt hinzufügen → Medium → Bild, JPEG oder PNG bis 512 KB) und dann in der Spalte „Eigenes Bild“ gewählt. Wird das Medium geändert, aktualisiert sich die Kachel sofort; eigene Medien werden vom Modul nie verändert oder gelöscht.
 
 ## Funktionen
 
@@ -281,6 +284,9 @@ A `MusicAssistant Shortcut` instance provides a tile with one or more buttons. T
 - With one entry, the tile shows a single button; with several entries, a grid.
 - Playback is started through the player's selection; the player resolves the station or playlist and logs errors.
 - If an entry is removed from the profile, the tile shows it as unavailable.
+- Each button shows an image: an optionally selected own image, otherwise the station or playlist image from the Music Assistant library, otherwise a neutral icon.
+- Images from Music Assistant are loaded once and stored as hidden media objects below the instance. The tile therefore shows them immediately, even after a restart or while Music Assistant is unreachable. Images are only reloaded for new entries or through "Reload images from Music Assistant"; if this fails, the previous image is kept.
+- An own image is first created as a media object in the console (Add object → Media → Image, JPEG or PNG up to 512 KB) and then selected in the "Own image" column. When the media object changes, the tile updates immediately; own media objects are never modified or deleted by the module.
 
 ## Features
 

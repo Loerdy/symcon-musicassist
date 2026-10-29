@@ -23,6 +23,7 @@ abstract class MusicAssistantTestCase extends TestCase
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantConnectionHttpStub', $library['id']);
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantConfiguratorStubCompat', $library['id']);
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantPlayerStubCompat', $library['id']);
+        IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantShortcutStubCompat', $library['id']);
         MusicAssistantConnectionHttpStub::$responses = [];
         MusicAssistantConnectionHttpStub::$calls = [];
         MusicAssistantConnectionHttpStub::$artworkResponses = [];

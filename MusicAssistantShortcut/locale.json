@@ -14,7 +14,19 @@
             "The entry %s is no longer offered by the player.": "Der Eintrag %s wird vom Player nicht mehr angeboten.",
             "Unknown action: %s": "Unbekannte Aktion: %s",
             "No entries configured": "Keine Einträge konfiguriert",
-            "Not available": "Nicht verfügbar"
+            "Not available": "Nicht verfügbar",
+            "Own image (optional)": "Eigenes Bild (optional)",
+            "Without an own image, the image from the Music Assistant library is used. Own images must be JPEG or PNG media objects of at most 512 KB.": "Ohne eigenes Bild wird das Bild aus der Music-Assistant-Bibliothek verwendet. Eigene Bilder müssen JPEG- oder PNG-Medienobjekte mit höchstens 512 KB sein.",
+            "Reload images from Music Assistant": "Bilder aus Music Assistant neu laden",
+            "ApiRequest could not be created or sent.": "ApiRequest konnte nicht erzeugt oder gesendet werden.",
+            "ApiRequest did not return a valid response.": "ApiRequest lieferte keine gültige Antwort.",
+            "ApiRequest failed.": "ApiRequest ist fehlgeschlagen.",
+            "ApiRequest returned invalid JSON.": "ApiRequest lieferte ungültiges JSON.",
+            "ApiRequest response is not a JSON object.": "ApiRequest-Antwort ist kein JSON-Objekt.",
+            "ArtworkRequest did not return a valid response.": "ArtworkRequest lieferte keine gültige Antwort.",
+            "ArtworkRequest failed.": "ArtworkRequest ist fehlgeschlagen.",
+            "Artwork response is invalid.": "Artwork-Antwort ist ungültig.",
+            "Artwork signature does not match the content type.": "Artwork-Signatur passt nicht zum Content-Type."
         }
     }
 }

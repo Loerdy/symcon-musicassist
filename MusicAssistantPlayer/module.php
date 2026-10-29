@@ -8,6 +8,7 @@ require_once __DIR__ . '/../libs/MusicAssistantPlayerGroupVolumes.php';
 require_once __DIR__ . '/../libs/MusicAssistantPlayerTile.php';
 require_once __DIR__ . '/../libs/MusicAssistantPlayerMediaSelection.php';
 require_once __DIR__ . '/../libs/MusicAssistantSelectionOptions.php';
+require_once __DIR__ . '/../libs/MusicAssistantArtworkClient.php';
 
 class MusicAssistantPlayer extends IPSModule
 {
@@ -18,6 +19,7 @@ class MusicAssistantPlayer extends IPSModule
     use MusicAssistantPlayerTile;
     use MusicAssistantPlayerMediaSelection;
     use MusicAssistantSelectionOptions;
+    use MusicAssistantArtworkClient;
 
     private const CONNECTION_REQUEST = '{246666E8-C78A-0E3D-5857-9AB5F5873E2E}';
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
