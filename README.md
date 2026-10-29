@@ -52,6 +52,17 @@ Eine `MusicAssistant Player`-Instanz repräsentiert einen normalen Music-Assista
 
 Der Player ist mit seiner tatsächlichen `MusicAssistant Connection` verbunden. Beim Anlegen über den Configurator werden Player-ID, Connection und die Playlist-/Radio-Profile automatisch zugeordnet.
 
+### MusicAssistant Shortcut
+
+Eine `MusicAssistant Shortcut`-Instanz (Schnellzugriff) stellt eine Kachel mit einem oder mehreren Buttons bereit. Ein Tippen auf einen Button startet den hinterlegten Radiosender bzw. die hinterlegte Playlist auf dem gewählten Player.
+
+- Als Player stehen nur `MusicAssistant Player`-Instanzen derselben `MusicAssistant Connection` zur Auswahl.
+- Die Einträge stammen aus den Playlist- und Radio-Profilen des gewählten Players, die der Configurator pflegt. Nach dem Wechsel des Players stehen dessen Einträge sofort zur Auswahl.
+- Eine optionale Beschriftung ersetzt den Namen aus dem Profil.
+- Mit einem Eintrag zeigt die Kachel einen einzelnen Button, mit mehreren Einträgen ein Raster.
+- Gestartet wird über die Auswahl des Players; Auflösung des Senders bzw. der Playlist und Fehlerprotokollierung übernimmt der Player.
+- Wird ein Eintrag aus dem Profil entfernt, zeigt die Kachel ihn als nicht verfügbar an.
+
 ## Funktionen
 
 - Previous, Stop, Play, Pause und Next
@@ -259,6 +270,17 @@ The form buttons can also create or update playlist and radio profiles from the 
 A `MusicAssistant Player` instance represents a regular Music Assistant player or a sync group. It provides playback controls, volume, mute, shuffle, repeat, playlists, radio stations, current metadata, and cover artwork.
 
 The player is connected to its actual `MusicAssistant Connection`. When a player is created through the configurator, its PlayerID, connection, and playlist/radio profiles are assigned automatically.
+
+### MusicAssistant Shortcut
+
+A `MusicAssistant Shortcut` instance provides a tile with one or more buttons. Tapping a button starts the configured radio station or playlist on the selected player.
+
+- Only `MusicAssistant Player` instances of the same `MusicAssistant Connection` can be selected.
+- The entries are taken from the playlist and radio profiles of the selected player, which are maintained by the configurator. After changing the player, its entries are available immediately.
+- An optional label replaces the name from the profile.
+- With one entry, the tile shows a single button; with several entries, a grid.
+- Playback is started through the player's selection; the player resolves the station or playlist and logs errors.
+- If an entry is removed from the profile, the tile shows it as unavailable.
 
 ## Features
 

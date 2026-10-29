@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            color-scheme: light dark;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            min-width: 0;
+        }
+
+        body {
+            background-color: var(--card-color, transparent);
+            container-name: tile;
+            container-type: size;
+            overflow: hidden;
+        }
+
+        .shortcuts {
+            --button-background: rgb(255 255 255 / 7%);
+            --button-hover: rgb(255 255 255 / 14%);
+            --button-border: color-mix(in srgb, currentColor 18%, transparent);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(clamp(72px, 30cqmin, 140px), 1fr));
+            grid-auto-rows: 1fr;
+            gap: clamp(6px, 2cqmin, 12px);
+            width: 100%;
+            height: 100%;
+            padding: clamp(6px, 2cqmin, 12px);
+            color: var(--content-color, #f3f4f6);
+        }
+
+        .shortcuts[data-theme="light"] {
+            --button-background: rgb(0 0 0 / 5%);
+            --button-hover: rgb(0 0 0 / 10%);
+            color: var(--content-color, #202327);
+        }
+
+        .shortcuts[data-count="1"] {
+            grid-template-columns: 1fr;
+        }
+
+        .shortcut {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: clamp(4px, 1.5cqmin, 10px);
+            min-width: 0;
+            min-height: 0;
+            padding: clamp(6px, 2cqmin, 12px);
+            border: 1px solid var(--button-border);
+            border-radius: 14px;
+            background: var(--button-background);
+            color: inherit;
+            font: inherit;
+            cursor: pointer;
+            transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+        }
+
+        .shortcut:hover {
+            background: var(--button-hover);
+        }
+
+        .shortcut:active,
+        .shortcut[data-pressed="true"] {
+            border-color: var(--accent-color, currentColor);
+            transform: scale(0.97);
+        }
+
+        .shortcut:disabled {
+            cursor: default;
+            opacity: 0.45;
+            transform: none;
+        }
+
+        .shortcut svg {
+            flex: 1 1 auto;
+            width: 100%;
+            max-width: 64px;
+            min-height: 0;
+            max-height: 64px;
+            fill: currentColor;
+            opacity: 0.85;
+        }
+
+        .shortcut span {
+            width: 100%;
+            overflow: hidden;
+            font-size: clamp(0.75rem, 6cqmin, 1rem);
+            line-height: 1.2;
+            text-align: center;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .empty {
+            display: grid;
+            place-items: center;
+            grid-column: 1 / -1;
+            opacity: 0.6;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <main class="shortcuts" id="shortcuts"></main>
+
+    <template id="icon-radio">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6H8.3l8.26-3.34-.68-1.66L3.24 6.13C2.51 6.42 2 7.15 2 8v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2Zm0 2v3h-2V9h-2v2H4V8h16ZM7 19a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z"/></svg>
+    </template>
+    <template id="icon-playlist">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h12v2H3V6Zm0 4h12v2H3v-2Zm0 4h8v2H3v-2Zm14-8h4v2h-2v8.5a2.5 2.5 0 1 1-2-2.45V6Z"/></svg>
+    </template>
+
+    <script>
+        "use strict";
+
+        const container = document.getElementById("shortcuts");
+
+        function detectSymconTheme() {
+            const cardColor = getComputedStyle(container).getPropertyValue("--card-color").trim();
+            let theme = "dark";
+            if (cardColor !== "") {
+                const canvas = document.createElement("canvas");
+                canvas.width = 1;
+                canvas.height = 1;
+                const context = canvas.getContext("2d", {willReadFrequently: true});
+                if (context) {
+                    context.fillStyle = cardColor;
+                    context.fillRect(0, 0, 1, 1);
+                    const color = context.getImageData(0, 0, 1, 1).data;
+                    const linear = [color[0], color[1], color[2]].map((value) => {
+                        const channel = value / 255;
+                        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+                    });
+                    theme = linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722 > 0.42 ? "light" : "dark";
+                }
+            }
+            container.dataset.theme = theme;
+        }
+
+        function renderState(state) {
+            const entries = state && Array.isArray(state.entries) ? state.entries : [];
+            container.replaceChildren();
+            container.dataset.count = String(entries.length);
+
+            if (entries.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "empty";
+                empty.textContent = translate("No entries configured");
+                container.append(empty);
+                return;
+            }
+
+            entries.forEach((entry) => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "shortcut";
+                const template = document.getElementById(entry.type === "playlist" ? "icon-playlist" : "icon-radio");
+                button.append(template.content.cloneNode(true));
+                const label = document.createElement("span");
+                label.textContent = entry.available ? String(entry.label) : translate("Not available");
+                button.append(label);
+                button.title = label.textContent;
+                button.disabled = entry.available !== true;
+                button.addEventListener("click", () => {
+                    button.dataset.pressed = "true";
+                    window.setTimeout(() => delete button.dataset.pressed, 400);
+                    requestAction("Play", Number(entry.index));
+                });
+                container.append(button);
+            });
+        }
+
+        function handleMessage(data) {
+            let message = data;
+            if (typeof message === "string") {
+                try {
+                    message = JSON.parse(message);
+                } catch (error) {
+                    return;
+                }
+            }
+            if (message && typeof message === "object" && !Array.isArray(message)) {
+                renderState(message);
+            }
+        }
+
+        const themeObserver = new MutationObserver(detectSymconTheme);
+        themeObserver.observe(document.documentElement, {attributes: true, attributeFilter: ["class", "style"]});
+        themeObserver.observe(document.head, {childList: true, subtree: true, characterData: true});
+        window.addEventListener("focus", detectSymconTheme);
+
+        detectSymconTheme();
+        renderState(__MUSIC_ASSISTANT_INITIAL_STATE__);
+    </script>
+</body>
+</html>

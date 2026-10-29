@@ -9,6 +9,7 @@
       <directory suffix=".php">../MusicAssistantConfigurator</directory>
       <directory suffix=".php">../MusicAssistantConnection</directory>
       <directory suffix=".php">../MusicAssistantPlayer</directory>
+      <directory suffix=".php">../MusicAssistantShortcut</directory>
       <directory suffix=".php">../libs</directory>
     </include>
   </source>

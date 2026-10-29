@@ -20,4 +20,8 @@ class MusicAssistantValidationTest extends TestCaseSymconValidation
     {
         $this->validateModule(__DIR__ . '/../MusicAssistantPlayer');
     }
+    public function testValidateShortcutModule(): void
+    {
+        $this->validateModule(__DIR__ . '/../MusicAssistantShortcut');
+    }
 }

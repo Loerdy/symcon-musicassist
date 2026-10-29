@@ -1,0 +1,20 @@
+{
+    "translations": {
+        "de": {
+            "MusicAssistant Shortcut": "Music Assistant Schnellzugriff",
+            "Player": "Player",
+            "The entries are taken from the playlist and radio profiles of the selected player.": "Die Einträge stammen aus den Playlist- und Radio-Profilen des gewählten Players.",
+            "Entries": "Einträge",
+            "Entry": "Eintrag",
+            "Label (optional)": "Beschriftung (optional)",
+            "Radio": "Radio",
+            "Playlist": "Playlist",
+            "The selected player does not exist or is not a Music Assistant player.": "Der gewählte Player existiert nicht oder ist kein Music-Assistant-Player.",
+            "The selected player is not connected to the same Music Assistant Connection.": "Der gewählte Player ist nicht mit derselben Music Assistant Connection verbunden.",
+            "The entry %s is no longer offered by the player.": "Der Eintrag %s wird vom Player nicht mehr angeboten.",
+            "Unknown action: %s": "Unbekannte Aktion: %s",
+            "No entries configured": "Keine Einträge konfiguriert",
+            "Not available": "Nicht verfügbar"
+        }
+    }
+}

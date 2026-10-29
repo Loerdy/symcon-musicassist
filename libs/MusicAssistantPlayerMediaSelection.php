@@ -8,45 +8,10 @@ trait MusicAssistantPlayerMediaSelection
     // Abspielen selbst. Der Configurator schreibt keine Zuordnungen mehr in die Player (Store-Reviewrichtlinie Punkt 13).
     private function readSelectionOptions(string $ident, string $profileProperty): ?array
     {
-        $variableId = @$this->GetIDForIdent($ident);
-        if ($variableId <= 0 || !IPS_VariableExists($variableId)) {
-            return null;
-        }
-        $variable = IPS_GetVariable($variableId);
-        if (($variable['VariableType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-            return null;
-        }
-
-        $profile = is_string($variable['VariableCustomProfile'] ?? null)
-            ? trim($variable['VariableCustomProfile'])
-            : '';
-        if ($profile === '') {
-            $profile = is_string($variable['VariableProfile'] ?? null)
-                ? trim($variable['VariableProfile'])
-                : trim($this->ReadPropertyString($profileProperty));
-        }
-        if ($profile === '' || !IPS_VariableProfileExists($profile)) {
-            return null;
-        }
-        $profileData = IPS_GetVariableProfile($profile);
-        if (($profileData['ProfileType'] ?? -1) !== VARIABLETYPE_INTEGER) {
-            return null;
-        }
-
-        $options = [];
-        foreach (($profileData['Associations'] ?? []) as $association) {
-            $value = $association['Value'] ?? null;
-            $name = $association['Name'] ?? null;
-            if ((!is_int($value) && !is_float($value)) || !is_string($name)) {
-                continue;
-            }
-            $itemId = (int)$value;
-            if ($itemId <= 0 || (float)$itemId !== (float)$value || trim($name) === '') {
-                continue;
-            }
-            $options[] = ['value' => $itemId, 'label' => trim($name)];
-        }
-        return $options;
+        return $this->readSelectionOptionsOfVariable(
+            (int)@$this->GetIDForIdent($ident),
+            $this->ReadPropertyString($profileProperty)
+        );
     }
 
     private function resetInvalidMediaSelection(string $ident, string $profileProperty, string $resetTimer): void

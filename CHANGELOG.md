@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Neues Modul `MusicAssistant Shortcut` (Schnellzugriff): Eine Kachel mit einem oder mehreren Buttons startet hinterlegte Radiosender oder Playlists auf einem gewählten Player. Die Einträge stammen aus den Playlist- und Radio-Profilen des Players.
+
 ## v2.2.1 — 2026-10-29
 
 - Die HTML-Kachel zeigt das Standardcover jetzt auch dann sofort, wenn auf einen Titel oder Sender mit JPEG-Cover einer ohne Cover folgt; bisher blieb das vorherige Bild bis zum Neuladen der Seite stehen.
