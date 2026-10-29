@@ -23,6 +23,10 @@ class MusicAssistantConnectionHttpStub extends MusicAssistantConnection
             throw new Exception('No simulated HTTP response for ' . $command);
         }
         $response = self::$responses[$command];
+        // Eine Closure simuliert Ereignisse, die während des laufenden HTTP-Aufrufs eintreffen.
+        if ($response instanceof Closure) {
+            $response = $response($args);
+        }
         if ($response instanceof Throwable) {
             throw $response;
         }

@@ -22,6 +22,7 @@ abstract class MusicAssistantTestCase extends TestCase
         // Gleiche Modul-ID wie die Connection: Instanzen verwenden die Unterklasse mit simuliertem HTTP.
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantConnectionHttpStub', $library['id']);
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantConfiguratorStubCompat', $library['id']);
+        IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantPlayerStubCompat', $library['id']);
         MusicAssistantConnectionHttpStub::$responses = [];
         MusicAssistantConnectionHttpStub::$calls = [];
         parent::setUp();
@@ -36,6 +37,21 @@ abstract class MusicAssistantTestCase extends TestCase
             'http_code' => 200,
             'body'      => json_encode(['result' => $result])
         ];
+    }
+
+    // Die Antwort entsteht erst während des HTTP-Aufrufs; so lassen sich zwischenzeitliche Ereignisse simulieren.
+    protected function simulateHttpResultDuring(string $command, callable $during, $result): void
+    {
+        MusicAssistantConnectionHttpStub::$responses[$command] = function (array $args) use ($during, $result): array {
+            $during($args);
+            return [
+                'raw'       => ['result' => $result],
+                'result'    => $result,
+                'success'   => true,
+                'http_code' => 200,
+                'body'      => json_encode(['result' => $result])
+            ];
+        };
     }
 
     protected function simulateHttpApiError(string $command): void
