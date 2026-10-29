@@ -915,8 +915,9 @@ class MusicAssistantPlayer extends IPSModule
             return;
         } catch (Throwable $e) {
             // group_volume_mute leitet synchronisierte Mitglieder an ihren Leader weiter und ist daher nur
-            // als Ersatz für Gruppen-Player geeignet, nicht als allgemeiner Mute-Befehl.
-            if ($this->isConfiguredPlayerKnownGroup() || str_starts_with($playerId, 'syncgroup_')) {
+            // als Ersatz für Gruppen-Player geeignet, nicht als allgemeiner Mute-Befehl. Gruppen werden allein am
+            // dokumentierten Player-Typ erkannt; für das Format der Player-ID gibt es keine Zusage.
+            if ($this->isConfiguredPlayerKnownGroup()) {
                 $this->SendDebug('Mute', 'volume_mute fehlgeschlagen; Gruppen-Mute wird verwendet', 0);
                 $this->sendApiRequest('players/cmd/group_volume_mute', ['player_id' => $playerId, 'muted' => $muted]);
                 return;

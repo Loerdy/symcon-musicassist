@@ -75,9 +75,9 @@ class MusicAssistantPlayerControlTest extends MusicAssistantTestCase
         $this->assertTrue($this->value($playerInstanceId, 'Mute'));
     }
 
-    public function testMuteFallsBackToGroupMuteForSyncGroup(): void
+    public function testMuteFallsBackToGroupMuteForKnownGroup(): void
     {
-        $playerInstanceId = $this->createConnectedPlayer('syncgroup_living');
+        $playerInstanceId = $this->createConnectedPlayerOfType('living', 'group');
         $this->simulateHttpApiError('players/cmd/volume_mute');
         $this->simulateHttpResult('players/cmd/group_volume_mute', null);
 
@@ -87,8 +87,20 @@ class MusicAssistantPlayerControlTest extends MusicAssistantTestCase
             ['players/cmd/volume_mute', 'players/cmd/group_volume_mute'],
             array_column($this->httpCalls(), 'command')
         );
-        $this->assertSame(['player_id' => 'syncgroup_living', 'muted' => true], $this->httpCalls()[1]['args']);
+        $this->assertSame(['player_id' => 'living', 'muted' => true], $this->httpCalls()[1]['args']);
         $this->assertTrue($this->value($playerInstanceId, 'Mute'));
+    }
+
+    public function testSyncGroupPrefixAloneDoesNotUseGroupMute(): void
+    {
+        $playerInstanceId = $this->createConnectedPlayerOfType('syncgroup_living', 'player');
+        $this->simulateHttpApiError('players/cmd/volume_mute');
+        $this->simulateHttpResult('players/cmd/group_volume_mute', null);
+
+        IPS_RequestAction($playerInstanceId, 'Mute', true);
+
+        $this->assertSame(['players/cmd/volume_mute'], array_column($this->httpCalls(), 'command'));
+        $this->assertFalse($this->value($playerInstanceId, 'Mute'));
     }
 
     public function testFailedMuteOfNormalPlayerDoesNotUseGroupMute(): void
@@ -226,6 +238,22 @@ class MusicAssistantPlayerControlTest extends MusicAssistantTestCase
     private function createConnectedPlayer(string $playerId = self::PLAYER_ID): int
     {
         $playerInstanceId = $this->createPlayer($this->createConnection(), $playerId);
+        $this->clearHttpCalls();
+
+        return $playerInstanceId;
+    }
+
+    private function createConnectedPlayerOfType(string $playerId, string $type): int
+    {
+        $connectionId = $this->createConnection();
+        $playerInstanceId = $this->createPlayer($connectionId, $playerId);
+        $this->authenticate($connectionId);
+        $this->notifyConnectionStatus($connectionId, $playerInstanceId);
+        $this->receiveFromServer($connectionId, [
+            'event'     => 'player_updated',
+            'object_id' => $playerId,
+            'data'      => ['type' => $type]
+        ]);
         $this->clearHttpCalls();
 
         return $playerInstanceId;
