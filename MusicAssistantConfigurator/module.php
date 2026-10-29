@@ -27,6 +27,11 @@ class MusicAssistantConfigurator extends IPSModule
         // Der Configurator wertet keine Ereignisse der Connection aus. Der Filter passt auf keines davon, damit
         // ReceiveData() nicht bei jedem Player- oder Queue-Ereignis aufgerufen wird.
         $this->SetReceiveDataFilter('.*"Event":"configurator_[a-z_]+".*');
+        // Während KR_INIT werden die Instanzen erst nach und nach erstellt; die Migration könnte dann nur einen Teil
+        // der Player sehen. Sie wird bei der ersten Verwendung nachgeholt.
+        if (IPS_GetKernelRunlevel() !== KR_READY) {
+            return;
+        }
         // Store-Reviewrichtlinie Punkt 3: Ohne verbundene Connection ist die Instanz gültig, aber noch nicht
         // einsatzbereit. Profilnamen und Zuordnungen werden bei der ersten Verwendung übernommen.
         try {
