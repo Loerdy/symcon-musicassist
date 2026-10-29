@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Die HTML-Kachel zeigt das Standardcover jetzt auch dann sofort, wenn auf einen Titel oder Sender mit JPEG-Cover einer ohne Cover folgt; bisher blieb das vorherige Bild bis zum Neuladen der Seite stehen.
+
 ## v2.2.0 — 2026-10-28
 
 - Das Configurator-Formular bleibt bei fehlerhaften Profilnamen oder Playlist-/Radio-Zuordnungen nutzbar; vorhandene Player werden weiter angezeigt, die Neuerstellung ist bis zur Behebung deaktiviert und der Grund wird im Formular angezeigt.

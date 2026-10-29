@@ -239,6 +239,8 @@ trait MusicAssistantPlayerCover
         if (!IPS_SetMediaFile($mediaId, $mediaFile, false)) {
             throw new Exception($this->Translate('Cover file format could not be updated.'));
         }
+        // Die andere Datei kann bereits ein Bild enthalten (z. B. das Standardcover); die Kachel muss neu laden.
+        $this->markCoverChanged();
     }
 
     private function queueCoverDownloadUnlocked(string $proxyId, $state): bool
