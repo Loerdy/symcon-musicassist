@@ -344,7 +344,7 @@ trait MusicAssistantPlayerCover
         $configured = IPS_SetParent($mediaId, $this->InstanceID);
         $configured = IPS_SetIdent($mediaId, 'Cover') && $configured;
         $configured = IPS_SetName($mediaId, 'Cover') && $configured;
-        $configured = IPS_SetPosition($mediaId, 140) && $configured;
+        $configured = IPS_SetPosition($mediaId, 150) && $configured;
         $configured = IPS_SetMediaCached($mediaId, false) && $configured;
         $configured = IPS_SetMediaFile(
             $mediaId,

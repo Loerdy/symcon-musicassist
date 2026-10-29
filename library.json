@@ -2,11 +2,11 @@
   "id": "{0F7D8E2A-29D0-4BA6-8F4B-2F2B9F33D4A1}",
   "author": "Loerdy",
   "name": "Music Assistant",
-  "url": "https://www.music-assistant.io/api/",
+  "url": "https://github.com/Loerdy/symcon-musicassist",
   "compatibility": {
     "version": "8.2"
   },
   "version": "2.2",
-  "build": 0,
-  "date": 1793145600
+  "build": 1,
+  "date": 1793232000
 }

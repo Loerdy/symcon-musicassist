@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+## v2.2.1 — 2026-10-29
+
 - Die HTML-Kachel zeigt das Standardcover jetzt auch dann sofort, wenn auf einen Titel oder Sender mit JPEG-Cover einer ohne Cover folgt; bisher blieb das vorherige Bild bis zum Neuladen der Seite stehen.
 - Den Gruppen-Mute nutzt der Player als Ersatz nur noch, wenn Music Assistant ihn als Gruppe meldet (Player-Typ `group`); die nicht dokumentierte Erkennung am Präfix `syncgroup_` der Player-ID entfällt.
 - Der Configurator wird nicht mehr bei jedem Player- und Queue-Ereignis der Connection aufgerufen, da er diese Ereignisse nicht auswertet; das spart unnötige PHP-Aufrufe.
 - Beim Start von IP-Symcon übernimmt der Configurator fehlende Profilnamen und Playlist-/Radio-Zuordnungen nicht mehr, bevor alle Instanzen geladen sind; die Übernahme erfolgt bei der ersten Verwendung, sodass ein noch unvollständiger Instanzbestand keine falschen Werte dauerhaft speichern kann.
+- Neu angelegte Cover-Medien erhalten die Position 150 statt 140 und teilen sie sich damit nicht mehr mit der Favoriten-Variable; bestehende Cover und vom Benutzer gewählte Positionen bleiben unverändert.
+- Die Library verweist auf das GitHub-Repository statt auf die Music-Assistant-API-Dokumentation. Die Mindestversion bleibt IP-Symcon 8.2, mit der das Modul entwickelt und getestet wird.
+- Intern wurde der Player in mehrere Teilbereiche aufgeteilt und die Bibliothek mit automatisierten Tests abgesichert; am Verhalten ändert sich dadurch nichts.
 
 ## v2.2.0 — 2026-10-28
 
