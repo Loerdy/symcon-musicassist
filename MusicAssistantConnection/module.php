@@ -627,13 +627,9 @@ class MusicAssistantConnection extends IPSModule
 
     private function downloadArtwork(string $proxyId, bool $authenticated): array
     {
-        $host = trim($this->ReadPropertyString('Host'));
-        if (strpos($host, ':') !== false && $host[0] !== '[') {
-            $host = '[' . $host . ']';
-        }
         $url = sprintf(
             'http://%s:%d/imageproxy/%s?size=512&fmt=jpg',
-            $host,
+            $this->maUrlHost(),
             $this->ReadPropertyInteger('Port'),
             $proxyId
         );
@@ -2027,10 +2023,6 @@ class MusicAssistantConnection extends IPSModule
 
     private function webSocketUrl(): string
     {
-        $host = trim($this->ReadPropertyString('Host'));
-        if (strpos($host, ':') !== false && $host[0] !== '[') {
-            $host = '[' . $host . ']';
-        }
-        return sprintf('ws://%s:%d/ws', $host, $this->ReadPropertyInteger('Port'));
+        return sprintf('ws://%s:%d/ws', $this->maUrlHost(), $this->ReadPropertyInteger('Port'));
     }
 }

@@ -58,14 +58,30 @@ class MusicAssistantHttpTransportTest extends MusicAssistantTestCase
         $this->assertCount(2, array_unique($ids));
     }
 
-    public function testIpv6HostIsBracketedInApiUrl(): void
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function apiHostProvider(): array
     {
-        $connectionId = $this->createConnection('fd00::15');
+        return [
+            'IPv4'           => ['192.168.29.15', 'http://192.168.29.15:8095/api'],
+            'DNS name'       => ['music.local', 'http://music.local:8095/api'],
+            'IPv6'           => ['fd00::15', 'http://[fd00::15]:8095/api'],
+            'bracketed IPv6' => ['[fd00::15]', 'http://[fd00::15]:8095/api']
+        ];
+    }
+
+    /**
+     * @dataProvider apiHostProvider
+     */
+    public function testApiUrlFormatsHost(string $host, string $expectedUrl): void
+    {
+        $connectionId = $this->createConnection($host);
         $this->simulateTransport(200, '{"result":null}');
 
         $this->apiRequest($connectionId, 'players/cmd/play', ['player_id' => 'player-1']);
 
-        $this->assertSame('http://[fd00::15]:8095/api', $this->lastRequest()['url']);
+        $this->assertSame($expectedUrl, $this->lastRequest()['url']);
     }
 
     /**

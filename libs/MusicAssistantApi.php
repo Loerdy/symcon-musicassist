@@ -3,14 +3,20 @@ declare(strict_types=1);
 
 trait MusicAssistantApi
 {
-    private function maBaseUrl(): string
+    // IPv6-Literale müssen in HTTP- und WebSocket-URLs geklammert werden.
+    private function maUrlHost(): string
     {
         $host = trim($this->ReadPropertyString('Host'));
-        $port = (int)$this->ReadPropertyInteger('Port');
         if (strpos($host, ':') !== false && $host[0] !== '[') {
             $host = '[' . $host . ']';
         }
-        return sprintf('http://%s:%d', $host, $port);
+        return $host;
+    }
+
+    private function maBaseUrl(): string
+    {
+        $port = (int)$this->ReadPropertyInteger('Port');
+        return sprintf('http://%s:%d', $this->maUrlHost(), $port);
     }
 
     private function maApiUrl(): string

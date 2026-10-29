@@ -26,16 +26,32 @@ class MusicAssistantArtworkRequestTest extends MusicAssistantTestCase
         ]], $this->artworkRequests());
     }
 
-    public function testIpv6HostIsBracketedInArtworkUrl(): void
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function artworkHostProvider(): array
     {
-        $connectionId = $this->createConnection('fd00::15');
+        return [
+            'IPv4'           => ['192.168.29.15', 'http://192.168.29.15:8095'],
+            'DNS name'       => ['music.local', 'http://music.local:8095'],
+            'IPv6'           => ['fd00::15', 'http://[fd00::15]:8095'],
+            'bracketed IPv6' => ['[fd00::15]', 'http://[fd00::15]:8095']
+        ];
+    }
+
+    /**
+     * @dataProvider artworkHostProvider
+     */
+    public function testArtworkUrlFormatsHost(string $host, string $expectedBaseUrl): void
+    {
+        $connectionId = $this->createConnection($host);
         $proxyId = $this->proxyId('a');
         $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody()));
 
         $this->requestArtwork($connectionId, $proxyId);
 
         $this->assertSame(
-            'http://[fd00::15]:8095/imageproxy/' . $proxyId . '?size=512&fmt=jpg',
+            $expectedBaseUrl . '/imageproxy/' . $proxyId . '?size=512&fmt=jpg',
             $this->artworkRequests()[0]['url']
         );
     }
