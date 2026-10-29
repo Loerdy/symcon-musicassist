@@ -205,6 +205,23 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->assertSame(0, $this->timerInterval($playerInstanceId, 'RefreshGroupMemberVolumes'));
     }
 
+    public function testEmptyPlayerListKeepsExistingVariables(): void
+    {
+        [$connectionId, $playerInstanceId] = $this->createGroupWithMembers(['member-1', 'member-2']);
+        $variableIds = [
+            $this->memberVolumeId($playerInstanceId, 'member-1'),
+            $this->memberVolumeId($playerInstanceId, 'member-2')
+        ];
+
+        $this->sendGroupMembers($connectionId, []);
+        $this->simulateHttpResult('players/all', []);
+        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+
+        $this->assertTrue(IPS_VariableExists($variableIds[0]));
+        $this->assertTrue(IPS_VariableExists($variableIds[1]));
+    }
+
     public function testDisabledGroupVolumesSkipQueuedRefresh(): void
     {
         [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::GROUP_ID, ['ShowGroupMemberVolumes' => true]);
