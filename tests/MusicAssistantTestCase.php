@@ -25,6 +25,8 @@ abstract class MusicAssistantTestCase extends TestCase
         IPS\ModuleLoader::loadSingleModule(__DIR__ . '/fixtures/MusicAssistantPlayerStubCompat', $library['id']);
         MusicAssistantConnectionHttpStub::$responses = [];
         MusicAssistantConnectionHttpStub::$calls = [];
+        MusicAssistantConnectionHttpStub::$artworkResponses = [];
+        MusicAssistantConnectionHttpStub::$artworkRequests = [];
         parent::setUp();
     }
 
@@ -68,6 +70,46 @@ abstract class MusicAssistantTestCase extends TestCase
     protected function simulateHttpFailure(string $command): void
     {
         MusicAssistantConnectionHttpStub::$responses[$command] = new Exception('HTTP request failed: timeout');
+    }
+
+    protected function artworkResponse(
+        int $httpCode,
+        string $contentType,
+        string $body,
+        bool $transferSucceeded = true,
+        bool $sizeExceeded = false,
+        int $errorNumber = 0
+    ): array
+    {
+        return [
+            'transfer_succeeded' => $transferSucceeded,
+            'http_code'          => $httpCode,
+            'content_type'       => $contentType,
+            'body'               => $body,
+            'size_exceeded'      => $sizeExceeded,
+            'error_number'       => $errorNumber
+        ];
+    }
+
+    protected function jpegBody(string $marker = 'cover'): string
+    {
+        return "\xFF\xD8\xFF\xE0" . $marker;
+    }
+
+    /**
+     * @param array|Throwable|Closure ...$responses
+     */
+    protected function simulateArtwork(...$responses): void
+    {
+        MusicAssistantConnectionHttpStub::$artworkResponses = $responses;
+    }
+
+    /**
+     * @return array<int, array{url: string, headers: array}>
+     */
+    protected function artworkRequests(): array
+    {
+        return MusicAssistantConnectionHttpStub::$artworkRequests;
     }
 
     /**

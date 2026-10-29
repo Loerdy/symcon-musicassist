@@ -642,6 +642,29 @@ class MusicAssistantConnection extends IPSModule
             $headers[] = 'Authorization: Bearer ' . trim($this->ReadPropertyString('Token'));
         }
 
+        $response = $this->artworkHttpGet($url, $headers);
+        if ($response['size_exceeded'] || $response['error_number'] === CURLE_FILESIZE_EXCEEDED) {
+            throw new Exception('Imageproxy überschritt die maximale Bildgröße');
+        }
+        if (!$response['transfer_succeeded']) {
+            throw new Exception('cURL-Verbindungs- oder Übertragungsfehler; Fehlernummer=' . $response['error_number']);
+        }
+        $contentType = strtolower(trim($response['content_type']));
+        $contentType = trim(explode(';', $contentType, 2)[0]);
+        return [
+            'http_code'    => $response['http_code'],
+            'content_type' => $contentType,
+            'body'         => $response['body']
+        ];
+    }
+
+    /**
+     * Reiner HTTP-Transport des Imageproxy ohne Auswertung; in Tests ersetzbar, damit der Cover-Abruf ohne Netzwerk prüfbar ist.
+     *
+     * @return array{transfer_succeeded:bool, http_code:int, content_type:string, body:string, size_exceeded:bool, error_number:int}
+     */
+    protected function artworkHttpGet(string $url, array $headers): array
+    {
         $body = '';
         $sizeExceeded = false;
         $maxArtworkSize = self::MAX_ARTWORK_SIZE;
@@ -673,24 +696,20 @@ class MusicAssistantConnection extends IPSModule
             ]);
             $transferSucceeded = curl_exec($ch);
             $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $contentType = strtolower(trim((string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE)));
+            $contentType = (string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
             $curlErrorNumber = curl_errno($ch);
         } finally {
             // curl_close() ist seit PHP 8.0 wirkungslos und ab PHP 8.5 veraltet; das Handle wird mit unset freigegeben.
             unset($ch);
         }
 
-        if ($sizeExceeded || $curlErrorNumber === CURLE_FILESIZE_EXCEEDED) {
-            throw new Exception('Imageproxy überschritt die maximale Bildgröße');
-        }
-        if ($transferSucceeded === false) {
-            throw new Exception('cURL-Verbindungs- oder Übertragungsfehler; Fehlernummer=' . $curlErrorNumber);
-        }
-        $contentType = trim(explode(';', $contentType, 2)[0]);
         return [
-            'http_code'   => $httpCode,
-            'content_type' => $contentType,
-            'body'         => $body
+            'transfer_succeeded' => $transferSucceeded !== false,
+            'http_code'          => $httpCode,
+            'content_type'       => $contentType,
+            'body'               => $body,
+            'size_exceeded'      => $sizeExceeded,
+            'error_number'       => $curlErrorNumber
         ];
     }
 

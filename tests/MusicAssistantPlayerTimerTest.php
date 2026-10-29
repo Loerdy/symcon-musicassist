@@ -219,6 +219,94 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->assertSame(0, $this->timerInterval($playerInstanceId, 'RefreshGroupMemberVolumes'));
     }
 
+    public function testCoverIsDownloadedOutsideEventProcessing(): void
+    {
+        [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::PLAYER_ID, []);
+
+        $this->answerActiveQueue($connectionId, $this->withCover($this->queueItem('item-1', 'sp-1'), 'a'));
+
+        // Bis zum Download zeigt das Medium das Standardcover; der Abruf läuft erst über den Timer.
+        $this->assertSame([], $this->artworkRequests());
+        $this->assertSame(100, $this->timerInterval($playerInstanceId, 'DownloadCover'));
+        $this->assertSame($this->defaultCover(), $this->coverContent($playerInstanceId));
+
+        $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody('a')));
+        $this->player($playerInstanceId)->ProcessCoverDownload();
+
+        $this->assertCount(1, $this->artworkRequests());
+        $this->assertStringContainsString('/imageproxy/' . hash('sha256', 'a') . '?', $this->artworkRequests()[0]['url']);
+        $this->assertSame(base64_encode($this->jpegBody('a')), $this->coverContent($playerInstanceId));
+        $this->assertSame(0, $this->timerInterval($playerInstanceId, 'DownloadCover'));
+    }
+
+    public function testUnchangedCoverIsNotDownloadedAgain(): void
+    {
+        [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::PLAYER_ID, []);
+        $item = $this->withCover($this->queueItem('item-1', 'sp-1'), 'a');
+        $this->answerActiveQueue($connectionId, $item);
+        $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody('a')));
+        $this->player($playerInstanceId)->ProcessCoverDownload();
+
+        $this->sendQueueUpdated($connectionId, ['state' => 'playing', 'current_item' => $item]);
+        $this->player($playerInstanceId)->ProcessCoverDownload();
+
+        $this->assertCount(1, $this->artworkRequests());
+        $this->assertSame(0, $this->timerInterval($playerInstanceId, 'DownloadCover'));
+        $this->assertSame(base64_encode($this->jpegBody('a')), $this->coverContent($playerInstanceId));
+    }
+
+    public function testTrackChangeDuringCoverDownloadDiscardsStaleCover(): void
+    {
+        [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::PLAYER_ID, []);
+        $this->answerActiveQueue($connectionId, $this->withCover($this->queueItem('item-1', 'sp-1'), 'a'));
+
+        $this->simulateArtwork(function () use ($connectionId): array {
+            $this->sendQueueUpdated($connectionId, [
+                'state'        => 'playing',
+                'current_item' => $this->withCover($this->queueItem('item-2', 'sp-2'), 'b')
+            ]);
+            return $this->artworkResponse(200, 'image/jpeg', $this->jpegBody('a'));
+        });
+        $this->player($playerInstanceId)->ProcessCoverDownload();
+
+        $this->assertSame($this->defaultCover(), $this->coverContent($playerInstanceId));
+        $this->assertSame(100, $this->timerInterval($playerInstanceId, 'DownloadCover'));
+
+        $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody('b')));
+        $this->player($playerInstanceId)->ProcessCoverDownload();
+
+        $this->assertStringContainsString('/imageproxy/' . hash('sha256', 'b') . '?', $this->artworkRequests()[1]['url']);
+        $this->assertSame(base64_encode($this->jpegBody('b')), $this->coverContent($playerInstanceId));
+        $this->assertSame(0, $this->timerInterval($playerInstanceId, 'DownloadCover'));
+    }
+
+    public function testFailedCoverDownloadKeepsDefaultCoverAndFinishesJob(): void
+    {
+        [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::PLAYER_ID, []);
+        $this->answerActiveQueue($connectionId, $this->withCover($this->queueItem('item-1', 'sp-1'), 'a'));
+        $this->simulateArtwork($this->artworkResponse(200, 'text/html', 'error page'));
+
+        $this->player($playerInstanceId)->ProcessCoverDownload();
+        $this->player($playerInstanceId)->ProcessCoverDownload();
+
+        $this->assertCount(1, $this->artworkRequests());
+        $this->assertSame($this->defaultCover(), $this->coverContent($playerInstanceId));
+        $this->assertSame(0, $this->timerInterval($playerInstanceId, 'DownloadCover'));
+    }
+
+    public function testIdleQueueClearsCoverAndCancelsDownload(): void
+    {
+        [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::PLAYER_ID, []);
+        $this->answerActiveQueue($connectionId, $this->withCover($this->queueItem('item-1', 'sp-1'), 'a'));
+        $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody('a')));
+
+        $this->sendQueueUpdated($connectionId, ['state' => 'idle', 'current_item' => null]);
+        $this->player($playerInstanceId)->ProcessCoverDownload();
+
+        $this->assertSame([], $this->artworkRequests());
+        $this->assertSame('', $this->coverContent($playerInstanceId));
+    }
+
     /**
      * @return array{0: int, 1: int}
      */
@@ -311,6 +399,21 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
             'name'          => $mediaItem['name'],
             'media_item'    => $mediaItem
         ];
+    }
+
+    private function withCover(array $queueItem, string $seed): array
+    {
+        return $queueItem + ['image' => ['proxy_id' => hash('sha256', $seed)]];
+    }
+
+    private function coverContent(int $instanceId): string
+    {
+        return IPS_GetMediaContent(IPS_GetObjectIDByIdent('Cover', $instanceId));
+    }
+
+    private function defaultCover(): string
+    {
+        return base64_encode((string)file_get_contents(__DIR__ . '/../MusicAssistantPlayer/default-cover.png'));
     }
 
     private function libraryTrack(string $itemId, bool $favorite): array
