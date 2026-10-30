@@ -56,10 +56,11 @@ Der Player ist mit seiner tatsächlichen `MusicAssistant Connection` verbunden. 
 
 Eine `MusicAssistant Shortcut`-Instanz (Schnellzugriff) stellt eine Kachel mit einem oder mehreren Buttons bereit. Ein Tippen auf einen Button startet den hinterlegten Radiosender bzw. die hinterlegte Playlist auf dem gewählten Player.
 
-- Als Player stehen nur `MusicAssistant Player`-Instanzen derselben `MusicAssistant Connection` zur Auswahl.
+- Als Player wird eine `MusicAssistant Player`-Instanz gewählt. Sie muss an derselben `MusicAssistant Connection` hängen wie der Schnellzugriff; andernfalls zeigt die Instanz einen Fehlerstatus und startet nichts.
 - Die Einträge stammen aus den Playlist- und Radio-Profilen des gewählten Players, die der Configurator pflegt. Nach dem Wechsel des Players stehen dessen Einträge sofort zur Auswahl.
 - Eine optionale Beschriftung ersetzt den Namen aus dem Profil.
-- Mit einem Eintrag zeigt die Kachel einen einzelnen Button, mit mehreren Einträgen ein Raster.
+- Über „Beschriftung anzeigen“ lässt sich die Beschriftung je Eintrag ausblenden, etwa wenn der Name bereits im Logo steht. Das Bild füllt den Button dann bis zum abgerundeten Rand. Ohne Bild und bei nicht verfügbaren Einträgen bleibt die Beschriftung immer sichtbar.
+- Mit einem Eintrag zeigt die Kachel einen einzelnen Button, mit mehreren Einträgen ein Raster. Die quadratischen Buttons verteilen sich so auf die Kachel, dass sie möglichst groß werden; Logos werden dabei nicht verzerrt oder beschnitten.
 - Gestartet wird über die Auswahl des Players; Auflösung des Senders bzw. der Playlist und Fehlerprotokollierung übernimmt der Player.
 - Wird ein Eintrag aus dem Profil entfernt, zeigt die Kachel ihn als nicht verfügbar an.
 - Jeder Button zeigt ein Bild: ein optional gewähltes eigenes Bild, sonst das Bild des Senders bzw. der Playlist aus der Music-Assistant-Bibliothek, sonst ein neutrales Symbol.
@@ -278,10 +279,11 @@ The player is connected to its actual `MusicAssistant Connection`. When a player
 
 A `MusicAssistant Shortcut` instance provides a tile with one or more buttons. Tapping a button starts the configured radio station or playlist on the selected player.
 
-- Only `MusicAssistant Player` instances of the same `MusicAssistant Connection` can be selected.
+- A `MusicAssistant Player` instance is selected as player. It must be attached to the same `MusicAssistant Connection` as the shortcut; otherwise the instance shows an error status and starts nothing.
 - The entries are taken from the playlist and radio profiles of the selected player, which are maintained by the configurator. After changing the player, its entries are available immediately.
 - An optional label replaces the name from the profile.
-- With one entry, the tile shows a single button; with several entries, a grid.
+- "Show label" hides the label per entry, for example when the name is already part of the logo. The image then fills the button up to its rounded edge. Without an image and for unavailable entries, the label is always shown.
+- With one entry, the tile shows a single button; with several entries, a grid. The square buttons are arranged so that they are as large as possible; logos are neither distorted nor cropped.
 - Playback is started through the player's selection; the player resolves the station or playlist and logs errors.
 - If an entry is removed from the profile, the tile shows it as unavailable.
 - Each button shows an image: an optionally selected own image, otherwise the station or playlist image from the Music Assistant library, otherwise a neutral icon.
