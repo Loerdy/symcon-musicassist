@@ -18,6 +18,31 @@ class MusicAssistantConnectionTest extends MusicAssistantTestCase
         $this->assertSame(104, IPS_GetInstance($connectionId)['InstanceStatus']);
     }
 
+    public function testKernelStartReevaluatesPendingClientConfiguration(): void
+    {
+        $connectionId = $this->createConnection();
+        $this->assertSame(104, IPS_GetInstance($connectionId)['InstanceStatus']);
+        // Simuliert einen Client, dessen Adresse beim Start nicht mehr zur Connection passt.
+        IPS_SetProperty($this->webSocketId($connectionId), 'URL', 'ws://192.0.2.1:8095/ws');
+        IPS_ApplyChanges($this->webSocketId($connectionId));
+
+        $this->connection($connectionId)->MessageSink(time(), 0, IPS_KERNELSTARTED, []);
+
+        $this->assertSame(204, IPS_GetInstance($connectionId)['InstanceStatus']);
+    }
+
+    public function testKernelStartKeepsAuthenticatedSession(): void
+    {
+        $connectionId = $this->createConnection();
+        $this->authenticate($connectionId);
+        IPS_SetProperty($this->webSocketId($connectionId), 'URL', 'ws://192.0.2.1:8095/ws');
+        IPS_ApplyChanges($this->webSocketId($connectionId));
+
+        $this->connection($connectionId)->MessageSink(time(), 0, IPS_KERNELSTARTED, []);
+
+        $this->assertSame(102, IPS_GetInstance($connectionId)['InstanceStatus']);
+    }
+
     public function testConfirmedAuthenticationActivatesConnection(): void
     {
         $connectionId = $this->createConnection();

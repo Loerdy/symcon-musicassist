@@ -73,6 +73,8 @@ class MusicAssistantConnection extends IPSModule
         });
         $this->SetBuffer('ResyncGeneration', '');
         $this->RegisterTimer('CheckConnection', 0, 'IPS_RequestAction($_IPS["TARGET"], "CheckConnection", 0);');
+        // Beim Start ist der WebSocket-Client in ApplyChanges noch nicht geladen; der Status wird danach neu bestimmt.
+        $this->RegisterMessage(0, IPS_KERNELSTARTED);
         $this->RequireParent(self::WEBSOCKET_MODULE);
     }
 
@@ -137,6 +139,14 @@ class MusicAssistantConnection extends IPSModule
 
     public function MessageSink($TimeStamp, $SenderID, $Message, $Data): void
     {
+        if ($Message === IPS_KERNELSTARTED) {
+            // Nur die Ruhezustände neu bewerten; eine bereits laufende Anmeldung oder Sitzung bleibt unberührt.
+            if (in_array($this->GetStatus(), [104, 204], true)) {
+                $this->SetStatus($this->disconnectedStatus());
+            }
+            return;
+        }
+
         if ($Message === FM_CHILDREMOVED && $SenderID === $this->InstanceID) {
             $this->cleanupRegisteredPlayers();
             return;
@@ -890,7 +900,9 @@ class MusicAssistantConnection extends IPSModule
     private function parentNeedsConfirmation(): bool
     {
         $parentId = (int)$this->GetBuffer('ParentInstanceId');
-        if (!$this->isConfigured() || $parentId <= 0 || !IPS_InstanceExists($parentId)) {
+        // Vor KR_READY ist die Instanzschnittstelle des Clients ggf. noch nicht verfügbar (Warnung bei IPS_GetProperty).
+        if (IPS_GetKernelRunlevel() !== KR_READY
+            || !$this->isConfigured() || $parentId <= 0 || !IPS_InstanceExists($parentId)) {
             return false;
         }
         $parent = IPS_GetInstance($parentId);
