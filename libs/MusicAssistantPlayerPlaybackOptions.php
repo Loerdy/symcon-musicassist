@@ -167,7 +167,8 @@ trait MusicAssistantPlayerPlaybackOptions
         }
         // Eine Sekunde Reserve, damit Music Assistant den Timer beim erneuten Lesen bereits beendet hat.
         $this->SetTimerInterval('SleepTimerExpired', (int)ceil(($timestamp - time()) * 1000) + 1000);
-        $end = date('H:i', (int)round($timestamp));
+        // Die Sekunden machen sichtbar, dass der Timer nicht zur vollen Minute endet.
+        $end = sprintf($this->Translate("%s o'clock"), date('H:i:s', (int)round($timestamp)));
         if ((string)$this->GetValue('SleepTimerEnd') !== $end) {
             $this->SetValue('SleepTimerEnd', $end);
         }

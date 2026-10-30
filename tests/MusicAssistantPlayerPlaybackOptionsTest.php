@@ -38,7 +38,7 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
             $this->httpCalls()
         );
         $this->assertSame(30, $this->value($playerInstanceId, 'SleepTimer'));
-        $this->assertSame(date('H:i', $expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
+        $this->assertSame($this->expectedEnd($expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
     }
 
     public function testSleepTimerOffClearsTimer(): void
@@ -106,7 +106,7 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         IPS_RequestAction($playerInstanceId, 'SleepTimerExpired', 0);
 
         $this->assertSame(1, $this->value($playerInstanceId, 'SleepTimer'));
-        $this->assertSame(date('H:i', $expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
+        $this->assertSame($this->expectedEnd($expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
         $this->assertGreaterThan(60000, $this->timerInterval($playerInstanceId, 'SleepTimerExpired'));
     }
 
@@ -154,7 +154,7 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         $this->sendPlayerUpdated($connectionId, ['sleep_timer_expires_at' => (float)$expiresAt]);
 
         $this->assertSame(60, $this->value($playerInstanceId, 'SleepTimer'));
-        $this->assertSame(date('H:i', $expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
+        $this->assertSame($this->expectedEnd($expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
 
         $this->sendPlayerUpdated($connectionId, ['volume_level' => 20]);
         $this->assertSame(60, $this->value($playerInstanceId, 'SleepTimer'));
@@ -184,7 +184,7 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         $this->sendPlayerUpdated($connectionId, ['sleep_timer_expires_at' => $expiresAt * 1000]);
 
         $this->assertSame(15, $this->value($playerInstanceId, 'SleepTimer'));
-        $this->assertSame(date('H:i', $expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
+        $this->assertSame($this->expectedEnd($expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
     }
 
     /**
@@ -259,7 +259,7 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         IPS_ApplyChanges($playerInstanceId);
 
         $this->assertSame(30, $this->value($playerInstanceId, 'SleepTimer'));
-        $this->assertSame(date('H:i', $expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
+        $this->assertSame($this->expectedEnd($expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
         $this->assertTrue($this->value($playerInstanceId, 'Crossfade'));
         $this->assertFalse($this->value($playerInstanceId, 'Autoplay'));
     }
@@ -350,6 +350,11 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         $this->assertNotEmpty($calls, 'Kein Aufruf von ' . $command);
 
         return $calls[count($calls) - 1];
+    }
+
+    private function expectedEnd(int $expiresAt): string
+    {
+        return date('H:i:s', $expiresAt) . " o'clock";
     }
 
     private function timerInterval(int $instanceId, string $ident): int

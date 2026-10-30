@@ -13,6 +13,7 @@
             "Sleep timer": "Sleep-Timer",
             "Sleep timer ends": "Sleep-Timer endet",
             "%d min": "%d min",
+            "%s o'clock": "%s Uhr",
             "Crossfade": "Crossfade",
             "Autoplay": "Autoplay",
             "Invalid sleep timer duration.": "Ungültige Dauer für den Sleep-Timer.",
