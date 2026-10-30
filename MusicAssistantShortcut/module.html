@@ -54,7 +54,12 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            align-self: center;
+            justify-self: center;
             gap: clamp(4px, 1.5cqmin, 10px);
+            /* Quadratische Buttons, Kantenlänge aus layoutGrid(). */
+            width: var(--size, 100%);
+            height: var(--size, 100%);
             min-width: 0;
             min-height: 0;
             overflow: hidden;
@@ -76,6 +81,22 @@
         .shortcut[data-pressed="true"] {
             border-color: var(--accent-color, currentColor);
             transform: scale(0.97);
+        }
+
+        /* Reine Bild-Buttons: das Bild schließt bündig mit dem abgerundeten Rand ab. */
+        .shortcut[data-image-only="true"] {
+            padding: 0;
+            border: 0;
+        }
+
+        .shortcut[data-image-only="true"]:active,
+        .shortcut[data-image-only="true"][data-pressed="true"] {
+            outline: 2px solid var(--accent-color, currentColor);
+            outline-offset: -2px;
+        }
+
+        .shortcut[data-image-only="true"] img {
+            border-radius: 0;
         }
 
         .shortcut:disabled {
@@ -177,6 +198,7 @@
             }
             container.style.setProperty("--columns", String(best.columns));
             container.style.setProperty("--rows", String(best.rows));
+            container.style.setProperty("--size", Math.max(0, Math.floor(best.size)) + "px");
         }
 
         function renderState(state) {
@@ -213,6 +235,8 @@
                     const label = document.createElement("span");
                     label.textContent = text;
                     button.append(label);
+                } else {
+                    button.dataset.imageOnly = "true";
                 }
                 button.title = text;
                 button.setAttribute("aria-label", text);
