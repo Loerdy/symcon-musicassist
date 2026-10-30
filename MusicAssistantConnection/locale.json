@@ -69,7 +69,8 @@
             "registration unknown": "Registrierung unbekannt",
             "registered": "registriert",
             "not registered": "nicht registriert",
-            "Player instances: %d": "Player-Instanzen: %d"
+            "Player instances: %d": "Player-Instanzen: %d",
+            "registration after connecting": "Registrierung nach Verbindungsaufbau"
         }
     }
 }

@@ -17,7 +17,7 @@ class MusicAssistantConnection extends IPSModule
     private const PLAYER_MODULE_ID = '{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}';
     private const MAX_ARTWORK_SIZE = 5242880;
     // Version der lokalen API-Dokumentation, gegen die das Modul entwickelt und getestet wurde.
-    private const TESTED_SERVER_VERSION = '2.10.8';
+    private const TESTED_SERVER_VERSION = '2.10.9';
     private const STATE_SEMAPHORE_TIMEOUT = 5000;
     private const STATE_SEMAPHORE_ERROR = 1701;
     private const AUTH_MAX_ATTEMPTS = 3;

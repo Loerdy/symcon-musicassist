@@ -86,6 +86,9 @@ trait MusicAssistantConnectionDiagnostics
             $registeredPlayers = null;
         }
 
+        // Beim Verbindungsverlust verwirft die Connection alle Registrierungen; die Player melden sich erst wieder an,
+        // wenn sie authentifiziert ist. Ohne Verbindung wäre „nicht registriert“ daher irreführend.
+        $connected = $this->GetStatus() === 102;
         $players = [];
         foreach (IPS_GetInstanceListByModuleID(self::PLAYER_MODULE_ID) as $playerInstanceId) {
             if (!IPS_InstanceExists($playerInstanceId)) {
@@ -98,6 +101,8 @@ trait MusicAssistantConnectionDiagnostics
             $playerId = trim((string)IPS_GetProperty($playerInstanceId, 'PlayerID'));
             if ($playerId === '') {
                 $registration = $this->Translate('no player ID');
+            } elseif (!$connected) {
+                $registration = $this->Translate('registration after connecting');
             } elseif ($registeredPlayers === null) {
                 $registration = $this->Translate('registration unknown');
             } else {
