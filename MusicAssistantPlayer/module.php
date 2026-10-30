@@ -75,11 +75,11 @@ class MusicAssistantPlayer extends IPSModule
         $this->SetBuffer('CoverRevision', '1');
         $this->SetBuffer('VisualizationCoverRevision', '');
 
-        $this->RegisterTimer('ResetPlaylist', 0, 'MASS_ResetPlaylistSelection($_IPS["TARGET"]);');
-        $this->RegisterTimer('ResetRadio', 0, 'MASS_ResetRadioSelection($_IPS["TARGET"]);');
-        $this->RegisterTimer('ResolveFavorite', 0, 'MASS_ProcessFavoriteResolution($_IPS["TARGET"]);');
-        $this->RegisterTimer('DownloadCover', 0, 'MASS_ProcessCoverDownload($_IPS["TARGET"]);');
-        $this->RegisterTimer('RefreshGroupMemberVolumes', 0, 'MASS_ProcessGroupMemberVolumeRefresh($_IPS["TARGET"]);');
+        $this->RegisterTimer('ResetPlaylist', 0, 'IPS_RequestAction($_IPS["TARGET"], "ResetPlaylist", 0);');
+        $this->RegisterTimer('ResetRadio', 0, 'IPS_RequestAction($_IPS["TARGET"], "ResetRadio", 0);');
+        $this->RegisterTimer('ResolveFavorite', 0, 'IPS_RequestAction($_IPS["TARGET"], "ResolveFavorite", 0);');
+        $this->RegisterTimer('DownloadCover', 0, 'IPS_RequestAction($_IPS["TARGET"], "DownloadCover", 0);');
+        $this->RegisterTimer('RefreshGroupMemberVolumes', 0, 'IPS_RequestAction($_IPS["TARGET"], "RefreshGroupMemberVolumes", 0);');
     }
 
     public function ApplyChanges(): void
@@ -513,6 +513,27 @@ class MusicAssistantPlayer extends IPSModule
         switch ($Ident) {
             case 'UpdateConfigView':
                 $this->UpdateConfigView();
+                break;
+
+            // Ziele der Timer; die gleichnamigen öffentlichen Funktionen bleiben für bestehende Skripte erhalten.
+            case 'ResetPlaylist':
+                $this->ResetPlaylistSelection();
+                break;
+
+            case 'ResetRadio':
+                $this->ResetRadioSelection();
+                break;
+
+            case 'ResolveFavorite':
+                $this->ProcessFavoriteResolution();
+                break;
+
+            case 'DownloadCover':
+                $this->ProcessCoverDownload();
+                break;
+
+            case 'RefreshGroupMemberVolumes':
+                $this->ProcessGroupMemberVolumeRefresh();
                 break;
 
             case 'Playlist':

@@ -72,7 +72,7 @@ class MusicAssistantConnection extends IPSModule
             $this->SetBuffer('ResyncPlayers', '{}');
         });
         $this->SetBuffer('ResyncGeneration', '');
-        $this->RegisterTimer('CheckConnection', 0, 'MASS_CheckConnection($_IPS["TARGET"]);');
+        $this->RegisterTimer('CheckConnection', 0, 'IPS_RequestAction($_IPS["TARGET"], "CheckConnection", 0);');
         $this->RequireParent(self::WEBSOCKET_MODULE);
     }
 
@@ -175,6 +175,10 @@ class MusicAssistantConnection extends IPSModule
         switch ($Ident) {
             case 'ConfigureParent':
                 $this->configureParentOnUserRequest();
+                break;
+
+            case 'CheckConnection':
+                $this->CheckConnection();
                 break;
 
             default:

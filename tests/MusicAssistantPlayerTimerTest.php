@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 include_once __DIR__ . '/MusicAssistantTestCase.php';
 
-// Die Stubs führen Timer nicht aus: Die Tests prüfen das geplante Intervall und rufen die Zielmethode
-// des Timers anschließend selbst auf, wie es der Kernel nach Ablauf des Intervalls tun würde.
+// Die Stubs führen Timer nicht aus: Die Tests prüfen das geplante Intervall und lösen anschließend
+// dieselbe Aktion aus, die das Timer-Skript nach Ablauf des Intervalls per IPS_RequestAction aufruft.
 class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
 {
     private const PLAYER_ID = 'player-1';
@@ -24,7 +24,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->assertFalse($this->value($playerInstanceId, 'Favorite'));
 
         $this->simulateHttpResult('music/get_library_item', $this->libraryTrack('42', true));
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
 
         $this->assertSame(
             [[
@@ -42,7 +42,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::PLAYER_ID, ['ShowFavorite' => true]);
 
         $this->answerActiveQueue($connectionId, $this->queueItem('item-1', '42', 'library', true));
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
 
         $this->assertSame([], $this->httpCalls());
         $this->assertTrue($this->value($playerInstanceId, 'Favorite'));
@@ -57,14 +57,14 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->simulateHttpResultDuring('music/get_library_item', function () use ($connectionId): void {
             $this->sendQueueUpdated($connectionId, ['state' => 'playing', 'current_item' => $this->queueItem('item-2', 'sp-2')]);
         }, $this->libraryTrack('42', true));
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
 
         // Das Ergebnis für den alten Titel wird verworfen; der neue Titel wird erneut geplant.
         $this->assertFalse($this->value($playerInstanceId, 'Favorite'));
         $this->assertSame(100, $this->timerInterval($playerInstanceId, 'ResolveFavorite'));
 
         $this->simulateHttpResult('music/get_library_item', $this->libraryTrack('43', true));
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
 
         $this->assertSame(['sp-1', 'sp-2'], array_column(array_column($this->httpCalls(), 'args'), 'item_id'));
         $this->assertTrue($this->value($playerInstanceId, 'Favorite'));
@@ -78,7 +78,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->simulateHttpResult('music/get_library_item', $this->libraryTrack('42', true));
 
         $this->sendQueueUpdated($connectionId, ['state' => 'idle', 'current_item' => null]);
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
 
         $this->assertSame([], $this->httpCalls());
         $this->assertFalse($this->value($playerInstanceId, 'Favorite'));
@@ -90,8 +90,8 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->answerActiveQueue($connectionId, $this->queueItem('item-1', 'sp-1'));
         $this->simulateHttpFailure('music/get_library_item');
 
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
 
         $this->assertCount(1, $this->httpCalls());
         $this->assertFalse($this->value($playerInstanceId, 'Favorite'));
@@ -103,11 +103,11 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::PLAYER_ID, ['ShowFavorite' => true]);
         $this->answerActiveQueue($connectionId, $this->queueItem('item-1', 'sp-1'));
         $this->simulateHttpFailure('music/get_library_item');
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
 
         $this->sendQueueUpdated($connectionId, ['state' => 'playing', 'current_item' => $this->queueItem('item-2', 'sp-2')]);
         $this->simulateHttpResult('music/get_library_item', $this->libraryTrack('43', true));
-        $this->player($playerInstanceId)->ProcessFavoriteResolution();
+        IPS_RequestAction($playerInstanceId, 'ResolveFavorite', 0);
 
         $this->assertTrue($this->value($playerInstanceId, 'Favorite'));
     }
@@ -122,7 +122,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->assertSame(100, $this->timerInterval($playerInstanceId, 'RefreshGroupMemberVolumes'));
 
         $this->simulateHttpResult('players/all', $this->playersSnapshot(['member-1', 'member-2']));
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         $this->assertSame(
             [['command' => 'players/all', 'args' => ['return_unavailable' => true, 'return_disabled' => true]]],
@@ -142,7 +142,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->simulateHttpResultDuring('players/all', function () use ($connectionId): void {
             $this->sendPlayerUpdated($connectionId, 'member-1', ['volume_level' => 77]);
         }, $this->playersSnapshot(['member-1', 'member-2']));
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         $this->assertSame(77, $this->memberVolume($playerInstanceId, 'member-1'));
         $this->assertSame(50, $this->memberVolume($playerInstanceId, 'member-2'));
@@ -155,13 +155,13 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
 
         $this->sendGroupMembers($connectionId, ['member-1']);
         $this->simulateHttpResult('players/all', $this->playersSnapshot(['member-1']));
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         // Eine kurzzeitige Verkleinerung entfernt noch keinen Regler, sondern plant einen Bestätigungs-Snapshot.
         $this->assertTrue(IPS_VariableExists($member2VariableId));
         $this->assertSame(1500, $this->timerInterval($playerInstanceId, 'RefreshGroupMemberVolumes'));
 
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         $this->assertFalse(IPS_VariableExists($member2VariableId));
         $this->assertSame(30, $this->memberVolume($playerInstanceId, 'member-1'));
@@ -175,10 +175,10 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
 
         $this->sendGroupMembers($connectionId, ['member-1']);
         $this->simulateHttpResult('players/all', $this->playersSnapshot(['member-1']));
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         $this->simulateHttpResult('players/all', $this->playersSnapshot(['member-1', 'member-2']));
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         $this->assertTrue(IPS_VariableExists($member2VariableId));
         $this->assertSame($member2VariableId, $this->memberVolumeId($playerInstanceId, 'member-2'));
@@ -195,7 +195,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
 
         $this->sendGroupMembers($connectionId, ['member-1', 'member-2', 'member-3']);
         $this->simulateHttpFailure('players/all');
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         $this->assertSame($variableIds, [
             $this->memberVolumeId($playerInstanceId, 'member-1'),
@@ -215,8 +215,8 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
 
         $this->sendGroupMembers($connectionId, []);
         $this->simulateHttpResult('players/all', []);
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         $this->assertTrue(IPS_VariableExists($variableIds[0]));
         $this->assertTrue(IPS_VariableExists($variableIds[1]));
@@ -230,7 +230,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         IPS_SetProperty($playerInstanceId, 'ShowGroupMemberVolumes', false);
         IPS_ApplyChanges($playerInstanceId);
         $this->simulateHttpResult('players/all', $this->playersSnapshot(['member-1']));
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
 
         $this->assertSame([], $this->httpCalls());
         $this->assertSame(0, $this->timerInterval($playerInstanceId, 'RefreshGroupMemberVolumes'));
@@ -248,7 +248,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->assertSame($this->defaultCover(), $this->coverContent($playerInstanceId));
 
         $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody('a')));
-        $this->player($playerInstanceId)->ProcessCoverDownload();
+        IPS_RequestAction($playerInstanceId, 'DownloadCover', 0);
 
         $this->assertCount(1, $this->artworkRequests());
         $this->assertStringContainsString('/imageproxy/' . hash('sha256', 'a') . '?', $this->artworkRequests()[0]['url']);
@@ -262,10 +262,10 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $item = $this->withCover($this->queueItem('item-1', 'sp-1'), 'a');
         $this->answerActiveQueue($connectionId, $item);
         $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody('a')));
-        $this->player($playerInstanceId)->ProcessCoverDownload();
+        IPS_RequestAction($playerInstanceId, 'DownloadCover', 0);
 
         $this->sendQueueUpdated($connectionId, ['state' => 'playing', 'current_item' => $item]);
-        $this->player($playerInstanceId)->ProcessCoverDownload();
+        IPS_RequestAction($playerInstanceId, 'DownloadCover', 0);
 
         $this->assertCount(1, $this->artworkRequests());
         $this->assertSame(0, $this->timerInterval($playerInstanceId, 'DownloadCover'));
@@ -284,13 +284,13 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
             ]);
             return $this->artworkResponse(200, 'image/jpeg', $this->jpegBody('a'));
         });
-        $this->player($playerInstanceId)->ProcessCoverDownload();
+        IPS_RequestAction($playerInstanceId, 'DownloadCover', 0);
 
         $this->assertSame($this->defaultCover(), $this->coverContent($playerInstanceId));
         $this->assertSame(100, $this->timerInterval($playerInstanceId, 'DownloadCover'));
 
         $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody('b')));
-        $this->player($playerInstanceId)->ProcessCoverDownload();
+        IPS_RequestAction($playerInstanceId, 'DownloadCover', 0);
 
         $this->assertStringContainsString('/imageproxy/' . hash('sha256', 'b') . '?', $this->artworkRequests()[1]['url']);
         $this->assertSame(base64_encode($this->jpegBody('b')), $this->coverContent($playerInstanceId));
@@ -303,8 +303,8 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->answerActiveQueue($connectionId, $this->withCover($this->queueItem('item-1', 'sp-1'), 'a'));
         $this->simulateArtwork($this->artworkResponse(200, 'text/html', 'error page'));
 
-        $this->player($playerInstanceId)->ProcessCoverDownload();
-        $this->player($playerInstanceId)->ProcessCoverDownload();
+        IPS_RequestAction($playerInstanceId, 'DownloadCover', 0);
+        IPS_RequestAction($playerInstanceId, 'DownloadCover', 0);
 
         $this->assertCount(1, $this->artworkRequests());
         $this->assertSame($this->defaultCover(), $this->coverContent($playerInstanceId));
@@ -318,7 +318,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         $this->simulateArtwork($this->artworkResponse(200, 'image/jpeg', $this->jpegBody('a')));
 
         $this->sendQueueUpdated($connectionId, ['state' => 'idle', 'current_item' => null]);
-        $this->player($playerInstanceId)->ProcessCoverDownload();
+        IPS_RequestAction($playerInstanceId, 'DownloadCover', 0);
 
         $this->assertSame([], $this->artworkRequests());
         $this->assertSame('', $this->coverContent($playerInstanceId));
@@ -350,7 +350,7 @@ class MusicAssistantPlayerTimerTest extends MusicAssistantTestCase
         [$connectionId, $playerInstanceId] = $this->createActivePlayer(self::GROUP_ID, ['ShowGroupMemberVolumes' => true]);
         $this->sendGroupMembers($connectionId, $memberIds);
         $this->simulateHttpResult('players/all', $this->playersSnapshot($memberIds));
-        $this->player($playerInstanceId)->ProcessGroupMemberVolumeRefresh();
+        IPS_RequestAction($playerInstanceId, 'RefreshGroupMemberVolumes', 0);
         $this->clearHttpCalls();
 
         return [$connectionId, $playerInstanceId];
