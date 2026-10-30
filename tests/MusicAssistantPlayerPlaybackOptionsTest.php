@@ -59,6 +59,71 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         $this->assertSame('-', $this->value($playerInstanceId, 'SleepTimerEnd'));
     }
 
+    public function testSleepTimerSchedulesExpiryCheck(): void
+    {
+        [, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);
+        $this->simulateHttpResult('players/sleep_timer/set', time() + 60);
+
+        IPS_RequestAction($playerInstanceId, 'SleepTimer', 1);
+
+        $interval = $this->timerInterval($playerInstanceId, 'SleepTimerExpired');
+        $this->assertGreaterThanOrEqual(60000, $interval);
+        $this->assertLessThanOrEqual(61000, $interval);
+
+        $this->simulateHttpResult('players/sleep_timer/clear', null);
+        IPS_RequestAction($playerInstanceId, 'SleepTimer', 0);
+
+        $this->assertSame(0, $this->timerInterval($playerInstanceId, 'SleepTimerExpired'));
+    }
+
+    public function testExpiryResetsSelectionAndEnd(): void
+    {
+        [, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);
+        $this->simulateHttpResult('players/sleep_timer/set', time() + 60);
+        IPS_RequestAction($playerInstanceId, 'SleepTimer', 1);
+        $this->clearHttpCalls();
+        $this->simulateHttpResult('players/sleep_timer/get', null);
+
+        IPS_RequestAction($playerInstanceId, 'SleepTimerExpired', 0);
+
+        $this->assertSame(
+            [['command' => 'players/sleep_timer/get', 'args' => ['player_id' => self::PLAYER_ID]]],
+            $this->httpCalls()
+        );
+        $this->assertSame(0, $this->value($playerInstanceId, 'SleepTimer'));
+        $this->assertSame('-', $this->value($playerInstanceId, 'SleepTimerEnd'));
+        $this->assertSame(0, $this->timerInterval($playerInstanceId, 'SleepTimerExpired'));
+    }
+
+    public function testExpiryKeepsTimerExtendedInMusicAssistant(): void
+    {
+        [, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);
+        $this->simulateHttpResult('players/sleep_timer/set', time() + 60);
+        IPS_RequestAction($playerInstanceId, 'SleepTimer', 1);
+        $expiresAt = time() + 30 * 60;
+        $this->simulateHttpResult('players/sleep_timer/get', (float)$expiresAt);
+
+        IPS_RequestAction($playerInstanceId, 'SleepTimerExpired', 0);
+
+        $this->assertSame(1, $this->value($playerInstanceId, 'SleepTimer'));
+        $this->assertSame(date('H:i', $expiresAt), $this->value($playerInstanceId, 'SleepTimerEnd'));
+        $this->assertGreaterThan(60000, $this->timerInterval($playerInstanceId, 'SleepTimerExpired'));
+    }
+
+    public function testExpiryResetsEvenIfStateCannotBeRead(): void
+    {
+        [, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);
+        $this->simulateHttpResult('players/sleep_timer/set', time() + 60);
+        IPS_RequestAction($playerInstanceId, 'SleepTimer', 1);
+        $this->simulateHttpFailure('players/sleep_timer/get');
+
+        IPS_RequestAction($playerInstanceId, 'SleepTimerExpired', 0);
+
+        $this->assertSame(0, $this->value($playerInstanceId, 'SleepTimer'));
+        $this->assertSame('-', $this->value($playerInstanceId, 'SleepTimerEnd'));
+        $this->assertSame(0, $this->timerInterval($playerInstanceId, 'SleepTimerExpired'));
+    }
+
     public function testUnknownSleepTimerDurationSendsNoCommand(): void
     {
         [, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);
@@ -212,6 +277,18 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         }
     }
 
+    public function testDisablingSleepTimerStopsExpiryCheck(): void
+    {
+        [, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);
+        $this->simulateHttpResult('players/sleep_timer/set', time() + 60);
+        IPS_RequestAction($playerInstanceId, 'SleepTimer', 1);
+
+        IPS_SetProperty($playerInstanceId, 'ShowSleepTimer', false);
+        IPS_ApplyChanges($playerInstanceId);
+
+        $this->assertSame(0, $this->timerInterval($playerInstanceId, 'SleepTimerExpired'));
+    }
+
     /**
      * @return array{0: int, 1: int}
      */
@@ -273,6 +350,11 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         $this->assertNotEmpty($calls, 'Kein Aufruf von ' . $command);
 
         return $calls[count($calls) - 1];
+    }
+
+    private function timerInterval(int $instanceId, string $ident): int
+    {
+        return IPS\InstanceManager::getInstanceInterface($instanceId)->GetTimerIntervalForTest($ident);
     }
 
     private function value(int $instanceId, string $ident)

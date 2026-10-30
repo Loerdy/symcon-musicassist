@@ -86,6 +86,7 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterTimer('ResolveFavorite', 0, 'IPS_RequestAction($_IPS["TARGET"], "ResolveFavorite", 0);');
         $this->RegisterTimer('DownloadCover', 0, 'IPS_RequestAction($_IPS["TARGET"], "DownloadCover", 0);');
         $this->RegisterTimer('RefreshGroupMemberVolumes', 0, 'IPS_RequestAction($_IPS["TARGET"], "RefreshGroupMemberVolumes", 0);');
+        $this->RegisterTimer('SleepTimerExpired', 0, 'IPS_RequestAction($_IPS["TARGET"], "SleepTimerExpired", 0);');
     }
 
     public function ApplyChanges(): void
@@ -558,6 +559,10 @@ class MusicAssistantPlayer extends IPSModule
 
             case 'RefreshGroupMemberVolumes':
                 $this->ProcessGroupMemberVolumeRefresh();
+                break;
+
+            case 'SleepTimerExpired':
+                $this->processSleepTimerExpiry();
                 break;
 
             case 'Playlist':

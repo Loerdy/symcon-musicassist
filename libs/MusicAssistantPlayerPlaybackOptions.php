@@ -39,6 +39,8 @@ trait MusicAssistantPlayerPlaybackOptions
             if ((string)$this->GetValue('SleepTimerEnd') === '') {
                 $this->SetValue('SleepTimerEnd', '-');
             }
+        } else {
+            $this->SetTimerInterval('SleepTimerExpired', 0);
         }
 
         $showQueueOptions = $this->ReadPropertyBoolean('ShowQueueOptions');
@@ -109,6 +111,21 @@ trait MusicAssistantPlayerPlaybackOptions
         $this->updateSleepTimerState($this->sleepTimerTimestamp($expiresAt) ?? (float)(time() + $seconds));
     }
 
+    // Music Assistant meldet den Ablauf nicht per Ereignis; der Timer liest danach den Zustand erneut.
+    private function processSleepTimerExpiry(): void
+    {
+        $this->SetTimerInterval('SleepTimerExpired', 0);
+        $expiresAt = null;
+        try {
+            if ($this->HasActiveParent() && trim($this->ReadPropertyString('PlayerID')) !== '') {
+                $expiresAt = $this->sendApiRequest('players/sleep_timer/get', ['player_id' => $this->playerId()]);
+            }
+        } catch (Throwable $e) {
+            $this->SendDebug('Sleep timer', 'Zustand nach Ablauf konnte nicht gelesen werden: ' . $e->getMessage(), 0);
+        }
+        $this->updateSleepTimerState($expiresAt);
+    }
+
     private function requestQueueOption(string $ident, bool $enabled): void
     {
         $command = $ident === 'Crossfade' ? 'player_queues/crossfade' : 'player_queues/autoplay';
@@ -120,10 +137,12 @@ trait MusicAssistantPlayerPlaybackOptions
     private function updateSleepTimerState($expiresAt): void
     {
         if (@$this->GetIDForIdent('SleepTimer') <= 0 || @$this->GetIDForIdent('SleepTimerEnd') <= 0) {
+            $this->SetTimerInterval('SleepTimerExpired', 0);
             return;
         }
         $timestamp = $this->sleepTimerTimestamp($expiresAt);
         if ($timestamp === null || $timestamp <= time()) {
+            $this->SetTimerInterval('SleepTimerExpired', 0);
             if ((int)$this->GetValue('SleepTimer') !== 0) {
                 $this->SetValue('SleepTimer', 0);
             }
@@ -146,6 +165,8 @@ trait MusicAssistantPlayerPlaybackOptions
             }
             $this->SetValue('SleepTimer', $step);
         }
+        // Eine Sekunde Reserve, damit Music Assistant den Timer beim erneuten Lesen bereits beendet hat.
+        $this->SetTimerInterval('SleepTimerExpired', (int)ceil(($timestamp - time()) * 1000) + 1000);
         $end = date('H:i', (int)round($timestamp));
         if ((string)$this->GetValue('SleepTimerEnd') !== $end) {
             $this->SetValue('SleepTimerEnd', $end);

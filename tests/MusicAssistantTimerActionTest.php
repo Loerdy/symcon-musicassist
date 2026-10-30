@@ -9,7 +9,7 @@ class MusicAssistantTimerActionTest extends MusicAssistantTestCase
 {
     private const TIMERS = [
         'MusicAssistantConnection' => ['CheckConnection'],
-        'MusicAssistantPlayer'     => ['ResetPlaylist', 'ResetRadio', 'ResolveFavorite', 'DownloadCover', 'RefreshGroupMemberVolumes'],
+        'MusicAssistantPlayer'     => ['ResetPlaylist', 'ResetRadio', 'ResolveFavorite', 'DownloadCover', 'RefreshGroupMemberVolumes', 'SleepTimerExpired'],
         'MusicAssistantShortcut'   => ['LoadImages']
     ];
 
