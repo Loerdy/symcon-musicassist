@@ -31,9 +31,13 @@ Steuerbefehle laufen über die HTTP-API. Zustandsänderungen werden über den We
 
 Im Bereich **Diagnose** der Connection steht ein Bericht mit den Versionen von Library, IP-Symcon, PHP und Music Assistant, dem Verbindungsstatus und den verbundenen Player-Instanzen. Er enthält weder Token, Adressen noch Player-Namen oder -IDs und kann für Fehlermeldungen direkt in einen Forumsbeitrag kopiert werden.
 
+![Connection mit aufgeklapptem Diagnosebericht](docs/images/connection.png)
+
 ### MusicAssistant Configurator
 
 Der `Music Assistant Konfigurator` liest die Playerliste aus Music Assistant und zeigt Name, Player-ID, Provider, Verfügbarkeit und den Status der zugehörigen IP-Symcon-Instanz an.
+
+![Music Assistant Konfigurator mit gefundenen Playern](docs/images/configurator.png)
 
 Der native IP-Symcon-Configurator unterstützt:
 
@@ -52,11 +56,19 @@ Beim Löschen wird nur die IP-Symcon-Instanz entfernt. Der Player in Music Assis
 
 Eine `MusicAssistant Player`-Instanz repräsentiert einen normalen Music-Assistant-Player oder eine Syncgroup. Sie bietet Wiedergabesteuerung, Lautstärke, Mute, Shuffle, Repeat, Playlists, Radiosender sowie aktuelle Metadaten und Cover-Artwork.
 
+![Player-Kachel im dunklen Design](docs/images/player-tile-dark.jpg)
+
+![Player-Kachel im hellen Design](docs/images/player-tile-light.jpg)
+
+*Links die native Mediaplayer-Kachel von IP-Symcon, rechts die eigene HTML-Kachel des Moduls mit Gruppenlautstärken, Crossfade, Autoplay und Sleep-Timer.*
+
 Der Player ist mit seiner tatsächlichen `MusicAssistant Connection` verbunden. Beim Anlegen über den Configurator werden Player-ID, Connection und die Playlist-/Radio-Profile automatisch zugeordnet.
 
 ### MusicAssistant Shortcut
 
 Eine `MusicAssistant Shortcut`-Instanz (Schnellzugriff) stellt eine Kachel mit einem oder mehreren Buttons bereit. Ein Tippen auf einen Button startet den hinterlegten Radiosender bzw. die hinterlegte Playlist auf dem gewählten Player.
+
+![Shortcut-Kachel mit Senderlogos und Playlists](docs/images/shortcut-tile.png)
 
 - Als Player wird eine `MusicAssistant Player`-Instanz gewählt. Sie muss an derselben `MusicAssistant Connection` hängen wie der Schnellzugriff; andernfalls zeigt die Instanz einen Fehlerstatus und startet nichts.
 - Die Einträge stammen aus den Playlist- und Radio-Profilen des gewählten Players, die der Configurator pflegt. Nach dem Wechsel des Players stehen dessen Einträge sofort zur Auswahl.
@@ -259,9 +271,13 @@ Control commands are sent through the HTTP API. Status changes are received thro
 
 The connection's **Diagnostics** section shows a report with the versions of the library, IP-Symcon, PHP and Music Assistant, the connection status and the connected player instances. It contains no token, addresses, player names or player IDs and can be copied directly into a forum post when reporting problems.
 
+![Connection with the diagnostics report expanded](docs/images/connection.png)
+
 ### MusicAssistant Configurator
 
 The `MusicAssistant Configurator` retrieves the player list from Music Assistant and displays the name, PlayerID, provider, availability, and status of the corresponding IP-Symcon instance.
+
+![Music Assistant configurator with discovered players](docs/images/configurator.png)
 
 The native IP-Symcon configurator supports:
 
@@ -280,11 +296,19 @@ The form buttons can also create or update playlist and radio profiles from the 
 
 A `MusicAssistant Player` instance represents a regular Music Assistant player or a sync group. It provides playback controls, volume, mute, shuffle, repeat, playlists, radio stations, current metadata, and cover artwork.
 
+![Player tile in dark mode](docs/images/player-tile-dark.jpg)
+
+![Player tile in light mode](docs/images/player-tile-light.jpg)
+
+*Left: the native IP-Symcon media player tile; right: the module's own HTML tile with group volumes, crossfade, autoplay and sleep timer.*
+
 The player is connected to its actual `MusicAssistant Connection`. When a player is created through the configurator, its PlayerID, connection, and playlist/radio profiles are assigned automatically.
 
 ### MusicAssistant Shortcut
 
 A `MusicAssistant Shortcut` instance provides a tile with one or more buttons. Tapping a button starts the configured radio station or playlist on the selected player.
+
+![Shortcut tile with station logos and playlists](docs/images/shortcut-tile.png)
 
 - A `MusicAssistant Player` instance is selected as player. It must be attached to the same `MusicAssistant Connection` as the shortcut; otherwise the instance shows an error status and starts nothing.
 - The entries are taken from the playlist and radio profiles of the selected player, which are maintained by the configurator. After changing the player, its entries are available immediately.
