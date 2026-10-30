@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Der Player bietet optional einen Sleep-Timer (15 bis 120 Minuten) mit Anzeige der Endzeit sowie Schalter für Crossfade und Autoplay der aktuellen Warteschlange. Beides wird im Player-Formular per Checkbox eingeschaltet; bestehende Instanzen bleiben unverändert, bis die Option aktiviert wird. Ein in der Music-Assistant-App gesetzter Sleep-Timer wird ebenfalls angezeigt.
+- Der Player bietet optional einen Sleep-Timer (15 bis 120 Minuten) mit Anzeige der Endzeit sowie Schalter für Crossfade und Autoplay der aktuellen Warteschlange. Beides wird im Player-Formular per Checkbox eingeschaltet; bestehende Instanzen bleiben unverändert, bis die Option aktiviert wird. Ein in der Music-Assistant-App gesetzter Sleep-Timer wird ebenfalls angezeigt. Die Endzeit wird mit Sekunden angezeigt (z. B. „13:04:32 Uhr“) und nach dem Ablauf automatisch zurückgesetzt. Die eigene HTML-Kachel zeigt die aktivierten Optionen in einer zweiten Schalterzeile und die Endzeit hinter dem Wiedergabestatus.
 
 ## v2.3.0 — 2026-10-30
 

@@ -289,6 +289,53 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         $this->assertSame(0, $this->timerInterval($playerInstanceId, 'SleepTimerExpired'));
     }
 
+    public function testTileHidesOptionsWhenDisabled(): void
+    {
+        [, $playerInstanceId] = $this->createActivePlayer([]);
+
+        $state = $this->tileState($playerInstanceId);
+
+        $this->assertFalse($state['showSleepTimer']);
+        $this->assertSame([], $state['sleepTimerOptions']);
+        $this->assertSame('', $state['sleepTimerEnd']);
+        $this->assertFalse($state['showQueueOptions']);
+        $this->assertFalse($state['crossfade']);
+        $this->assertFalse($state['autoplay']);
+    }
+
+    public function testTileShowsSleepTimerAndQueueOptions(): void
+    {
+        [$connectionId, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true, 'ShowQueueOptions' => true]);
+        $expiresAt = time() + 900;
+        $this->simulateHttpResult('players/sleep_timer/set', $expiresAt);
+        IPS_RequestAction($playerInstanceId, 'SleepTimer', 15);
+        $this->answerActiveQueue($connectionId);
+        $this->sendQueueUpdated($connectionId, ['crossfade_enabled' => true, 'autoplay_enabled' => false]);
+
+        $state = $this->tileState($playerInstanceId);
+
+        $this->assertTrue($state['showSleepTimer']);
+        $this->assertSame(15, $state['sleepTimer']);
+        $this->assertSame($this->expectedEnd($expiresAt), $state['sleepTimerEnd']);
+        $values = array_column($state['sleepTimerOptions'], 'value');
+        $this->assertSame(0, $values[0]);
+        $this->assertContains(15, $values);
+        $this->assertTrue($state['showQueueOptions']);
+        $this->assertTrue($state['crossfade']);
+        $this->assertFalse($state['autoplay']);
+    }
+
+    public function testTileShowsNoEndWithoutTimer(): void
+    {
+        [, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);
+
+        $state = $this->tileState($playerInstanceId);
+
+        $this->assertTrue($state['showSleepTimer']);
+        $this->assertSame(0, $state['sleepTimer']);
+        $this->assertSame('', $state['sleepTimerEnd']);
+    }
+
     /**
      * @return array{0: int, 1: int}
      */
@@ -350,6 +397,14 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         $this->assertNotEmpty($calls, 'Kein Aufruf von ' . $command);
 
         return $calls[count($calls) - 1];
+    }
+
+    private function tileState(int $playerInstanceId): array
+    {
+        $tile = IPS\InstanceManager::getInstanceInterface($playerInstanceId)->GetVisualizationTile();
+        $this->assertSame(1, preg_match('/renderState\((\{.*\})\);/', $tile, $match));
+
+        return json_decode($match[1], true, 512, JSON_THROW_ON_ERROR);
     }
 
     private function expectedEnd(int $expiresAt): string

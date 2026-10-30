@@ -92,11 +92,41 @@ trait MusicAssistantPlayerTile
             'playlists'   => $playlists,
             'radios'      => $radios,
             'groupMembers' => $groupMembers
-        ];
+        ] + $this->buildVisualizationPlaybackOptions();
         if ($includeCover) {
             $state['cover'] = $this->readVisualizationCover();
         }
         return $state;
+    }
+
+    // Die Schalter erscheinen nur, wenn die zugehörigen Variablen über die Instanzkonfiguration angelegt sind.
+    private function buildVisualizationPlaybackOptions(): array
+    {
+        $showSleepTimer = $this->ReadPropertyBoolean('ShowSleepTimer')
+            && @$this->GetIDForIdent('SleepTimer') > 0
+            && @$this->GetIDForIdent('SleepTimerEnd') > 0;
+        $sleepTimer = $showSleepTimer ? (int)$this->GetValue('SleepTimer') : 0;
+        $sleepTimerEnd = $showSleepTimer && $sleepTimer !== 0 ? (string)$this->GetValue('SleepTimerEnd') : '';
+        $sleepTimerOptions = [];
+        if ($showSleepTimer) {
+            $sleepTimerOptions[] = ['value' => 0, 'caption' => $this->Translate('Off')];
+            foreach (self::SLEEP_TIMER_MINUTES as $minutes) {
+                $sleepTimerOptions[] = ['value' => $minutes, 'caption' => sprintf($this->Translate('%d min'), $minutes)];
+            }
+        }
+        $showQueueOptions = $this->ReadPropertyBoolean('ShowQueueOptions')
+            && @$this->GetIDForIdent('Crossfade') > 0
+            && @$this->GetIDForIdent('Autoplay') > 0;
+
+        return [
+            'showSleepTimer'    => $showSleepTimer,
+            'sleepTimer'        => $sleepTimer,
+            'sleepTimerEnd'     => $sleepTimerEnd === '-' ? '' : $sleepTimerEnd,
+            'sleepTimerOptions' => $sleepTimerOptions,
+            'showQueueOptions'  => $showQueueOptions,
+            'crossfade'         => $showQueueOptions && (bool)$this->GetValue('Crossfade'),
+            'autoplay'          => $showQueueOptions && (bool)$this->GetValue('Autoplay')
+        ];
     }
 
     private function readVisualizationSelection(string $ident): int

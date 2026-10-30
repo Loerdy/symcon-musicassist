@@ -651,6 +651,8 @@ class MusicAssistantPlayer extends IPSModule
                     $this->SendDebug('Sleep timer failed', $e->getMessage(), 0);
                     $this->LogMessage(sprintf($this->Translate('Sleep timer failed: %s'), $e->getMessage()), KL_ERROR);
                 }
+                // Erzwungen, damit die Kachel nach einem Fehler ihre bereits umgestellte Auswahl zurücknimmt.
+                $this->updateVisualization(true);
                 break;
 
             case 'Crossfade':
@@ -662,6 +664,7 @@ class MusicAssistantPlayer extends IPSModule
                     $message = $Ident === 'Crossfade' ? 'Crossfade failed: %s' : 'Autoplay failed: %s';
                     $this->LogMessage(sprintf($this->Translate($message), $e->getMessage()), KL_ERROR);
                 }
+                $this->updateVisualization(true);
                 break;
 
             case 'Mute':

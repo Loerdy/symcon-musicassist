@@ -347,6 +347,66 @@
             fill: currentColor;
         }
 
+        .sleep-end {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            min-width: 0;
+            margin-left: 0.3rem;
+            white-space: nowrap;
+        }
+
+        .sleep-end[hidden] {
+            display: none;
+        }
+
+        .sleep-end svg {
+            flex: none;
+            width: 0.85rem;
+            height: 0.85rem;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* Die Auswahl liegt unsichtbar über dem Symbol, damit Browser und App ihre eigene Liste öffnen. */
+        .mode-controls .sleep-timer {
+            position: relative;
+            display: grid;
+            place-items: center;
+            min-width: 0;
+            min-height: clamp(1.7rem, 7cqh, 2rem);
+            border: 1px solid var(--control-border);
+            border-radius: 0.55rem;
+            background: var(--control-background);
+        }
+
+        .mode-controls .sleep-timer[hidden] {
+            display: none;
+        }
+
+        .sleep-timer select {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .sleep-timer:hover,
+        .sleep-timer:focus-within {
+            background: var(--control-hover);
+        }
+
+        .sleep-timer[data-active="true"] {
+            color: var(--accent-color);
+            border-color: var(--accent-color);
+        }
+
         .media-selectors {
             display: none;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -488,6 +548,10 @@
             .media-selectors {
                 display: grid;
             }
+
+            .playback-options[hidden] {
+                display: none;
+            }
         }
 
         @container tile (min-width: 520px) and (min-height: 420px) {
@@ -522,6 +586,7 @@
             <div class="status">
                 <span class="status-dot" aria-hidden="true"></span>
                 <span id="status">Unknown</span>
+                <span class="sleep-end" id="sleep-end" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></svg><span id="sleep-end-text"></span></span>
             </div>
             <div class="transport" aria-label="Playback controls">
                 <button type="button" data-transport="0" title="Previous" aria-label="Previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 6 9 12l10 6Z"/></svg></button>
@@ -538,6 +603,11 @@
                 <button type="button" id="shuffle" title="Shuffle" aria-label="Shuffle" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h3c5 0 7 12 12 12h3"/><path d="m18 15 3 3-3 3"/><path d="M3 18h3c2.1 0 3.6-2.1 5-4.5"/><path d="M13 9.5C14.4 7.4 15.9 6 18 6h3"/><path d="m18 3 3 3-3 3"/></svg></button>
                 <button type="button" id="repeat" title="Repeat off" aria-label="Repeat off" data-repeat="off"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><path class="repeat-one" d="M12 10v4M10.8 11.2 12 10"/></svg></button>
                 <button type="button" id="favorite" title="Favorite" aria-label="Favorite" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg></button>
+            </div>
+            <div class="mode-controls playback-options" id="playback-options" hidden>
+                <button type="button" id="crossfade" title="Crossfade" aria-label="Crossfade" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7c6 0 12 10 18 10"/><path d="M3 17c6 0 12-10 18-10"/></svg></button>
+                <button type="button" id="autoplay" title="Autoplay" aria-label="Autoplay" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12c-2-2.7-3.5-4-5.5-4a4 4 0 0 0 0 8c2 0 3.5-1.3 5.5-4Zm0 0c2 2.7 3.5 4 5.5 4a4 4 0 0 0 0-8c-2 0-3.5 1.3-5.5 4Z"/></svg></button>
+                <div class="sleep-timer" id="sleep-timer" title="Sleep timer" data-active="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></svg><select id="sleep-timer-select" aria-label="Sleep timer"></select></div>
             </div>
             <div class="media-selectors">
                 <select id="playlist" aria-label="Playlist"><option value="">Playlist</option></select>
@@ -568,6 +638,11 @@
         document.getElementById("shuffle").setAttribute("aria-label", translate("Shuffle"));
         document.getElementById("favorite").title = translate("Favorite");
         document.getElementById("favorite").setAttribute("aria-label", translate("Favorite"));
+        document.getElementById("crossfade").title = translate("Crossfade");
+        document.getElementById("crossfade").setAttribute("aria-label", translate("Crossfade"));
+        document.getElementById("autoplay").title = translate("Autoplay");
+        document.getElementById("autoplay").setAttribute("aria-label", translate("Autoplay"));
+        document.getElementById("sleep-timer-select").setAttribute("aria-label", translate("Sleep timer"));
         document.getElementById("playlist").setAttribute("aria-label", translate("Playlist"));
         document.getElementById("radio").setAttribute("aria-label", translate("Radio"));
         document.getElementById("group-volumes").setAttribute("aria-label", translate("Group volumes"));
@@ -942,6 +1017,33 @@
             container.hidden = container.childElementCount === 0;
         }
 
+        function renderSleepTimer(show, selection, end, options) {
+            const container = document.getElementById("sleep-timer");
+            const select = document.getElementById("sleep-timer-select");
+            const validOptions = Array.isArray(options)
+                ? options.filter((option) => option && Number.isInteger(option.value) && option.value >= 0
+                    && typeof option.caption === "string")
+                : [];
+            const optionsKey = JSON.stringify(validOptions);
+            if (select.dataset.optionsKey !== optionsKey) {
+                select.replaceChildren(...validOptions.map((option) => {
+                    const element = document.createElement("option");
+                    element.value = String(option.value);
+                    element.textContent = option.caption;
+                    return element;
+                }));
+                select.dataset.optionsKey = optionsKey;
+            }
+            // Die Auswahl folgt immer dem Modul; nach einem fehlgeschlagenen Befehl springt sie so zurück.
+            select.value = String(selection);
+            container.hidden = !show;
+            container.dataset.active = String(selection > 0);
+            container.title = end !== "" ? `${translate("Sleep timer")}: ${end}` : translate("Sleep timer");
+
+            document.getElementById("sleep-end").hidden = end === "";
+            document.getElementById("sleep-end-text").textContent = end;
+        }
+
         function renderState(data) {
             if (!data || typeof data !== "object") {
                 return;
@@ -960,6 +1062,12 @@
             const repeat = ["off", "one", "all"].includes(data.repeat) ? data.repeat : "off";
             const showFavorite = data.showFavorite === true;
             const favorite = data.favorite === true;
+            const showSleepTimer = data.showSleepTimer === true;
+            const sleepTimer = showSleepTimer && Number.isInteger(data.sleepTimer) && data.sleepTimer > 0
+                ? data.sleepTimer
+                : 0;
+            const sleepTimerEnd = sleepTimer > 0 && typeof data.sleepTimerEnd === "string" ? data.sleepTimerEnd : "";
+            const showQueueOptions = data.showQueueOptions === true;
             const playlistSelection = Number.isInteger(data.playlistSelection) && data.playlistSelection > 0
                 ? data.playlistSelection
                 : 0;
@@ -1029,6 +1137,15 @@
             const favoriteButton = document.getElementById("favorite");
             favoriteButton.hidden = !showFavorite;
             favoriteButton.setAttribute("aria-pressed", String(favorite));
+
+            document.getElementById("playback-options").hidden = !showSleepTimer && !showQueueOptions;
+            const crossfadeButton = document.getElementById("crossfade");
+            crossfadeButton.hidden = !showQueueOptions;
+            crossfadeButton.setAttribute("aria-pressed", String(showQueueOptions && data.crossfade === true));
+            const autoplayButton = document.getElementById("autoplay");
+            autoplayButton.hidden = !showQueueOptions;
+            autoplayButton.setAttribute("aria-pressed", String(showQueueOptions && data.autoplay === true));
+            renderSleepTimer(showSleepTimer, sleepTimer, sleepTimerEnd, data.sleepTimerOptions);
 
             renderOptions("playlist", data.playlists, "Playlist", playlistSelection, playlistSelectionRevision);
             renderOptions("radio", data.radios, "Radio", radioSelection, radioSelectionRevision);
@@ -1164,6 +1281,20 @@
         document.getElementById("favorite").addEventListener("click", (event) => {
             if (!event.currentTarget.hidden) {
                 requestAction("Favorite", event.currentTarget.getAttribute("aria-pressed") !== "true");
+            }
+        });
+        ["crossfade", "autoplay"].forEach((id) => {
+            document.getElementById(id).addEventListener("click", (event) => {
+                if (!event.currentTarget.hidden) {
+                    const ident = id === "crossfade" ? "Crossfade" : "Autoplay";
+                    requestAction(ident, event.currentTarget.getAttribute("aria-pressed") !== "true");
+                }
+            });
+        });
+        document.getElementById("sleep-timer-select").addEventListener("change", (event) => {
+            const minutes = Number(event.target.value);
+            if (Number.isInteger(minutes) && minutes >= 0) {
+                requestAction("SleepTimer", minutes);
             }
         });
         document.getElementById("playlist").addEventListener("change", (event) => {

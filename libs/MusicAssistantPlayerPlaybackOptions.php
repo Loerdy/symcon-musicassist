@@ -124,6 +124,7 @@ trait MusicAssistantPlayerPlaybackOptions
             $this->SendDebug('Sleep timer', 'Zustand nach Ablauf konnte nicht gelesen werden: ' . $e->getMessage(), 0);
         }
         $this->updateSleepTimerState($expiresAt);
+        $this->updateVisualization();
     }
 
     private function requestQueueOption(string $ident, bool $enabled): void
