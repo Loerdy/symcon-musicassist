@@ -100,6 +100,17 @@ class MusicAssistantPlayerPlaybackOptionsTest extends MusicAssistantTestCase
         $this->assertSame('-', $this->value($playerInstanceId, 'SleepTimerEnd'));
     }
 
+    public function testEventBeforeOwnSelectionKeepsChosenStep(): void
+    {
+        [$connectionId, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);
+        // Music Assistant meldet das Ende mit Sekundenbruchteilen, bevor die eigene Auswahl gespeichert ist.
+        $expiresAt = time() + 15 * 60 + 0.4;
+
+        $this->sendPlayerUpdated($connectionId, ['sleep_timer_expires_at' => $expiresAt]);
+
+        $this->assertSame(15, $this->value($playerInstanceId, 'SleepTimer'));
+    }
+
     public function testMillisecondTimestampIsRecognized(): void
     {
         [$connectionId, $playerInstanceId] = $this->createActivePlayer(['ShowSleepTimer' => true]);

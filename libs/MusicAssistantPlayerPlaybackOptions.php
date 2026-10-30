@@ -133,8 +133,10 @@ trait MusicAssistantPlayerPlaybackOptions
             return;
         }
         // Ein außerhalb von IP-Symcon gesetzter Timer erhält die nächstgrößere Stufe; das Ende bleibt exakt.
+        // Die Toleranz von einer Minute fängt Sekundenbruchteile und ein Ereignis ab, das vor dem Speichern
+        // der eigenen Auswahl eintrifft; ein gerade gesetzter 15-Minuten-Timer bleibt so bei 15.
         if ((int)$this->GetValue('SleepTimer') === 0) {
-            $remaining = (int)ceil(($timestamp - time()) / 60);
+            $remaining = ($timestamp - time()) / 60 - 1;
             $step = self::SLEEP_TIMER_MINUTES[count(self::SLEEP_TIMER_MINUTES) - 1];
             foreach (self::SLEEP_TIMER_MINUTES as $minutes) {
                 if ($minutes >= $remaining) {

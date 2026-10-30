@@ -27,7 +27,8 @@ class MusicAssistantPlayer extends IPSModule
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const REPEAT_MODE_TO_VALUE = ['off' => 0, 'all' => 1, 'one' => 2];
     private const REPEAT_VALUE_TO_MODE = [0 => 'off', 1 => 'all', 2 => 'one'];
-    private const SLEEP_TIMER_MINUTES = [15, 30, 45, 60, 90, 120];
+    // TODO vor dem nächsten Release entfernen: Die Stufe 1 dient nur dem praktischen Test des Timer-Ablaufs.
+    private const SLEEP_TIMER_MINUTES = [1, 15, 30, 45, 60, 90, 120];
     private const COVER_SEMAPHORE_TIMEOUT = 5000;
     private const GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT = 40000;
     private const GROUP_MEMBER_REMOVAL_CONFIRMATION_DELAY = 1500;
