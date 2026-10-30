@@ -29,6 +29,8 @@ Die `MusicAssistant Connection` ist die zentrale Verbindung zu Music Assistant. 
 
 Steuerbefehle laufen über die HTTP-API. Zustandsänderungen werden über den WebSocket empfangen und an die verbundenen Player-Instanzen verteilt.
 
+Im Bereich **Diagnose** der Connection steht ein Bericht mit den Versionen von Library, IP-Symcon, PHP und Music Assistant, dem Verbindungsstatus und den verbundenen Player-Instanzen. Er enthält weder Token, Adressen noch Player-Namen oder -IDs und kann für Fehlermeldungen direkt in einen Forumsbeitrag kopiert werden.
+
 ### MusicAssistant Configurator
 
 Der `Music Assistant Konfigurator` liest die Playerliste aus Music Assistant und zeigt Name, Player-ID, Provider, Verfügbarkeit und den Status der zugehörigen IP-Symcon-Instanz an.
@@ -254,6 +256,8 @@ The `MusicAssistant Connection` is the central connection to Music Assistant. It
 - centralized retrieval of cover artwork through the Music Assistant image proxy
 
 Control commands are sent through the HTTP API. Status changes are received through the WebSocket and forwarded to the connected player instances.
+
+The connection's **Diagnostics** section shows a report with the versions of the library, IP-Symcon, PHP and Music Assistant, the connection status and the connected player instances. It contains no token, addresses, player names or player IDs and can be copied directly into a forum post when reporting problems.
 
 ### MusicAssistant Configurator
 

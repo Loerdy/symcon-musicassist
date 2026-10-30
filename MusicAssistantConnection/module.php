@@ -2,10 +2,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../libs/MusicAssistantApi.php';
+require_once __DIR__ . '/../libs/MusicAssistantConnectionDiagnostics.php';
 
 class MusicAssistantConnection extends IPSModule
 {
     use MusicAssistantApi;
+    use MusicAssistantConnectionDiagnostics;
 
     private const WEBSOCKET_MODULE = '{D68FD31F-0E90-7019-F16C-1949BD3079EF}';
     private const WEBSOCKET_TX = '{79827379-F36E-4ADA-8A95-5F8D1DC92FA9}';
@@ -14,6 +16,8 @@ class MusicAssistantConnection extends IPSModule
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const PLAYER_MODULE_ID = '{70DC85BD-4828-B5F2-12E4-AC8B6A173B36}';
     private const MAX_ARTWORK_SIZE = 5242880;
+    // Version der lokalen API-Dokumentation, gegen die das Modul entwickelt und getestet wurde.
+    private const TESTED_SERVER_VERSION = '2.10.8';
     private const STATE_SEMAPHORE_TIMEOUT = 5000;
     private const STATE_SEMAPHORE_ERROR = 1701;
     private const AUTH_MAX_ATTEMPTS = 3;
@@ -60,6 +64,8 @@ class MusicAssistantConnection extends IPSModule
         $this->RegisterPropertyString('Token', '');
         $this->SetBuffer('MsgId', '0');
         $this->SetBuffer('GreetingUrl', '');
+        $this->SetBuffer('ServerVersion', '');
+        $this->SetBuffer('SchemaVersion', '');
         $this->SetBuffer('AuthMessageId', '');
         $this->SetBuffer('AuthGeneration', '');
         $this->SetBuffer('AuthStarted', '0');
@@ -196,6 +202,10 @@ class MusicAssistantConnection extends IPSModule
                 $this->CheckConnection();
                 break;
 
+            case 'RefreshDiagnostics':
+                $this->refreshDiagnosticsReport();
+                break;
+
             default:
                 throw new Exception(sprintf($this->Translate('Unknown action: %s'), $Ident));
         }
@@ -260,15 +270,45 @@ class MusicAssistantConnection extends IPSModule
                     'visible' => $this->parentNeedsConfirmation()
                 ]
             ],
-            'status' => [
-                ['code' => 102, 'icon' => 'active', 'caption' => 'Authenticated'],
-                ['code' => 104, 'icon' => 'inactive', 'caption' => 'Waiting for connection / server greeting'],
-                ['code' => 201, 'icon' => 'error', 'caption' => 'Not configured: Check host, port and token'],
-                ['code' => 202, 'icon' => 'error', 'caption' => 'Authentication failed'],
-                ['code' => 203, 'icon' => 'error', 'caption' => 'Authentication: Sending failed or timed out'],
-                ['code' => 204, 'icon' => 'error', 'caption' => 'WebSocket Client: Apply configuration and activate']
-            ]
+            'actions' => [
+                [
+                    'type'    => 'ExpansionPanel',
+                    'caption' => 'Diagnostics',
+                    'items'   => [
+                        [
+                            'type'    => 'Label',
+                            'caption' => 'The report contains no token, addresses, player names or player IDs and can be copied into a forum post.'
+                        ],
+                        [
+                            'type'      => 'ValidationTextBox',
+                            'name'      => 'DiagnosticsReport',
+                            'caption'   => 'Report',
+                            'multiline' => true,
+                            'width'     => '100%',
+                            'value'     => $this->buildDiagnosticsReport()
+                        ],
+                        [
+                            'type'    => 'Button',
+                            'caption' => 'Refresh report',
+                            'onClick' => 'IPS_RequestAction($id, "RefreshDiagnostics", true);'
+                        ]
+                    ]
+                ]
+            ],
+            'status' => $this->statusDefinitions()
         ]);
+    }
+
+    private function statusDefinitions(): array
+    {
+        return [
+            ['code' => 102, 'icon' => 'active', 'caption' => 'Authenticated'],
+            ['code' => 104, 'icon' => 'inactive', 'caption' => 'Waiting for connection / server greeting'],
+            ['code' => 201, 'icon' => 'error', 'caption' => 'Not configured: Check host, port and token'],
+            ['code' => 202, 'icon' => 'error', 'caption' => 'Authentication failed'],
+            ['code' => 203, 'icon' => 'error', 'caption' => 'Authentication: Sending failed or timed out'],
+            ['code' => 204, 'icon' => 'error', 'caption' => 'WebSocket Client: Apply configuration and activate']
+        ];
     }
 
     public function ReceiveData($JSONString): string
@@ -290,6 +330,8 @@ class MusicAssistantConnection extends IPSModule
             && is_string($message['server_version'] ?? null)
             && is_int($message['schema_version'] ?? null)
             && is_int($message['min_supported_schema_version'] ?? null)) {
+            $this->SetBuffer('ServerVersion', $message['server_version']);
+            $this->SetBuffer('SchemaVersion', (string)$message['schema_version']);
             $this->withStateLock(function (): void {
                 $generation = (int)$this->GetBuffer('ConnectionGeneration') + 1;
                 $this->SetBuffer('ConnectionGeneration', (string)$generation);
