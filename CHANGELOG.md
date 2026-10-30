@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Der Player bietet optional einen Sleep-Timer (15 bis 120 Minuten) mit Anzeige der Endzeit sowie Schalter für Crossfade und Autoplay der aktuellen Warteschlange. Beides wird im Player-Formular per Checkbox eingeschaltet; bestehende Instanzen bleiben unverändert, bis die Option aktiviert wird. Ein in der Music-Assistant-App gesetzter Sleep-Timer wird ebenfalls angezeigt.
+
 ## v2.3.0 — 2026-10-30
 
 - Neues Modul `MusicAssistant Shortcut` (Schnellzugriff): Eine Kachel mit einem oder mehreren Buttons startet hinterlegte Radiosender oder Playlists auf einem gewählten Player. Die Einträge stammen aus den Playlist- und Radio-Profilen des Players. Jeder Button zeigt ein eigenes Bild, das Bild aus der Music-Assistant-Bibliothek oder ein neutrales Symbol; Bilder aus Music Assistant werden einmalig geladen und dauerhaft gespeichert. Die Beschriftung lässt sich je Eintrag ausblenden, etwa wenn der Name bereits im Logo steht; die Buttons verteilen sich so auf die Kachel, dass sie möglichst groß und quadratisch werden. Ohne Beschriftung füllt das Bild den Button bis zum abgerundeten Rand.

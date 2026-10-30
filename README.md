@@ -75,6 +75,8 @@ Eine `MusicAssistant Shortcut`-Instanz (Schnellzugriff) stellt eine Kachel mit e
 - Mute
 - Shuffle
 - Repeat mit `off`, `one` und `all`
+- optional: Sleep-Timer mit 15, 30, 45, 60, 90 oder 120 Minuten und Anzeige der Endzeit; auch in der Music-Assistant-App gesetzte Timer werden angezeigt
+- optional: Crossfade und Autoplay der aktuellen Warteschlange ein- und ausschalten
 - Wiedergabe synchronisierter Playlists
 - Wiedergabe synchronisierter Radiosender
 - Anzeige von Titel, Interpret und Album
@@ -298,6 +300,8 @@ A `MusicAssistant Shortcut` instance provides a tile with one or more buttons. T
 - mute
 - shuffle
 - repeat modes `off`, `one`, and `all`
+- optional: sleep timer with 15, 30, 45, 60, 90, or 120 minutes and display of the end time; timers set in the Music Assistant app are shown as well
+- optional: switch crossfade and autoplay of the current queue on and off
 - playback of synchronized playlists
 - playback of synchronized radio stations
 - display of title, artist, and album

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../libs/MusicAssistantPlayerFavorite.php';
 require_once __DIR__ . '/../libs/MusicAssistantPlayerGroupVolumes.php';
 require_once __DIR__ . '/../libs/MusicAssistantPlayerTile.php';
 require_once __DIR__ . '/../libs/MusicAssistantPlayerMediaSelection.php';
+require_once __DIR__ . '/../libs/MusicAssistantPlayerPlaybackOptions.php';
 require_once __DIR__ . '/../libs/MusicAssistantSelectionOptions.php';
 require_once __DIR__ . '/../libs/MusicAssistantArtworkClient.php';
 
@@ -18,6 +19,7 @@ class MusicAssistantPlayer extends IPSModule
     use MusicAssistantPlayerGroupVolumes;
     use MusicAssistantPlayerTile;
     use MusicAssistantPlayerMediaSelection;
+    use MusicAssistantPlayerPlaybackOptions;
     use MusicAssistantSelectionOptions;
     use MusicAssistantArtworkClient;
 
@@ -25,6 +27,7 @@ class MusicAssistantPlayer extends IPSModule
     private const CONNECTION_EVENT = '{3D0660F0-556B-7070-DA8E-CD7C6D19595C}';
     private const REPEAT_MODE_TO_VALUE = ['off' => 0, 'all' => 1, 'one' => 2];
     private const REPEAT_VALUE_TO_MODE = [0 => 'off', 1 => 'all', 2 => 'one'];
+    private const SLEEP_TIMER_MINUTES = [15, 30, 45, 60, 90, 120];
     private const COVER_SEMAPHORE_TIMEOUT = 5000;
     private const GROUP_MEMBER_VOLUME_SEMAPHORE_TIMEOUT = 40000;
     private const GROUP_MEMBER_REMOVAL_CONFIRMATION_DELAY = 1500;
@@ -42,6 +45,8 @@ class MusicAssistantPlayer extends IPSModule
         $this->RegisterPropertyBoolean('ShowGroupMemberVolumes', false);
         $this->RegisterPropertyBoolean('ShowFavorite', false);
         $this->RegisterPropertyBoolean('EnableCustomTile', false);
+        $this->RegisterPropertyBoolean('ShowSleepTimer', false);
+        $this->RegisterPropertyBoolean('ShowQueueOptions', false);
 
         $this->RegisterPropertyString('PlaylistProfile', '');
         $this->RegisterPropertyString('PlaylistMap', '{}');
@@ -291,6 +296,9 @@ class MusicAssistantPlayer extends IPSModule
             $this->removeGroupMemberVolumeVariables();
         }
 
+        $this->maintainPlaybackOptionVariables();
+        $this->refreshPlaybackOptions();
+
         // Repeat Initialwert
         if (@$this->GetIDForIdent('Repeat') > 0
             && !array_key_exists((int)@$this->GetValue('Repeat'), self::REPEAT_VALUE_TO_MODE)) {
@@ -329,6 +337,16 @@ class MusicAssistantPlayer extends IPSModule
                     'type' => 'CheckBox',
                     'name' => 'ShowFavorite',
                     'caption' => 'Show favorite control for the current track'
+                ],
+                [
+                    'type' => 'CheckBox',
+                    'name' => 'ShowSleepTimer',
+                    'caption' => 'Show sleep timer'
+                ],
+                [
+                    'type' => 'CheckBox',
+                    'name' => 'ShowQueueOptions',
+                    'caption' => 'Show crossfade and autoplay'
                 ],
                 [
                     'type' => 'CheckBox',
@@ -426,6 +444,7 @@ class MusicAssistantPlayer extends IPSModule
                 if (array_key_exists('repeat_mode', $data)) {
                     $this->updateRepeatMode($data['repeat_mode']);
                 }
+                $this->updateQueueOptionStates($data);
                 $this->updateVisualization();
             }
             return '';
@@ -476,6 +495,10 @@ class MusicAssistantPlayer extends IPSModule
         }
         if ($this->updateMuteState($data['volume_muted'] ?? null)) {
             $this->SendDebug('player_updated', 'Mute aktualisiert', 0);
+        }
+        // null bedeutet „kein Timer“; nur ein fehlendes Feld lässt den bisherigen Zustand unverändert.
+        if (array_key_exists('sleep_timer_expires_at', $data)) {
+            $this->updateSleepTimerState($data['sleep_timer_expires_at']);
         }
         $this->updateVisualization();
         return '';
@@ -612,6 +635,26 @@ class MusicAssistantPlayer extends IPSModule
                 } catch (Throwable $e) {
                     $this->SendDebug('Repeat failed', $e->getMessage(), 0);
                     $this->LogMessage(sprintf($this->Translate('Repeat failed: %s'), $e->getMessage()), KL_ERROR);
+                }
+                break;
+
+            case 'SleepTimer':
+                try {
+                    $this->requestSleepTimer((int)$Value);
+                } catch (Throwable $e) {
+                    $this->SendDebug('Sleep timer failed', $e->getMessage(), 0);
+                    $this->LogMessage(sprintf($this->Translate('Sleep timer failed: %s'), $e->getMessage()), KL_ERROR);
+                }
+                break;
+
+            case 'Crossfade':
+            case 'Autoplay':
+                try {
+                    $this->requestQueueOption($Ident, (bool)$Value);
+                } catch (Throwable $e) {
+                    $this->SendDebug($Ident . ' failed', $e->getMessage(), 0);
+                    $message = $Ident === 'Crossfade' ? 'Crossfade failed: %s' : 'Autoplay failed: %s';
+                    $this->LogMessage(sprintf($this->Translate($message), $e->getMessage()), KL_ERROR);
                 }
                 break;
 
