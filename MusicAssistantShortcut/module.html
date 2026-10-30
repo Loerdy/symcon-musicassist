@@ -33,8 +33,9 @@
             --button-hover: rgb(255 255 255 / 14%);
             --button-border: color-mix(in srgb, currentColor 18%, transparent);
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(clamp(72px, 30cqmin, 140px), 1fr));
-            grid-auto-rows: 1fr;
+            /* Spalten und Zeilen setzt layoutGrid(); minmax(0, …) verhindert, dass Bilder die Zeilen über die Kachel hinaus vergrößern. */
+            grid-template-columns: repeat(var(--columns, 1), minmax(0, 1fr));
+            grid-template-rows: repeat(var(--rows, 1), minmax(0, 1fr));
             gap: clamp(6px, 2cqmin, 12px);
             width: 100%;
             height: 100%;
@@ -48,10 +49,6 @@
             color: var(--content-color, #202327);
         }
 
-        .shortcuts[data-count="1"] {
-            grid-template-columns: 1fr;
-        }
-
         .shortcut {
             display: flex;
             flex-direction: column;
@@ -60,6 +57,7 @@
             gap: clamp(4px, 1.5cqmin, 10px);
             min-width: 0;
             min-height: 0;
+            overflow: hidden;
             padding: clamp(6px, 2cqmin, 12px);
             border: 1px solid var(--button-border);
             border-radius: 14px;
@@ -97,8 +95,9 @@
         }
 
         .shortcut img {
-            flex: 1 1 auto;
+            flex: 1 1 0;
             width: 100%;
+            height: 100%;
             min-height: 0;
             object-fit: contain;
             border-radius: 8px;
@@ -107,6 +106,7 @@
         .shortcut span {
             width: 100%;
             overflow: hidden;
+            flex: 0 0 auto;
             font-size: clamp(0.75rem, 6cqmin, 1rem);
             line-height: 1.2;
             text-align: center;
@@ -160,10 +160,30 @@
             container.dataset.theme = theme;
         }
 
+        // Wählt die Spaltenzahl, bei der die Buttons am größten und damit möglichst quadratisch werden.
+        function layoutGrid() {
+            const count = Math.max(1, Number(container.dataset.count) || 1);
+            const style = getComputedStyle(container);
+            const width = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+            const height = container.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+            const gap = parseFloat(style.rowGap) || 0;
+            let best = {columns: 1, rows: count, size: -1};
+            for (let columns = 1; columns <= count; columns++) {
+                const rows = Math.ceil(count / columns);
+                const size = Math.min((width - (columns - 1) * gap) / columns, (height - (rows - 1) * gap) / rows);
+                if (size > best.size) {
+                    best = {columns, rows, size};
+                }
+            }
+            container.style.setProperty("--columns", String(best.columns));
+            container.style.setProperty("--rows", String(best.rows));
+        }
+
         function renderState(state) {
             const entries = state && Array.isArray(state.entries) ? state.entries : [];
             container.replaceChildren();
             container.dataset.count = String(entries.length);
+            layoutGrid();
 
             if (entries.length === 0) {
                 const empty = document.createElement("div");
@@ -177,7 +197,8 @@
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "shortcut";
-                if (typeof entry.image === "string" && entry.image.startsWith("data:image/")) {
+                const hasImage = typeof entry.image === "string" && entry.image.startsWith("data:image/");
+                if (hasImage) {
                     const image = document.createElement("img");
                     image.alt = "";
                     image.src = entry.image;
@@ -186,10 +207,15 @@
                     const template = document.getElementById(entry.type === "playlist" ? "icon-playlist" : "icon-radio");
                     button.append(template.content.cloneNode(true));
                 }
-                const label = document.createElement("span");
-                label.textContent = entry.available ? String(entry.label) : translate("Not available");
-                button.append(label);
-                button.title = label.textContent;
+                const text = entry.available ? String(entry.label) : translate("Not available");
+                // Ausblenden nur bei vorhandenem Bild, sonst wäre der Button nicht mehr zuzuordnen.
+                if (entry.showLabel !== false || !hasImage || entry.available !== true) {
+                    const label = document.createElement("span");
+                    label.textContent = text;
+                    button.append(label);
+                }
+                button.title = text;
+                button.setAttribute("aria-label", text);
                 button.disabled = entry.available !== true;
                 button.addEventListener("click", () => {
                     button.dataset.pressed = "true";
@@ -218,6 +244,7 @@
         themeObserver.observe(document.documentElement, {attributes: true, attributeFilter: ["class", "style"]});
         themeObserver.observe(document.head, {childList: true, subtree: true, characterData: true});
         window.addEventListener("focus", detectSymconTheme);
+        new ResizeObserver(layoutGrid).observe(container);
 
         detectSymconTheme();
         renderState(__MUSIC_ASSISTANT_INITIAL_STATE__);

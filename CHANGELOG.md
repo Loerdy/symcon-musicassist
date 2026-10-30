@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Neues Modul `MusicAssistant Shortcut` (Schnellzugriff): Eine Kachel mit einem oder mehreren Buttons startet hinterlegte Radiosender oder Playlists auf einem gewählten Player. Die Einträge stammen aus den Playlist- und Radio-Profilen des Players. Jeder Button zeigt ein eigenes Bild, das Bild aus der Music-Assistant-Bibliothek oder ein neutrales Symbol; Bilder aus Music Assistant werden einmalig geladen und dauerhaft gespeichert.
+- Neues Modul `MusicAssistant Shortcut` (Schnellzugriff): Eine Kachel mit einem oder mehreren Buttons startet hinterlegte Radiosender oder Playlists auf einem gewählten Player. Die Einträge stammen aus den Playlist- und Radio-Profilen des Players. Jeder Button zeigt ein eigenes Bild, das Bild aus der Music-Assistant-Bibliothek oder ein neutrales Symbol; Bilder aus Music Assistant werden einmalig geladen und dauerhaft gespeichert. Die Beschriftung lässt sich je Eintrag ausblenden, etwa wenn der Name bereits im Logo steht; die Buttons verteilen sich so auf die Kachel, dass sie möglichst groß und quadratisch werden.
 
 ## v2.2.1 — 2026-10-29
 

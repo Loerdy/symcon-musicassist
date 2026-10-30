@@ -118,6 +118,10 @@ class MusicAssistantShortcut extends IPSModule
                 [
                     'type'    => 'Label',
                     'caption' => 'Without an own image, the image from the Music Assistant library is used. Own images must be JPEG or PNG media objects of at most 512 KB.'
+                ],
+                [
+                    'type'    => 'Label',
+                    'caption' => 'Without an image, the label is always shown.'
                 ]
             ],
             'actions' => [
@@ -250,7 +254,7 @@ class MusicAssistantShortcut extends IPSModule
     }
 
     /**
-     * @return array<int, array{type: string, itemId: int, label: string, imageId: int}>|null null bei unlesbarer Liste
+     * @return array<int, array{type: string, itemId: int, label: string, showLabel: bool, imageId: int}>|null null bei unlesbarer Liste
      */
     private function readEntries(): ?array
     {
@@ -267,10 +271,12 @@ class MusicAssistantShortcut extends IPSModule
                 continue;
             }
             $entries[] = [
-                'type'    => $match[1],
-                'itemId'  => (int)$match[2],
-                'label'   => is_string($row['label'] ?? null) ? trim($row['label']) : '',
-                'imageId' => is_int($row['image'] ?? null) ? $row['image'] : 0
+                'type'      => $match[1],
+                'itemId'    => (int)$match[2],
+                'label'     => is_string($row['label'] ?? null) ? trim($row['label']) : '',
+                // Einträge aus Schritt 2 haben das Feld noch nicht und zeigen weiterhin die Beschriftung.
+                'showLabel' => ($row['showLabel'] ?? true) !== false,
+                'imageId'   => is_int($row['image'] ?? null) ? $row['image'] : 0
             ];
         }
         return $entries;
@@ -322,6 +328,13 @@ class MusicAssistantShortcut extends IPSModule
                 'width'   => 'auto',
                 'add'     => '',
                 'edit'    => ['type' => 'ValidationTextBox']
+            ],
+            [
+                'caption' => 'Show label',
+                'name'    => 'showLabel',
+                'width'   => '150px',
+                'add'     => true,
+                'edit'    => ['type' => 'CheckBox']
             ],
             [
                 'caption' => 'Own image (optional)',
@@ -591,6 +604,7 @@ class MusicAssistantShortcut extends IPSModule
                 'type'      => $entry['type'],
                 'label'     => $entry['label'] !== '' ? $entry['label'] : (string)$name,
                 'available' => $name !== null,
+                'showLabel' => $entry['showLabel'],
                 'image'     => $image
             ];
         }

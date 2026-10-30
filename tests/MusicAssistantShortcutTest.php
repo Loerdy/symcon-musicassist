@@ -67,6 +67,14 @@ class MusicAssistantShortcutTest extends MusicAssistantTestCase
         );
         $this->assertSame('Radio: SWR3', $options[1]['caption']);
         $this->assertSame('Playlist: Favoriten', $options[3]['caption']);
+        $this->assertSame(
+            ['name' => 'showLabel', 'add' => true, 'edit' => 'CheckBox'],
+            [
+                'name' => $form['elements'][2]['columns'][2]['name'],
+                'add'  => $form['elements'][2]['columns'][2]['add'],
+                'edit' => $form['elements'][2]['columns'][2]['edit']['type']
+            ]
+        );
     }
 
     public function testReceiveDataFilterOnlyPassesProfileUpdates(): void
@@ -162,10 +170,22 @@ class MusicAssistantShortcutTest extends MusicAssistantTestCase
         $state = $this->tileState($shortcutId);
 
         $this->assertSame([
-            ['index' => 0, 'type' => 'radio', 'label' => 'Radio <Bob>', 'available' => true, 'image' => ''],
-            ['index' => 1, 'type' => 'playlist', 'label' => 'Lieblingslieder', 'available' => true, 'image' => ''],
-            ['index' => 2, 'type' => 'radio', 'label' => '', 'available' => false, 'image' => '']
+            ['index' => 0, 'type' => 'radio', 'label' => 'Radio <Bob>', 'available' => true, 'showLabel' => true, 'image' => ''],
+            ['index' => 1, 'type' => 'playlist', 'label' => 'Lieblingslieder', 'available' => true, 'showLabel' => true, 'image' => ''],
+            ['index' => 2, 'type' => 'radio', 'label' => '', 'available' => false, 'showLabel' => true, 'image' => '']
         ], $state['entries']);
+    }
+
+    public function testTilePassesHiddenLabelAndKeepsItForOlderEntries(): void
+    {
+        $connectionId = $this->createConnection();
+        $shortcutId = $this->createShortcut($connectionId, $this->createProfiledPlayer($connectionId), [
+            ['item' => 'radio:12', 'label' => '', 'showLabel' => false],
+            ['item' => 'radio:15', 'label' => '', 'showLabel' => true],
+            ['item' => 'playlist:7', 'label' => '']
+        ]);
+
+        $this->assertSame([false, true, true], array_column($this->tileState($shortcutId)['entries'], 'showLabel'));
     }
 
     public function testTileEscapesMarkupInInitialState(): void
